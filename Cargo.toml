@@ -3,6 +3,8 @@ name = "netrek"
 version = "0.1.0"
 edition = "2021"
 description = "Netrek in your terminal: a graphical TUI client and a game server"
+license = "MIT"
+repository = "https://github.com/MWChapel/netrek-terminal"
 
 [[bin]]
 name = "netrek"
