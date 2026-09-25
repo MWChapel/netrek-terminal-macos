@@ -1,0 +1,21 @@
+[package]
+name = "netrek"
+version = "0.1.0"
+edition = "2021"
+description = "Netrek in your terminal: a graphical TUI client and a game server"
+
+[[bin]]
+name = "netrek"
+path = "src/main.rs"
+
+[dependencies]
+crossterm = "0.28"
+serde = { version = "1", features = ["derive"] }
+bincode = "1.3"
+clap = { version = "4", features = ["derive"] }
+rand = "0.8"
+fontdue = "0.9"
+tiny-skia = { version = "0.12.0", default-features = false, features = ["std", "simd"] }
+
+[profile.release]
+opt-level = 3

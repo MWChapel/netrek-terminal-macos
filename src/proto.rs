@@ -1,0 +1,210 @@
+//! Wire protocol: length-prefixed bincode frames over TCP.
+
+use crate::consts::{ShipType, Team};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use std::io::{self, Read, Write};
+
+const MAX_FRAME: usize = 1 << 20;
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MsgTarget {
+    All,
+    Team(Team),
+    Player(u8),
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub enum ClientMsg {
+    Hello { name: String, version: u32 },
+    Join { team: Team, ship: ShipType },
+    Course(u8),
+    Speed(u8),
+    Torp(u8),
+    Phaser(u8),
+    Plasma(u8),
+    Shields,
+    Cloak,
+    Orbit,
+    Bomb,
+    BeamUp,
+    BeamDown,
+    Repair,
+    /// Tractor (pressor=false) or pressor (pressor=true) on a player; None releases.
+    Tractor { target: Option<u8>, pressor: bool },
+    DetEnemy,
+    DetOwn,
+    LockPlanet(u8),
+    LockPlayer(u8),
+    Refit(ShipType),
+    Message { to: MsgTarget, text: String },
+    Quit,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MsgKind {
+    All,
+    Team,
+    Indiv,
+    System,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct ChatMsg {
+    pub kind: MsgKind,
+    pub from: String,
+    pub text: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PState {
+    Outfit,
+    Alive,
+    Exploding,
+    Dead,
+}
+
+pub mod pf {
+    pub const SHIELD: u16 = 1;
+    pub const CLOAK: u16 = 2;
+    pub const ORBIT: u16 = 4;
+    pub const BOMB: u16 = 8;
+    pub const BEAMUP: u16 = 16;
+    pub const BEAMDOWN: u16 = 32;
+    pub const REPAIR: u16 = 64;
+    pub const TRACTOR: u16 = 128;
+    pub const PRESSOR: u16 = 256;
+    pub const ROBOT: u16 = 512;
+    pub const WEAPON_HOT: u16 = 1024;
+    pub const ENGINE_HOT: u16 = 2048;
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct PlayerInfo {
+    pub id: u8,
+    pub name: String,
+    pub team: Team,
+    pub ship: ShipType,
+    pub state: PState,
+    pub x: i32,
+    pub y: i32,
+    pub dir: u8,
+    pub speed: u8,
+    pub flags: u16,
+    pub kills: f32,
+    /// Armies carried (only revealed to teammates; 0 otherwise).
+    pub armies: u8,
+    pub tractor_target: Option<u8>,
+    /// True when this is a cloaked enemy whose position is only approximate.
+    pub fuzzy: bool,
+    pub explode_frame: u8,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TorpKind {
+    Photon,
+    Plasma,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct TorpInfo {
+    pub owner: u8,
+    pub team: Team,
+    pub kind: TorpKind,
+    pub x: i32,
+    pub y: i32,
+    /// 0 = in flight, >0 = explosion animation frame.
+    pub explode: u8,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct PhaserInfo {
+    pub owner: u8,
+    pub x1: i32,
+    pub y1: i32,
+    pub x2: i32,
+    pub y2: i32,
+    pub hit: bool,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct PlanetInfo {
+    pub owner: Team,
+    pub armies: u16,
+    pub flags: u8,
+    /// Whether our team has scouted this planet (otherwise owner/armies are stale).
+    pub known: bool,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+pub struct SelfInfo {
+    pub fuel: u32,
+    pub shield: u32,
+    pub damage: u32,
+    pub wtemp: u32,
+    pub etemp: u32,
+    pub armies: u8,
+    pub max_armies_now: u8,
+    pub kills: f32,
+    pub speed: u8,
+    pub desired_speed: u8,
+    pub max_speed_now: u8,
+    pub torps_out: u8,
+    pub lock: Option<String>,
+    pub orbiting: Option<u8>,
+    pub deaths: u32,
+    pub total_kills: f32,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct Frame {
+    pub tick: u32,
+    pub me: u8,
+    pub me_info: SelfInfo,
+    pub players: Vec<PlayerInfo>,
+    pub torps: Vec<TorpInfo>,
+    pub phasers: Vec<PhaserInfo>,
+    pub planets: Vec<PlanetInfo>,
+    /// Teams that are currently allowed to be joined.
+    pub open_teams: Vec<Team>,
+    /// Planets held by Fed, Rom, Kli, Ori (public knowledge, like the team window).
+    pub team_planets: [u8; 4],
+    /// Teams that already have a starbase in play.
+    pub starbase_teams: Vec<Team>,
+    /// Banner shown across the screen (e.g. galaxy conquered).
+    pub banner: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub enum ServerMsg {
+    Welcome { slot: u8, motd: Vec<String> },
+    Reject(String),
+    Frame(Box<Frame>),
+    Msg(ChatMsg),
+    /// Result of a join/refit attempt that failed.
+    Warning(String),
+}
+
+pub fn encode<T: Serialize>(msg: &T) -> Vec<u8> {
+    let body = bincode::serialize(msg).expect("serialize");
+    let mut out = Vec::with_capacity(body.len() + 4);
+    out.extend_from_slice(&(body.len() as u32).to_be_bytes());
+    out.extend_from_slice(&body);
+    out
+}
+
+pub fn write_msg<T: Serialize, W: Write>(w: &mut W, msg: &T) -> io::Result<()> {
+    w.write_all(&encode(msg))?;
+    w.flush()
+}
+
+pub fn read_msg<T: DeserializeOwned, R: Read>(r: &mut R) -> io::Result<T> {
+    let mut len = [0u8; 4];
+    r.read_exact(&mut len)?;
+    let len = u32::from_be_bytes(len) as usize;
+    if len > MAX_FRAME {
+        return Err(io::Error::new(io::ErrorKind::InvalidData, "frame too large"));
+    }
+    let mut buf = vec![0u8; len];
+    r.read_exact(&mut buf)?;
+    bincode::deserialize(&buf).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+}
