@@ -4,7 +4,7 @@ mod proto;
 mod server;
 
 use clap::{Parser, Subcommand};
-use consts::{ShipType, Team, DEFAULT_PORT};
+use consts::{Faction, ShipType, Team, DEFAULT_PORT};
 
 #[derive(Parser)]
 #[command(name = "netrek", version, about = "Netrek — the classic multiplayer space battle game, in your terminal")]
@@ -29,6 +29,13 @@ enum Cmd {
         /// Empires the robots play for: "all", or a list like "fed,rom,kli"
         #[arg(short, long, default_value = "fed,rom", value_parser = parse_empires)]
         empires: Empires,
+        /// Alien incursions: bare --aliens for all of them, or a list like
+        /// "khan,borg" (khan, gorn, tholian, fesarius, mirror, doomsday, amoeba, borg)
+        #[arg(long, num_args = 0..=1, default_missing_value = "all", value_parser = parse_aliens)]
+        aliens: Option<Aliens>,
+        /// Average seconds between alien incursions
+        #[arg(long, default_value_t = 150)]
+        alien_interval: u64,
     },
     /// Connect to a server and play
     Play {
@@ -48,6 +55,13 @@ enum Cmd {
         /// Empires the robots play for: "all", or a list like "fed,rom,kli"
         #[arg(short, long, default_value = "fed,rom", value_parser = parse_empires)]
         empires: Empires,
+        /// Alien incursions: bare --aliens for all of them, or a list like
+        /// "khan,borg" (khan, gorn, tholian, fesarius, mirror, doomsday, amoeba, borg)
+        #[arg(long, num_args = 0..=1, default_missing_value = "all", value_parser = parse_aliens)]
+        aliens: Option<Aliens>,
+        /// Average seconds between alien incursions
+        #[arg(long, default_value_t = 150)]
+        alien_interval: u64,
         #[command(flatten)]
         who: Who,
     },
@@ -74,6 +88,26 @@ struct Who {
 
 #[derive(Clone)]
 struct Empires(Vec<Team>);
+
+#[derive(Clone)]
+struct Aliens(Vec<Faction>);
+
+fn parse_aliens(s: &str) -> Result<Aliens, String> {
+    if s.eq_ignore_ascii_case("all") {
+        return Ok(Aliens(Faction::ALL.to_vec()));
+    }
+    let mut out = Vec::new();
+    for part in s.split(',').map(str::trim).filter(|p| !p.is_empty()) {
+        let f = Faction::from_key(part).ok_or_else(|| {
+            let names: Vec<&str> = Faction::ALL.iter().map(|f| f.key()).collect();
+            format!("unknown alien '{}': choose from {} or all", part, names.join(", "))
+        })?;
+        if !out.contains(&f) {
+            out.push(f);
+        }
+    }
+    Ok(Aliens(out))
+}
 
 fn parse_empires(s: &str) -> Result<Empires, String> {
     if s.eq_ignore_ascii_case("all") {
@@ -119,9 +153,15 @@ fn player_name(who: &Who) -> String {
 fn main() {
     let cli = Cli::parse();
     let result = match cli.cmd {
-        Cmd::Server { port, bind, bots, empires } => {
-            server::run(server::ServerConfig { bind, port, bots, empires: empires.0, quiet: false })
-        }
+        Cmd::Server { port, bind, bots, empires, aliens, alien_interval } => server::run(server::ServerConfig {
+            bind,
+            port,
+            bots,
+            empires: empires.0,
+            aliens: aliens.map(|a| a.0).unwrap_or_default(),
+            alien_interval,
+            quiet: false,
+        }),
         Cmd::Play { host, port, who } => client::run(client::ClientConfig {
             host,
             port,
@@ -131,8 +171,16 @@ fn main() {
             gfx: parse_gfx(&who.gfx),
             mute: who.mute,
         }),
-        Cmd::Solo { bots, empires, who } => {
-            let cfg = server::ServerConfig { bind: "127.0.0.1".into(), port: 0, bots, empires: empires.0, quiet: true };
+        Cmd::Solo { bots, empires, aliens, alien_interval, who } => {
+            let cfg = server::ServerConfig {
+                bind: "127.0.0.1".into(),
+                port: 0,
+                bots,
+                empires: empires.0,
+                aliens: aliens.map(|a| a.0).unwrap_or_default(),
+                alien_interval,
+                quiet: true,
+            };
             server::spawn_background(cfg).and_then(|port| {
                 client::run(client::ClientConfig {
                     host: "127.0.0.1".into(),

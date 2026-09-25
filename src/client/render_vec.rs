@@ -4,7 +4,7 @@
 
 use super::pixels::{mix, rgb, scale, Rgb};
 use super::vg::Canvas;
-use super::render_px::team_rgb;
+use super::render_px::{callsign, planet_rgb, player_rgb, ship_size_units, team_rgb, torp_rgb};
 use super::shipart::{engine_points, ship_parts, Part};
 use super::App;
 use crate::consts::*;
@@ -75,7 +75,7 @@ impl App {
                 continue;
             }
             let info = &f.planets[k];
-            let col = if info.known { team_rgb(info.owner) } else { GREY };
+            let col = if info.known { planet_rgb(info) } else { GREY };
             let (x, y) = to(def.x, def.y);
             px.disc(x, y, pr, scale(col, 0.12), 1.0);
             px.ring(x, y, pr, 1.3, col, 1.0);
@@ -99,6 +99,13 @@ impl App {
             px.text_centered(tr, x, y + pr + fs * 1.1, def.name, fs, col);
         }
 
+        // Tholian webs: glowing crystalline strands.
+        for w in &f.webs {
+            let (a, b) = (to(w.x1 as f64, w.y1 as f64), to(w.x2 as f64, w.y2 as f64));
+            px.line(a.0, a.1, b.0, b.1, 3.0, rgb(0xffa040), 0.18, 0.0);
+            px.line(a.0, a.1, b.0, b.1, 1.0, rgb(0xffd090), 0.9, 0.0);
+        }
+
         // Tractor / pressor beams.
         for p in f.players.iter().filter(|p| p.state == PState::Alive) {
             if let Some(t) = p.tractor_target.and_then(|t| f.players.iter().find(|q| q.id == t)) {
@@ -111,7 +118,7 @@ impl App {
         // Phasers.
         for ph in &f.phasers {
             let owner = f.players.iter().find(|p| p.id == ph.owner);
-            let col = if ph.owner == self.slot { WHITE } else { owner.map_or(WHITE, |p| mix(team_rgb(p.team), WHITE, 0.3)) };
+            let col = if ph.owner == self.slot { WHITE } else { owner.map_or(WHITE, |p| mix(player_rgb(p), WHITE, 0.3)) };
             let (a, b) = (to(ph.x1 as f64, ph.y1 as f64), to(ph.x2 as f64, ph.y2 as f64));
             px.line(a.0, a.1, b.0, b.1, 1.0, col, if ph.hit { 1.0 } else { 0.7 }, if ph.hit { 0.0 } else { 2.0 });
             if ph.hit {
@@ -125,7 +132,7 @@ impl App {
                 continue;
             }
             let (x, y) = to(t.x as f64, t.y as f64);
-            let col = if t.owner == self.slot { mix(team_rgb(t.team), WHITE, 0.5) } else { team_rgb(t.team) };
+            let col = if t.owner == self.slot { mix(team_rgb(t.team), WHITE, 0.5) } else { torp_rgb(f, t) };
             if t.explode > 0 {
                 let e = t.explode as f32;
                 let fade = 1.0 - e / 7.0;
@@ -151,7 +158,7 @@ impl App {
             }
             let (x, y) = to(p.x as f64, p.y as f64);
             let is_me = p.id == self.slot;
-            let team = team_rgb(p.team);
+            let team = player_rgb(p);
             if p.state == PState::Exploding {
                 let fr = p.explode_frame as f32;
                 let fade = (1.0 - fr / 11.0).max(0.0);
@@ -171,18 +178,24 @@ impl App {
             let dash = if cloaked { 2.0 } else { 0.0 };
             let a = p.dir as f32 * TAU / 256.0;
             let (sa, ca) = (a.sin(), a.cos());
-            let sr = if p.ship == ShipType::Starbase { sr * 1.5 } else { sr };
+            let sr = if ship_size_units(p.ship) > 0.0 {
+                u(ship_size_units(p.ship))
+            } else if p.ship == ShipType::Starbase {
+                sr * 1.5
+            } else {
+                sr
+            };
             let rot = |lx: f32, ly: f32| (x + (lx * ca - ly * sa) * sr, y + (lx * sa + ly * ca) * sr);
             if p.speed > 0 && !cloaked {
                 let k = p.speed as f32 / p.ship.stats().max_speed as f32;
-                for (ex, ey) in engine_points(p.team, p.ship) {
+                for (ex, ey) in engine_points(p.team, p.ship, p.faction) {
                     let (gx, gy) = rot(ex, ey + 0.05);
                     px.glow(gx, gy, sr * (0.25 + 0.35 * k), rgb(0xff9a40), 0.35 + 0.5 * k);
                 }
             }
             let fill = scale(team, if is_me { 0.6 } else { 0.42 });
             let edge = if is_me { WHITE } else { mix(team, WHITE, 0.25) };
-            for part in ship_parts(p.team, p.ship) {
+            for part in ship_parts(p.team, p.ship, p.faction) {
                 match part {
                     Part::Poly { pts, fill: filled } => {
                         let pts: Vec<(f32, f32)> = pts.iter().map(|&(lx, ly)| rot(lx, ly)).collect();
@@ -226,7 +239,7 @@ impl App {
                 };
                 px.ring(x, y, sr * 1.45, 1.0, scol, 0.9);
             }
-            let tag = slot_char(p.id).to_string();
+            let tag = p.faction.map_or(slot_char(p.id).to_string(), |f| f.tag().to_string());
             px.text(tr, x + sr * 1.5 + 1.0, y - sr * 0.6, &tag, fs, if cloaked { GREY } else { col });
         }
 
@@ -261,10 +274,15 @@ impl App {
             px.line(p.0, p.1, q.0, q.1, 1.0, DARK_GREY, 0.9, 3.0);
         }
 
+        for w in &f.webs {
+            let (a, b) = (to(w.x1 as f64, w.y1 as f64), to(w.x2 as f64, w.y2 as f64));
+            px.line(a.0, a.1, b.0, b.1, 1.0, rgb(0xffa040), 0.6, 0.0);
+        }
+
         let gr = (pw as f32 / 70.0).clamp(3.0, 9.0);
         for (k, def) in PLANETS.iter().enumerate() {
             let info = &f.planets[k];
-            let col = if info.known { team_rgb(info.owner) } else { GREY };
+            let col = if info.known { planet_rgb(info) } else { GREY };
             let (x, y) = to(def.x, def.y);
             px.disc(x, y, gr, scale(col, 0.15), 1.0);
             px.ring(x, y, gr, 1.1, col, 1.0);
@@ -289,8 +307,8 @@ impl App {
                 continue;
             }
             let is_me = p.id == self.slot;
-            let col = if is_me { WHITE } else { mix(team_rgb(p.team), WHITE, 0.1) };
-            let tag = format!("{}{}", p.team.letter(), slot_char(p.id));
+            let col = if is_me { WHITE } else { mix(player_rgb(p), WHITE, 0.1) };
+            let tag = callsign(p);
             if is_me {
                 px.ring(x, y, fs * 0.9, 1.0, WHITE, 0.8);
             }

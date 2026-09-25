@@ -1,6 +1,6 @@
 //! Wire protocol: length-prefixed bincode frames over TCP.
 
-use crate::consts::{ShipType, Team};
+use crate::consts::{Faction, ShipType, Team};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::io::{self, Read, Write};
 
@@ -97,6 +97,8 @@ pub struct PlayerInfo {
     /// True when this is a cloaked enemy whose position is only approximate.
     pub fuzzy: bool,
     pub explode_frame: u8,
+    /// Set for alien ships (the --aliens incursions).
+    pub faction: Option<Faction>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
@@ -133,6 +135,18 @@ pub struct PlanetInfo {
     pub flags: u8,
     /// Whether our team has scouted this planet (otherwise owner/armies are stale).
     pub known: bool,
+    /// Held by an alien power (Khan's stronghold, Terran Empire conquests),
+    /// or `Some(Doomsday)` when the planet killer has devoured it.
+    pub alien: Option<Faction>,
+}
+
+/// One strand of a Tholian web.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct WebInfo {
+    pub x1: i32,
+    pub y1: i32,
+    pub x2: i32,
+    pub y2: i32,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
@@ -164,6 +178,7 @@ pub struct Frame {
     pub torps: Vec<TorpInfo>,
     pub phasers: Vec<PhaserInfo>,
     pub planets: Vec<PlanetInfo>,
+    pub webs: Vec<WebInfo>,
     /// Teams that are currently allowed to be joined.
     pub open_teams: Vec<Team>,
     /// Planets held by Fed, Rom, Kli, Ori (public knowledge, like the team window).

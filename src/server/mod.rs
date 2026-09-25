@@ -1,6 +1,7 @@
 //! TCP game server: one thread runs the simulation at 10 updates/second,
 //! each connection gets a reader thread and a writer thread.
 
+pub mod aliens;
 pub mod bot;
 pub mod world;
 
@@ -22,6 +23,10 @@ pub struct ServerConfig {
     pub bots: usize,
     /// Empires the robots play for (humans may still join any open empire).
     pub empires: Vec<Team>,
+    /// Alien incursions that may happen (empty = none).
+    pub aliens: Vec<Faction>,
+    /// Average seconds between alien incursions.
+    pub alien_interval: u64,
     pub quiet: bool,
 }
 
@@ -59,6 +64,10 @@ fn serve(listener: TcpListener, cfg: ServerConfig) -> io::Result<()> {
         println!("netrek server listening on {}", listener.local_addr()?);
         let names: Vec<&str> = cfg.empires.iter().map(|t| t.plural()).collect();
         println!("{} robots will be playing for the {}", cfg.bots, names.join(", "));
+        if !cfg.aliens.is_empty() {
+            let kinds: Vec<&str> = cfg.aliens.iter().map(|f| f.key()).collect();
+            println!("alien incursions every ~{}s: {}", cfg.alien_interval, kinds.join(", "));
+        }
     }
     let game_cfg = cfg.clone();
     thread::spawn(move || game_loop(rx, game_cfg));
@@ -133,6 +142,7 @@ fn game_loop(rx: Receiver<Event>, cfg: ServerConfig) {
     let mut world = World::new();
     let mut conns: HashMap<u64, Conn> = HashMap::new();
     let mut bots: Vec<bot::Bot> = Vec::new();
+    let mut director = aliens::Director::new(aliens::AlienConfig { kinds: cfg.aliens.clone(), interval: cfg.alien_interval });
     let tick_len = Duration::from_millis(1000 / UPS);
     let mut next = Instant::now();
     let log = |s: String| {
@@ -190,6 +200,7 @@ fn game_loop(rx: Receiver<Event>, cfg: ServerConfig) {
         if world.tick % UPS as u32 == 0 {
             balance_bots(&mut world, &mut bots, cfg.bots, &cfg.empires);
         }
+        director.tick(&mut world);
         for b in bots.iter_mut() {
             b.think(&mut world);
         }

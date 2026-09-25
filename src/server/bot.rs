@@ -7,7 +7,7 @@ use crate::proto::{ClientMsg, PState};
 use rand::Rng;
 
 const NAMES: &[&str] = &[
-    "Kirk", "Kang", "Kor", "Koloth", "Tomalak", "Sulu", "Decker", "Garth", "Hunter", "Ruk", "Khan",
+    "Kirk", "Kang", "Kor", "Koloth", "Tomalak", "Sulu", "Decker", "Garth", "Hunter", "Ruk", "Sarek",
     "Maltz", "Sela", "Worf", "Riker", "Chekov", "Styles", "Terrell", "Kruge", "Valkris",
 ];
 
@@ -50,7 +50,7 @@ fn dist(ax: f64, ay: f64, bx: f64, by: f64) -> f64 {
 
 /// Direction to fire so a torp traveling at `speed` meets a target moving
 /// with velocity (tvx, tvy).
-fn lead(sx: f64, sy: f64, tx: f64, ty: f64, tvx: f64, tvy: f64, speed: f64) -> f64 {
+pub fn lead(sx: f64, sy: f64, tx: f64, ty: f64, tvx: f64, tvy: f64, speed: f64) -> f64 {
     let (dx, dy) = (tx - sx, ty - sy);
     let a = tvx * tvx + tvy * tvy - speed * speed;
     let b = 2.0 * (dx * tvx + dy * tvy);

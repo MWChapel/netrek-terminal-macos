@@ -1,7 +1,7 @@
 //! Per-empire ship designs, loosely after the classic Star Trek silhouettes.
 //! Coordinates are in ship radii with the nose pointing up (-y).
 
-use crate::consts::{ShipType, Team};
+use crate::consts::{Faction, ShipType, Team};
 use std::f32::consts::TAU;
 
 pub enum Part {
@@ -61,7 +61,10 @@ fn line(a: (f32, f32), b: (f32, f32)) -> Part {
     Line { a, b }
 }
 
-pub fn ship_parts(team: Team, ship: ShipType) -> Vec<Part> {
+pub fn ship_parts(team: Team, ship: ShipType, faction: Option<Faction>) -> Vec<Part> {
+    if let Some(f) = faction {
+        return alien(f, ship);
+    }
     match team {
         Team::Fed | Team::Ind => federation(ship),
         Team::Kli => klingon(ship),
@@ -125,6 +128,7 @@ fn federation(ship: ShipType) -> Vec<Part> {
                 v.push(line((a.cos() * 0.25, a.sin() * 0.25), (a.cos() * 0.6, a.sin() * 0.6)));
             }
         }
+        _ => return federation(ShipType::Cruiser),
     }
     v
 }
@@ -162,6 +166,7 @@ fn klingon(ship: ShipType) -> Vec<Part> {
                 v.push(circle(tip, 0.15));
             }
         }
+        _ => return klingon(ShipType::Cruiser),
     }
     v
 }
@@ -202,6 +207,7 @@ fn romulan(ship: ShipType) -> Vec<Part> {
             }
             v.push(circle((0.0, 0.0), 0.18));
         }
+        _ => return romulan(ShipType::Cruiser),
     }
     v
 }
@@ -239,8 +245,88 @@ fn orion(ship: ShipType) -> Vec<Part> {
     v
 }
 
+/// Alien vessels and monsters.
+fn alien(f: Faction, ship: ShipType) -> Vec<Part> {
+    let mut v = Vec::new();
+    match f {
+        // Reliant: a Miranda-class hull, as Khan stole it.
+        Faction::Khan => return federation(ShipType::Destroyer),
+        // The ISS fleet flies ships identical to Starfleet's.
+        Faction::Mirror => return federation(ship),
+        Faction::Gorn => {
+            // Blunt, heavy hammerhead with swept engine pods.
+            v.push(sym(&[(0.0, -0.95), (0.3, -0.85), (0.9, -0.75), (0.9, -0.45), (0.3, -0.35), (0.3, 0.45), (0.75, 0.95), (0.0, 0.75)]));
+            v.push(Circle { c: (0.0, -0.62), r: 0.14, fill: false });
+            v.push(line((0.0, -0.3), (0.0, 0.6)));
+        }
+        Faction::Tholian => {
+            // A crystalline wedge.
+            v.push(sym(&[(0.0, -1.0), (0.55, 0.8), (0.0, 0.45)]));
+            v.push(line((0.0, -0.65), (0.0, 0.45)));
+            v.extend(pair(|s| line((0.0, -0.2), (s * 0.3, 0.45))));
+        }
+        Faction::Fesarius => {
+            // A vast globe made of many smaller modules.
+            v.push(circle((0.0, 0.0), 1.0));
+            for k in 0..12 {
+                let a = k as f32 / 12.0 * TAU;
+                v.push(Circle { c: (a.cos() * 0.72, a.sin() * 0.72), r: 0.16, fill: false });
+            }
+            for k in 0..6 {
+                let a = k as f32 / 6.0 * TAU + 0.26;
+                v.push(Circle { c: (a.cos() * 0.38, a.sin() * 0.38), r: 0.12, fill: false });
+            }
+            v.push(Circle { c: (0.0, 0.0), r: 0.14, fill: true });
+        }
+        Faction::Doomsday => {
+            // The planet killer: a long neutronium cone, open maw forward.
+            v.push(Poly { pts: vec![(-0.5, -1.0), (0.5, -1.0), (0.26, 1.0), (-0.26, 1.0)], fill: true });
+            v.push(Hole { pts: (0..16).map(|k| { let a = k as f32 / 16.0 * TAU; (a.cos() * 0.4, -0.9 + a.sin() * 0.08) }).collect() });
+            v.extend(pair(|s| line((s * 0.22, -0.8), (s * 0.12, 0.95))));
+            v.push(line((-0.4, -0.25), (0.4, -0.25)));
+            v.push(line((-0.33, 0.35), (0.33, 0.35)));
+        }
+        Faction::Amoeba => {
+            // A wobbling single cell with a nucleus and vacuoles.
+            v.push(Poly {
+                pts: (0..28)
+                    .map(|k| {
+                        let a = k as f32 / 28.0 * TAU;
+                        let r = 0.85 + 0.1 * (3.0 * a).sin() + 0.06 * (5.0 * a + 1.0).sin();
+                        (a.cos() * r, a.sin() * r)
+                    })
+                    .collect(),
+                fill: true,
+            });
+            v.push(Circle { c: (0.12, -0.1), r: 0.3, fill: false });
+            v.push(Circle { c: (0.12, -0.1), r: 0.1, fill: false });
+            v.push(Circle { c: (-0.4, 0.3), r: 0.1, fill: false });
+            v.push(Circle { c: (0.35, 0.45), r: 0.07, fill: false });
+        }
+        Faction::Borg => {
+            // The cube, with its maze of conduits.
+            v.push(Poly { pts: vec![(-0.72, -0.72), (0.72, -0.72), (0.72, 0.72), (-0.72, 0.72)], fill: true });
+            for k in 1..4 {
+                let t = -0.72 + k as f32 * 0.36;
+                v.push(line((t, -0.72), (t, 0.72)));
+                v.push(line((-0.72, t), (0.72, t)));
+            }
+            v.push(Poly { pts: vec![(-0.25, -0.25), (0.25, -0.25), (0.25, 0.25), (-0.25, 0.25)], fill: false });
+        }
+    }
+    v
+}
+
 /// Where the engines are (for exhaust glows), in ship radii.
-pub fn engine_points(team: Team, ship: ShipType) -> Vec<(f32, f32)> {
+pub fn engine_points(team: Team, ship: ShipType, faction: Option<Faction>) -> Vec<(f32, f32)> {
+    match faction {
+        Some(Faction::Khan) => return engine_points(Team::Fed, ShipType::Destroyer, None),
+        Some(Faction::Mirror) => return engine_points(Team::Fed, ship, None),
+        Some(Faction::Gorn) => return vec![(0.6, 0.9), (-0.6, 0.9)],
+        Some(Faction::Tholian) => return vec![(0.0, 0.55)],
+        Some(_) => return vec![],
+        None => {}
+    }
     match (team, ship) {
         (_, ShipType::Starbase) => vec![],
         (Team::Fed | Team::Ind, ShipType::Scout) => vec![(0.45, 0.95), (-0.45, 0.95)],
@@ -266,14 +352,31 @@ mod tests {
     #[test]
     fn gallery() {
         let (cell, r) = (120.0f32, 44.0f32);
-        let mut c = Canvas::new(6 * cell as i32, 4 * cell as i32, [0.0, 0.0, 0.0]);
-        for (row, team) in Team::PLAYABLE.iter().enumerate() {
-            for (col, ship) in ShipType::ALL.iter().enumerate() {
+        let mut c = Canvas::new(8 * cell as i32, 5 * cell as i32, [0.0, 0.0, 0.0]);
+        let mut rows: Vec<Vec<(Team, ShipType, Option<Faction>)>> = Team::PLAYABLE
+            .iter()
+            .map(|&t| ShipType::ALL.iter().map(|&s| (t, s, None)).collect())
+            .collect();
+        rows.push(vec![
+            (Team::Ind, ShipType::Augment, Some(Faction::Khan)),
+            (Team::Ind, ShipType::GornRaider, Some(Faction::Gorn)),
+            (Team::Ind, ShipType::TholianVessel, Some(Faction::Tholian)),
+            (Team::Ind, ShipType::Cruiser, Some(Faction::Mirror)),
+            (Team::Ind, ShipType::Fesarius, Some(Faction::Fesarius)),
+            (Team::Ind, ShipType::PlanetKiller, Some(Faction::Doomsday)),
+            (Team::Ind, ShipType::Amoeba, Some(Faction::Amoeba)),
+            (Team::Ind, ShipType::BorgCube, Some(Faction::Borg)),
+        ]);
+        for (row, ships) in rows.iter().enumerate() {
+            for (col, &(team, ship, faction)) in ships.iter().enumerate() {
                 let (x, y) = (col as f32 * cell + cell / 2.0, row as f32 * cell + cell / 2.0);
-                let team_c = team_rgb(*team);
+                let team_c = match faction {
+                    Some(f) => crate::client::render_px::faction_rgb(f),
+                    None => team_rgb(team),
+                };
                 let fill = [team_c[0] * 0.42, team_c[1] * 0.42, team_c[2] * 0.42];
                 let rot = |p: (f32, f32)| (x + p.0 * r, y + p.1 * r);
-                for part in ship_parts(*team, *ship) {
+                for part in ship_parts(team, ship, faction) {
                     match part {
                         Part::Poly { pts, fill: f } => {
                             let pts: Vec<_> = pts.into_iter().map(rot).collect();

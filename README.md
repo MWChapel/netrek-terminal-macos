@@ -16,6 +16,8 @@ that runs entirely inside a terminal window on macOS.
 - **Trek-style ships:** each empire has its own ship designs (Federation saucers and
   nacelles, Klingon D7s and Birds-of-Prey, Romulan warbirds, Orion raiders).
 - **Robots:** AI pilots fight, bomb, carry armies and capture planets, so you can play solo.
+- **Alien incursions** (optional): Khan, the Gorn, Tholian webs, the Fesarius, the
+  mirror universe, the planet killer, the space amoeba and the Borg drop into the game.
 - **Sound:** synthesized retro sound effects, with no audio libraries required.
 - **Mouse and keyboard:** aim and steer with the mouse, with the classic Netrek key bindings.
 
@@ -34,6 +36,7 @@ that runs entirely inside a terminal window on macOS.
 - [Ships](#ships)
 - [Planets](#planets)
 - [Robots](#robots)
+- [Alien incursions](#alien-incursions)
 - [Sound](#sound)
 - [Hosting a server](#hosting-a-server)
 - [Troubleshooting](#troubleshooting)
@@ -89,6 +92,12 @@ For a four-way war with robots flying for every empire:
 netrek solo --empires all --bots 15
 ```
 
+Add Star Trek villains to the mix:
+
+```sh
+netrek solo --empires all --bots 15 --aliens
+```
+
 To play with friends, one person runs a server and everyone else connects:
 
 ```sh
@@ -114,6 +123,8 @@ netrek <COMMAND>
 | `-b, --bind <ADDR>` | `0.0.0.0` | Address to bind; use `127.0.0.1` for local-only |
 | `--bots <N>` | `6` | Robot players kept in the game |
 | `-e, --empires <LIST>` | `fed,rom` | Empires the robots play for: `all`, or a comma list such as `fed,rom,kli` |
+| `--aliens [LIST]` | off | Alien incursions: bare `--aliens` for all eight, or a list such as `khan,borg`. See [Alien incursions](#alien-incursions) |
+| `--alien-interval <SECS>` | `150` | Average seconds between incursions |
 
 The server logs connections, joins, kills and planet captures to stdout.
 
@@ -125,6 +136,8 @@ Starts a server on a random localhost port in the background and connects to it.
 |---|---|---|
 | `--bots <N>` | `7` | Number of robots |
 | `-e, --empires <LIST>` | `fed,rom` | Empires the robots play for: `all`, or a comma list |
+| `--aliens [LIST]` | off | Alien incursions (all, or a list such as `khan,borg`) |
+| `--alien-interval <SECS>` | `150` | Average seconds between incursions |
 | `-n, --name <NAME>` | `$USER` | Your callsign |
 | `-t, --team <TEAM>` | `fed` | Preferred team: `fed`, `rom`, `kli`, `ori` |
 | `-s, --ship <SHIP>` | `CA` | Preferred ship: `SC`, `DD`, `CA`, `BB`, `AS`, `SB` |
@@ -414,6 +427,45 @@ the rest are shared among the survivors until the galaxy resets. Robots attack e
 empire that has ships in play, so in a four-way game each empire fights its neighbours
 on two fronts. Robots are marked in the player list.
 
+## Alien incursions
+
+Pass `--aliens` to `server` or `solo` and episodes from Star Trek drop into the galaxy.
+One arrives roughly every `--alien-interval` seconds (150 by default, with some random
+variation), and at most **two** are active at once. Each arrival, defeat and withdrawal
+is announced to everyone as a magenta **ALERT** message with a klaxon.
+
+```sh
+netrek server --empires all --bots 12 --aliens            # all eight
+netrek solo --aliens khan,borg,doomsday --alien-interval 90
+```
+
+| Name (`--aliens`) | What happens |
+|---|---|
+| `khan` | **Khan Noonien Singh** seizes a planet as his Augment stronghold (40 armies, and it fires on everyone). Three augmented Reliant-style ships, faster and much tougher than stock Federation ships, hunt Federation ships first and bomb Federation worlds. |
+| `gorn` | **Gorn raiders** (four heavy hammerhead ships) go from colony to colony, orbiting and wiping out the inhabitants all the way to zero armies, and fight anyone who comes close. |
+| `tholian` | **Tholian vessels** appear around a planet and circle it in formation, spinning an ever-widening **Tholian web** between themselves and back to the centre. Any non-Tholian ship touching a strand takes damage. Strands dissolve after 90 seconds. |
+| `fesarius` | **The Fesarius**, Balok's vast globe ship, wanders the galaxy hunting ships with heavy beams and tractoring them in. |
+| `mirror` | A rift opens and the **Terran Empire** arrives in ships identical to Starfleet's (but silver). They fight everyone, bomb planets down and **conquer** them for the Empire. |
+| `doomsday` | **The planet killer** drifts from world to world and **devours** them, leaving dead rock with no armies or resources. Its antiproton beam hits nearby ships, and anything in front of its maw is eaten. Its neutronium hull shrugs off most damage, but, as Commodore Decker showed, **a ship exploding in its maw does 8× damage**. |
+| `amoeba` | **The space amoeba** drifts toward ships, drains the fuel of everything within reach, damages it and pulls it in. |
+| `borg` | **The Borg cube** hunts the nearest ship, cuts it with beams and torpedoes, and grabs it with a tractor beam. Hold a ship for 4 seconds and it is **assimilated**: destroyed, and replaced by a new cube (up to three). Cubes **adapt**: every hit makes them more resistant, down to taking 30% damage. |
+
+**How aliens behave:**
+
+- **Enemies of everyone:** aliens fly as independents, so they're hostile to all four
+  empires (and robots will fight them). They don't fight each other.
+- **Callsigns and colours:** they have their own colours and designs, and are labelled by
+  name on the tactical view (`Khan`, `Borg`, `ISS`, …). On the galaxy map and player list
+  they show as `KH`, `GN`, `TH`, `FS`, `MU`, `PK`, `AM` or `BG` plus a slot.
+- **Rewards:** destroying an alien is worth more than a normal kill. Fleet ships give 1.5
+  kills, Khan's ships 2, and the monsters 3 to 5.
+- **Planets:** planets taken by Khan or the Terran Empire are shown in the alien's colour.
+  Devoured planets turn grey. All of them can be retaken with armies, and everything is
+  restored when the galaxy resets.
+- **Ending:** an incursion ends when all its ships are destroyed, or it withdraws after
+  4–6 minutes. If an empire loses its last planet to aliens, it has been wiped out by
+  alien invaders.
+
 ## Sound
 
 Sound effects are synthesized when the client starts (square waves, sweeps and filtered
@@ -427,7 +479,7 @@ You'll hear:
 - ship explosions, quieter with distance, and a bigger blast when you die
 - hull and shield hits
 - shields up and down, cloaking, entering orbit
-- a red-alert klaxon when an enemy comes close
+- a red-alert klaxon when an enemy comes close, and when an alien incursion is announced
 - a chirp for incoming messages and a beep for warnings
 - a fanfare when a planet is captured
 
@@ -518,6 +570,7 @@ src/
     mod.rs              TCP server, per-client threads, game loop, robot balancing
     world.rs            the game simulation (one tick = one Netrek update)
     bot.rs              robot pilots
+    aliens.rs           alien incursions: scheduling, AI and special powers
   client/
     mod.rs              connection, input handling, graphics-mode detection, sound triggers
     render.rs           layout, outfit screen, text dashboard, player list, messages, popups
@@ -557,12 +610,16 @@ The tests include:
 
 - **`four_empire_game`:** 16 robots across all four empires. Checks every empire gets
   its share of ships and that the fighting spreads across the galaxy.
+- **`every_incursion_plays_out`:** runs each of the eight alien incursions against a
+  four-empire robot war and checks it arrives, acts and ends cleanly.
+- **`incursions_do_not_repeat_while_active`:** long games with all eight aliens, checking
+  at most two are active at once and none repeats while it's still active.
 - **`robots_play_a_game`:** a headless 30-minute robot game. It checks the rules engine
   holds up (kills happen, no panics) and prints a summary of kills, planet captures and
   armies bombed.
 - **`effects_render`:** every sound effect synthesizes to valid, non-silent audio.
-- **`gallery`:** renders every empire's ship designs to `$TMPDIR/netrek-ships.ppm`, handy
-  when tweaking silhouettes.
+- **`gallery`:** renders every empire's ship designs, plus the aliens, to
+  `$TMPDIR/netrek-ships.ppm`, handy when tweaking silhouettes.
 
 Dependencies:
 

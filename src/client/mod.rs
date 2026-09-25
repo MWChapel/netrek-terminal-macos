@@ -444,6 +444,7 @@ impl App {
             }
             ServerMsg::Msg(m) => {
                 match m.kind {
+                    MsgKind::System if m.from == "ALERT" => self.sound.play(sound::Sfx::Alert, 0.5),
                     MsgKind::System if m.text.contains("taken over by") => self.sound.play(sound::Sfx::Capture, 0.5),
                     MsgKind::System => {}
                     _ => self.sound.play(sound::Sfx::Message, 0.6),
@@ -794,17 +795,20 @@ impl App {
         let text = match (player, planet) {
             (Some((p, d)), Some((_, pd))) if d < pd => {
                 let s = p.ship.stats();
-                format!(
-                    "{}{} {} — {} {} • speed {} • kills {:.2}{}",
-                    p.team.letter(),
-                    slot_char(p.id),
-                    p.name,
-                    p.team.name(),
-                    s.name,
-                    p.speed,
-                    p.kills,
-                    if p.flags & pf::ROBOT != 0 { " • robot" } else { "" }
-                )
+                match p.faction {
+                    Some(fac) => format!("{} {} — {} • {} • speed {}", render_px::callsign(&p), p.name, fac.name(), s.name, p.speed),
+                    None => format!(
+                        "{}{} {} — {} {} • speed {} • kills {:.2}{}",
+                        p.team.letter(),
+                        slot_char(p.id),
+                        p.name,
+                        p.team.name(),
+                        s.name,
+                        p.speed,
+                        p.kills,
+                        if p.flags & pf::ROBOT != 0 { " • robot" } else { "" }
+                    ),
+                }
             }
             (_, Some((k, _))) => {
                 let pl = &f.planets[k];
@@ -813,7 +817,12 @@ impl App {
                     format!(
                         "{} — {} • {} armies{}{}{}{}",
                         def.name,
-                        pl.owner.name(),
+                        match pl.alien {
+                            Some(Faction::Doomsday) => "devoured by the planet killer",
+                            Some(Faction::Khan) => "Khan's stronghold",
+                            Some(fac) => fac.name(),
+                            None => pl.owner.name(),
+                        },
                         pl.armies,
                         if pl.flags & PL_HOME != 0 { " • HOME" } else { "" },
                         if pl.flags & PL_REPAIR != 0 { " • REPAIR" } else { "" },

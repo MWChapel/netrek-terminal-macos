@@ -31,8 +31,14 @@ fn ship_shape(s: ShipType) -> &'static [(f64, f64)] {
         ],
         ShipType::Battleship => &[(0.0, -1.0), (0.75, -0.35), (0.75, 0.95), (-0.75, 0.95), (-0.75, -0.35)],
         ShipType::Assault => &[(0.0, -0.85), (0.95, 0.15), (0.55, 0.95), (-0.55, 0.95), (-0.95, 0.15)],
-        ShipType::Starbase => &[
+        ShipType::Starbase | ShipType::Fesarius | ShipType::Amoeba => &[
             (0.0, -1.0), (0.7, -0.7), (1.0, 0.0), (0.7, 0.7), (0.0, 1.0), (-0.7, 0.7), (-1.0, 0.0), (-0.7, -0.7),
+        ],
+        ShipType::BorgCube => &[(-0.75, -0.75), (0.75, -0.75), (0.75, 0.75), (-0.75, 0.75)],
+        ShipType::PlanetKiller => &[(-0.5, -1.0), (0.5, -1.0), (0.26, 1.0), (-0.26, 1.0)],
+        ShipType::TholianVessel => &[(0.0, -1.0), (0.55, 0.8), (0.0, 0.45), (-0.55, 0.8)],
+        ShipType::Augment | ShipType::GornRaider => &[
+            (0.0, -1.0), (0.6, -0.55), (0.25, 0.0), (0.8, 0.95), (0.3, 0.6), (-0.3, 0.6), (-0.8, 0.95), (-0.25, 0.0), (-0.6, -0.55),
         ],
     }
 }
@@ -66,6 +72,21 @@ const LOGO: [&str; 6] = [
 ];
 
 impl App {
+    /// Terminal colour for a ship: alien faction colour or empire colour.
+    fn player_color(&self, p: &PlayerInfo) -> Color {
+        match p.faction {
+            Some(f) => super::pixels::to_color(super::render_px::faction_rgb(f), self.truecolor),
+            None => team_color(p.team),
+        }
+    }
+
+    fn planet_color(&self, info: &PlanetInfo) -> Color {
+        match info.alien {
+            Some(_) => super::pixels::to_color(super::render_px::planet_rgb(info), self.truecolor),
+            None => team_color(info.owner),
+        }
+    }
+
     pub(super) fn draw(&mut self, scr: &mut Screen) {
         scr.clear();
         let (w, h) = (scr.w as i32, scr.h as i32);
@@ -308,7 +329,7 @@ impl App {
                 continue;
             }
             let info = &f.planets[k];
-            let col = if info.known { team_color(info.owner) } else { DIM };
+            let col = if info.known { self.planet_color(info) } else { DIM };
             let (px, py) = to_dot(def.x, def.y);
             b.circle(px, py, pr, col, 2);
             if info.flags & PL_HOME != 0 {
@@ -336,10 +357,17 @@ impl App {
             }
         }
 
+        // Tholian webs.
+        for w in &f.webs {
+            let (ax, ay) = to_dot(w.x1 as f64, w.y1 as f64);
+            let (bx, by) = to_dot(w.x2 as f64, w.y2 as f64);
+            b.line(ax, ay, bx, by, Color::DarkYellow, 3);
+        }
+
         // Phasers.
         for ph in &f.phasers {
             let owner = f.players.iter().find(|p| p.id == ph.owner);
-            let col = if ph.owner == self.slot { Color::White } else { owner.map_or(Color::White, |p| team_color(p.team)) };
+            let col = if ph.owner == self.slot { Color::White } else { owner.map_or(Color::White, |p| self.player_color(p)) };
             let (ax, ay) = to_dot(ph.x1 as f64, ph.y1 as f64);
             let (bx, by) = to_dot(ph.x2 as f64, ph.y2 as f64);
             b.line_pattern(ax, ay, bx, by, col, 6, if ph.hit { 1 } else { 2 });
@@ -362,7 +390,7 @@ impl App {
             }
             let (x, y) = to_dot(t.x as f64, t.y as f64);
             let mine = t.owner == self.slot;
-            let col = if mine { Color::White } else { team_color(t.team) };
+            let col = if mine { Color::White } else { f.players.iter().find(|p| p.id == t.owner).map_or(team_color(t.team), |p| self.player_color(p)) };
             if t.explode > 0 {
                 let r = t.explode as f64 * 0.9 * (DAMDIST / 2000.0) / (upd / 140.0).max(0.5);
                 b.arc(x, y, r.min(10.0), if t.explode % 2 == 0 { Color::Yellow } else { Color::Red }, 5, 2);
@@ -400,7 +428,7 @@ impl App {
                 }
                 continue;
             }
-            let col = if is_me { Color::White } else { team_color(p.team) };
+            let col = if is_me { Color::White } else { self.player_color(p) };
             let cloaked = p.flags & pf::CLOAK != 0;
             let a = p.dir as f64 * std::f64::consts::TAU / 256.0;
             let (sa, ca) = (a.sin(), a.cos());
@@ -429,8 +457,8 @@ impl App {
                 };
                 b.arc(x, y, sr + 2.5, shield_col, prio - 1, 1);
             }
-            let tag = format!("{}{}", p.team.letter(), slot_char(p.id));
-            labels.push((((x + sr + 3.0) / 2.0) as i32, (y / 4.0) as i32, tag, if cloaked { DIM } else { team_color(p.team) }, is_me));
+            let tag = super::render_px::callsign(p);
+            labels.push((((x + sr + 3.0) / 2.0) as i32, (y / 4.0) as i32, tag, if cloaked { DIM } else { self.player_color(p) }, is_me));
         }
 
         b.blit(scr);
@@ -474,7 +502,7 @@ impl App {
         let mut labels: Vec<(i32, i32, String, Color, bool)> = Vec::new();
         for (k, def) in PLANETS.iter().enumerate() {
             let info = &f.planets[k];
-            let col = if info.known { team_color(info.owner) } else { DIM };
+            let col = if info.known { self.planet_color(info) } else { DIM };
             let (x, y) = to_dot(def.x, def.y);
             b.disc(x, y, 0.8, col, 2);
             let abbr: String = def.name.chars().take(3).collect();
@@ -492,7 +520,7 @@ impl App {
             let (text, col) = if p.fuzzy {
                 ("??".to_string(), DIM)
             } else {
-                (format!("{}{}", p.team.letter(), slot_char(p.id)), if is_me { Color::White } else { team_color(p.team) })
+                (super::render_px::callsign(p), if is_me { Color::White } else { self.player_color(p) })
             };
             labels.push((cx, cy, text, col, true));
         }
@@ -619,7 +647,7 @@ impl App {
         if r.h < 1 {
             return;
         }
-        let header = format!("{:<3}{:<3}{:<17}{:>7}{:>6}  {}", "No", "Ty", "Name", "Kills", "Arm", "");
+        let header = format!("{:<4}{:<3}{:<16}{:>7}{:>6}  {}", "No", "Ty", "Name", "Kills", "Arm", "");
         scr.text_clip(r.x, r.y, &header, Color::White, true, maxx);
         for (k, p) in ps.iter().enumerate() {
             let y = r.y + 1 + k as i32;
@@ -633,16 +661,15 @@ impl App {
                 _ => "dead",
             };
             let line = format!(
-                "{}{} {} {:<16.16}{:>7.2}{:>6}  {}",
-                p.team.letter(),
-                slot_char(p.id),
+                "{:<4}{:<3}{:<16.16}{:>7.2}{:>6}  {}",
+                super::render_px::callsign(p),
                 p.ship.stats().abbr,
                 p.name,
                 p.kills,
                 arm,
                 status
             );
-            let col = if p.state == PState::Alive { team_color(p.team) } else { DIM };
+            let col = if p.state == PState::Alive { self.player_color(p) } else { DIM };
             scr.text_clip(r.x, y, &line, col, p.id == self.slot, maxx);
         }
     }
@@ -653,13 +680,14 @@ impl App {
         let start = self.msgs.len().saturating_sub(n);
         for (k, m) in self.msgs.iter().skip(start).enumerate() {
             let col = match m.kind {
+                MsgKind::System if m.from == "ALERT" => Color::Magenta,
                 MsgKind::System => Color::Grey,
                 MsgKind::All => Color::White,
                 MsgKind::Team => team_color(my_team),
                 MsgKind::Indiv => Color::Cyan,
             };
             let line = format!("{:<8} {}", m.from, m.text);
-            scr.text_clip(r.x, r.y + k as i32, &line, col, m.kind != MsgKind::System, r.x + r.w - 1);
+            scr.text_clip(r.x, r.y + k as i32, &line, col, m.kind != MsgKind::System || m.from == "ALERT", r.x + r.w - 1);
         }
     }
 
@@ -844,7 +872,7 @@ impl App {
                     } else {
                         format!("{:<15}?   ?", def.name)
                     };
-                    let col = if info.known { team_color(info.owner) } else { DIM };
+                    let col = if info.known { self.planet_color(info) } else { DIM };
                     scr.text_clip(r.x + c * 34, r.y + row, &line, col, false, r.x + r.w - 1);
                 }
             }
