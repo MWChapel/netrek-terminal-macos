@@ -3,6 +3,8 @@
 A graphical client and game server for **Netrek**, the 1988 multiplayer space battle game,
 that runs entirely inside a terminal window on macOS.
 
+![A four-empire game in vector mode: tactical view on the left, galactic map in the middle, player list on the right, ship controls and messages below](screen.png)
+
 - **Classic layout:** tactical and galactic maps side by side as two squares, with the
   dashboard, player list and message window underneath, like the original X11 client.
 - **Real graphics in the terminal:** vector-style maps and control panel drawn with
