@@ -230,6 +230,9 @@ iTerm2 instead.
   Planets are labelled with their name. Planets your team has scouted also show their
   army count and resources: **R**epair, **F**uel, **A**gricultural. Ships show their
   player slot.
+- **Aliens:** ships from alien incursions are drawn in their own colours and labelled by
+  name (`Khan`, `Borg`, …). Tholian webs show as glowing orange strands. See
+  [Alien incursions](#alien-incursions).
 - **Galactic:** unscouted planets are grey with a `?`. Planets with more than 4 armies
   are marked, and home worlds have a double ring. Cloaked enemies appear as `??` at a
   rough position.
@@ -466,6 +469,63 @@ netrek solo --aliens khan,borg,doomsday --alien-interval 90
   4–6 minutes. If an empire loses its last planet to aliens, it has been wiped out by
   alien invaders.
 
+**Who's who on screen:**
+
+| Alien | Colour | Tag | Looks like |
+|---|---|---|---|
+| Khan | magenta | `KH` | Reliant: saucer with a roll bar and nacelles slung below |
+| Gorn | olive | `GN` | Hammerhead hull with swept engine fins |
+| Tholian | orange | `TH` | Crystalline wedge; its web is glowing orange strands |
+| Fesarius | pale blue | `FS` | A vast globe of smaller modules |
+| Terran Empire | silver | `MU` | Exactly like Federation ships, but silver (labelled `ISS`) |
+| Planet killer | steel grey | `PK` | A long cone with an open maw at the front |
+| Space amoeba | sea green | `AM` | A wobbling cell with a nucleus |
+| Borg | neon green | `BG` | The cube, criss-crossed with conduits |
+
+**Alien vessels:**
+
+| Vessel | Speed | Shields | Hull | Weapons | Kill credit |
+|---|---|---|---|---|---|
+| Augment ship (Khan) | 10 | 150 | 150 | torpedo 50, phaser 120 | 2 |
+| Gorn raider | 7 | 120 | 170 | torpedo 45, phaser 90 | 1.5 |
+| Tholian vessel | 8 | 70 | 80 | phaser 70, web | 1.5 |
+| Terran Empire ships | as Starfleet CA / DD / BB | | | | 1.5 |
+| Fesarius | 3 | 1,500 | 1,500 | phaser 140, tractor | 4 |
+| Planet killer | 2 | 1,000 | 2,500 | antiproton beam 80, maw | 5 |
+| Space amoeba | 3 | – | 1,400 | energy drain, tractor | 3.5 |
+| Borg cube | 6 | 2,000 | 3,000 | cutting beam 120, torpedo 60, tractor, assimilation | 4 (new cubes 3) |
+
+The monsters regenerate quickly. The planet killer only takes 40% of normal weapon
+damage, and a Borg cube's resistance builds as it's hit.
+
+### Surviving the aliens
+
+- **Khan:** his ships outgun a single cruiser, so fight them together. Retaking his
+  stronghold takes a lot of bombing first. It starts with 40 armies and fires on anyone
+  who comes close.
+- **Gorn:** they spend time in orbit wiping out each colony, which makes them sitting
+  targets. Catch them while they're busy. They only turn to fight ships within about
+  8,000 units.
+- **Tholians:** don't fly through the web. It only hurts while you're touching a strand,
+  so cross strands quickly or go around. Kill the ships from outside the web with
+  torpedoes; their hulls are thin.
+- **Fesarius:** its beams reach about 8,000 units and its tractor pulls you in, so keep
+  your distance and shields up and hit it with torpedoes from long range. It moves at
+  warp 3, so you can always outrun it.
+- **Terran Empire:** ordinary Starfleet ships with ordinary stats. Treat them like any
+  enemy fleet, and hurry to save planets they've bombed down before they conquer them.
+- **Planet killer:** weapons barely dent it, and its maw eats anything in front of it.
+  The reliable way to kill it is Commodore Decker's: a ship exploding right at its maw
+  does 8× damage. A damaged ship that's going down anyway makes a fine last stand.
+  Otherwise, torpedo it from the side and stay out of its antiproton beam.
+- **Space amoeba:** it drains your fuel from 3,200 units away and pulls you in, so don't
+  get close. Pound it with torpedoes from range. It's slow, and it has no shields.
+- **Borg:** a cube assimilates a ship it holds in its tractor beam within about 2,600
+  units for four seconds. Its tractor is far stronger than any pressor, so don't try to
+  push free. Instead stay out of range, and if you're caught, run at full speed: cubes
+  only reach warp 6. Hit it hard and early, because every hit makes it tougher, and
+  every ship it catches becomes another cube.
+
 ## Sound
 
 Sound effects are synthesized when the client starts (square waves, sweeps and filtered
@@ -504,6 +564,9 @@ netrek server --port 2592 --bots 6
   run may ask to allow incoming connections.
 - **Local only:** use `--bind 127.0.0.1` to keep the server local.
 
+To add alien incursions to a hosted game, start the server with `--aliens`. Clients
+don't need any flag; they draw whatever the server sends.
+
 Clients and servers must be built from the same version (the protocol version is
 checked when a client connects).
 
@@ -534,6 +597,12 @@ sound plays on the machine running the client.
 **"Netrek needs a terminal of at least 80x24."**
 Enlarge the window or shrink the font.
 
+**No aliens are showing up.**
+Aliens only appear when the *server* was started with `--aliens` (for `solo`, pass it to
+`netrek solo`). The first incursion arrives after half the interval (at most a minute),
+then about every `--alien-interval` seconds. An incursion needs free player slots (up to
+4), so a full 32-player galaxy delays them.
+
 **Can't connect.**
 Check the host and port, and that the server's firewall allows the port. Client and
 server must be the same version.
@@ -554,6 +623,8 @@ This is a from-scratch reimplementation, not a port of the original C code:
   - refitting is instant
   - starbases can't be docked with
   - there's no self-destruct countdown or ghostbusting
+- **Additions:** alien incursions (`--aliens`), per-empire Star Trek ship designs and
+  sound effects aren't part of classic Netrek.
 - **What matches the original:** the core numbers (ship stats, weapon damage and range,
   explosion radii, orbit distances, fuel and heat costs, turn rates, the planet table)
   come from the original server.
