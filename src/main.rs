@@ -26,6 +26,9 @@ enum Cmd {
         /// Number of robot players to keep in the game
         #[arg(long, default_value_t = 6)]
         bots: usize,
+        /// Empires the robots play for: "all", or a list like "fed,rom,kli"
+        #[arg(short, long, default_value = "fed,rom", value_parser = parse_empires)]
+        empires: Empires,
     },
     /// Connect to a server and play
     Play {
@@ -42,6 +45,9 @@ enum Cmd {
         /// Number of robot players
         #[arg(long, default_value_t = 7)]
         bots: usize,
+        /// Empires the robots play for: "all", or a list like "fed,rom,kli"
+        #[arg(short, long, default_value = "fed,rom", value_parser = parse_empires)]
+        empires: Empires,
         #[command(flatten)]
         who: Who,
     },
@@ -64,6 +70,26 @@ struct Who {
     /// Start with sound effects turned off (toggle in game with S)
     #[arg(long)]
     mute: bool,
+}
+
+#[derive(Clone)]
+struct Empires(Vec<Team>);
+
+fn parse_empires(s: &str) -> Result<Empires, String> {
+    if s.eq_ignore_ascii_case("all") {
+        return Ok(Empires(Team::PLAYABLE.to_vec()));
+    }
+    let mut teams = Vec::new();
+    for part in s.split(',').map(str::trim).filter(|p| !p.is_empty()) {
+        let t = parse_team(part)?;
+        if !teams.contains(&t) {
+            teams.push(t);
+        }
+    }
+    if teams.is_empty() {
+        return Err("give at least one empire, or \"all\"".into());
+    }
+    Ok(Empires(teams))
 }
 
 fn parse_team(s: &str) -> Result<Team, String> {
@@ -93,8 +119,8 @@ fn player_name(who: &Who) -> String {
 fn main() {
     let cli = Cli::parse();
     let result = match cli.cmd {
-        Cmd::Server { port, bind, bots } => {
-            server::run(server::ServerConfig { bind, port, bots, quiet: false })
+        Cmd::Server { port, bind, bots, empires } => {
+            server::run(server::ServerConfig { bind, port, bots, empires: empires.0, quiet: false })
         }
         Cmd::Play { host, port, who } => client::run(client::ClientConfig {
             host,
@@ -105,8 +131,8 @@ fn main() {
             gfx: parse_gfx(&who.gfx),
             mute: who.mute,
         }),
-        Cmd::Solo { bots, who } => {
-            let cfg = server::ServerConfig { bind: "127.0.0.1".into(), port: 0, bots, quiet: true };
+        Cmd::Solo { bots, empires, who } => {
+            let cfg = server::ServerConfig { bind: "127.0.0.1".into(), port: 0, bots, empires: empires.0, quiet: true };
             server::spawn_background(cfg).and_then(|port| {
                 client::run(client::ClientConfig {
                     host: "127.0.0.1".into(),

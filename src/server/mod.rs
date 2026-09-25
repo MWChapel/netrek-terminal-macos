@@ -20,6 +20,8 @@ pub struct ServerConfig {
     pub bind: String,
     pub port: u16,
     pub bots: usize,
+    /// Empires the robots play for (humans may still join any open empire).
+    pub empires: Vec<Team>,
     pub quiet: bool,
 }
 
@@ -55,7 +57,8 @@ fn serve(listener: TcpListener, cfg: ServerConfig) -> io::Result<()> {
     let quiet = cfg.quiet;
     if !quiet {
         println!("netrek server listening on {}", listener.local_addr()?);
-        println!("{} robots will be playing", cfg.bots);
+        let names: Vec<&str> = cfg.empires.iter().map(|t| t.plural()).collect();
+        println!("{} robots will be playing for the {}", cfg.bots, names.join(", "));
     }
     let game_cfg = cfg.clone();
     thread::spawn(move || game_loop(rx, game_cfg));
@@ -185,7 +188,7 @@ fn game_loop(rx: Receiver<Event>, cfg: ServerConfig) {
         }
 
         if world.tick % UPS as u32 == 0 {
-            balance_bots(&mut world, &mut bots, cfg.bots);
+            balance_bots(&mut world, &mut bots, cfg.bots, &cfg.empires);
         }
         for b in bots.iter_mut() {
             b.think(&mut world);
@@ -232,9 +235,15 @@ fn game_loop(rx: Receiver<Event>, cfg: ServerConfig) {
     }
 }
 
-/// Keep `total` robots in play, split so the Federation and Romulans
-/// (the classic "T-mode" pairing) end up with even team sizes.
-fn balance_bots(world: &mut World, bots: &mut Vec<bot::Bot>, total: usize) {
+/// Keep `total` robots in play, spread over `empires` so every empire ends up
+/// with the same number of ships (humans included). Empires that have been
+/// genocided drop out of the rotation until the galaxy resets.
+fn balance_bots(world: &mut World, bots: &mut Vec<bot::Bot>, total: usize, empires: &[Team]) {
+    let open = world.open_teams();
+    let teams: Vec<Team> = empires.iter().copied().filter(|t| open.contains(t)).collect();
+    if teams.is_empty() {
+        return;
+    }
     let humans = |t: Team| {
         world
             .players
@@ -242,11 +251,21 @@ fn balance_bots(world: &mut World, bots: &mut Vec<bot::Bot>, total: usize) {
             .filter(|p| p.in_use && !p.robot && p.team == t && p.state != PState::Outfit)
             .count()
     };
-    let (hf, hr) = (humans(Team::Fed), humans(Team::Rom));
-    let sum = total + hf + hr;
-    let fed_size = sum / 2;
-    for team in [Team::Fed, Team::Rom] {
-        let want = if team == Team::Fed { fed_size.saturating_sub(hf) } else { (sum - fed_size).saturating_sub(hr) };
+    let human_counts: Vec<usize> = teams.iter().map(|&t| humans(t)).collect();
+    // Robots on empires no longer in the rotation go home.
+    bots.retain(|b| {
+        if teams.contains(&b.team) {
+            true
+        } else {
+            world.remove_player(b.id);
+            false
+        }
+    });
+    let sum = total + human_counts.iter().sum::<usize>();
+    let (base, extra) = (sum / teams.len(), sum % teams.len());
+    for (k, &team) in teams.iter().enumerate() {
+        let size = base + usize::from(k < extra);
+        let want = size.saturating_sub(human_counts[k]);
         let have = bots.iter().filter(|b| b.team == team).count();
         if have < want {
             for _ in have..want {
@@ -279,7 +298,7 @@ mod tests {
     fn robots_play_a_game() {
         let mut world = World::new();
         let mut bots = Vec::new();
-        balance_bots(&mut world, &mut bots, 10);
+        balance_bots(&mut world, &mut bots, 10, &[Team::Fed, Team::Rom]);
         assert_eq!(bots.len(), 10);
         let mut log = Vec::new();
         for _ in 0..(UPS as u32 * 60 * 30) {
@@ -306,5 +325,44 @@ mod tests {
             println!("{:?}: {} planets", t, world.team_planet_count(t));
         }
         assert!(kills > 0, "robots never killed anyone");
+    }
+
+    /// Robots spread over all four empires, each fighting its neighbours.
+    #[test]
+    fn four_empire_game() {
+        let all = Team::PLAYABLE;
+        let mut world = World::new();
+        let mut bots = Vec::new();
+        balance_bots(&mut world, &mut bots, 16, &all);
+        for t in all {
+            assert_eq!(bots.iter().filter(|b| b.team == t).count(), 4, "{:?} should get 4 robots", t);
+        }
+        let mut kills_by = std::collections::HashMap::new();
+        for tick in 0..(UPS as u32 * 60 * 20) {
+            if tick % UPS as u32 == 0 {
+                balance_bots(&mut world, &mut bots, 16, &all);
+            }
+            for b in bots.iter_mut() {
+                b.think(&mut world);
+            }
+            world.tick();
+            for o in world.outbox.drain(..) {
+                // "... was kill N for Name (T5)[ (carrying ...)]" -> credit the killer's team.
+                let t = &o.msg.text;
+                if let Some(pos) = t.find("was kill").and_then(|p| t[p..].find(" for ").map(|q| p + q)) {
+                    if let Some(open) = t[pos..].find('(') {
+                        let letter = t[pos + open + 1..].chars().next().unwrap_or('?');
+                        *kills_by.entry(letter).or_insert(0) += 1;
+                    }
+                }
+            }
+            world.warnings.clear();
+        }
+        println!("kills by empire: {:?}", kills_by);
+        for t in all {
+            println!("{:?}: {} planets", t, world.team_planet_count(t));
+        }
+        let fighting = ['F', 'R', 'K', 'O'].iter().filter(|c| kills_by.get(c).copied().unwrap_or(0) > 0).count();
+        assert!(fighting >= 3, "expected most empires to score kills: {:?}", kills_by);
     }
 }

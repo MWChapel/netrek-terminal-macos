@@ -812,18 +812,17 @@ impl App {
             Some(t) if open.contains(&t) => t,
             Some(t) => return self.warn(format!("The {} are not accepting recruits", t.plural())),
             None => {
-                // Default: join the smaller of the open teams.
+                // Default: join the smallest empire that already has ships in play.
                 let f = self.frame.as_ref();
                 let size = |t: Team| {
                     f.map(|f| f.players.iter().filter(|p| p.team == t && p.state != PState::Outfit).count())
                         .unwrap_or(0)
                 };
-                match open.iter().copied().filter(|t| matches!(t, Team::Fed | Team::Rom)).min_by_key(|&t| size(t)) {
+                let active: Vec<Team> = open.iter().copied().filter(|&t| size(t) > 0).collect();
+                let pool = if active.is_empty() { open.clone() } else { active };
+                match pool.into_iter().min_by_key(|&t| size(t)) {
                     Some(t) => t,
-                    None => match open.first() {
-                        Some(&t) => t,
-                        None => return self.warn("No teams are open right now"),
-                    },
+                    None => return self.warn("No teams are open right now"),
                 }
             }
         };

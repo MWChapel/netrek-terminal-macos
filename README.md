@@ -81,6 +81,12 @@ On the **outfit screen**, choose an empire with `f` `r` `k` `o` and a ship with
 tactical map to aim. Left-click fires torpedoes, right-click steers, and `0`–`9` set
 your speed. Press `?` at any time for the full key list.
 
+For a four-way war with robots flying for every empire:
+
+```sh
+netrek solo --empires all --bots 15
+```
+
 To play with friends, one person runs a server and everyone else connects:
 
 ```sh
@@ -104,7 +110,8 @@ netrek <COMMAND>
 |---|---|---|
 | `-p, --port <PORT>` | `2592` | TCP port to listen on (2592 is the traditional Netrek port) |
 | `-b, --bind <ADDR>` | `0.0.0.0` | Address to bind; use `127.0.0.1` for local-only |
-| `--bots <N>` | `6` | Robot players kept in the game, split between Federation and Romulans |
+| `--bots <N>` | `6` | Robot players kept in the game |
+| `-e, --empires <LIST>` | `fed,rom` | Empires the robots play for: `all`, or a comma list such as `fed,rom,kli` |
 
 The server logs connections, joins, kills and planet captures to stdout.
 
@@ -115,6 +122,7 @@ Starts a server on a random localhost port in the background and connects to it.
 | Option | Default | Meaning |
 |---|---|---|
 | `--bots <N>` | `7` | Number of robots |
+| `-e, --empires <LIST>` | `fed,rom` | Empires the robots play for: `all`, or a comma list |
 | `-n, --name <NAME>` | `$USER` | Your callsign |
 | `-t, --team <TEAM>` | `fed` | Preferred team: `fed`, `rom`, `kli`, `ori` |
 | `-s, --ship <SHIP>` | `CA` | Preferred ship: `SC`, `DD`, `CA`, `BB`, `AS`, `SB` |
@@ -387,9 +395,18 @@ Robots keep the game lively when there aren't enough people. They:
 - bomb enemy planets, pick up armies once they have kills, and invade the weakest
   enemy planets
 
-Robots play the classic two-empire **Federation vs Romulan** game and keep those two
-teams balanced. When a human joins a side, a robot on that side steps out. Robots are
-marked in the player list.
+By default robots play the classic two-empire **Federation vs Romulan** game. Use
+`--empires all` (or a list such as `fed,rom,kli`) to have them fly for more empires:
+
+```sh
+netrek server --empires all --bots 16    # four empires, 4 ships each
+```
+
+Robots keep the chosen empires the same size, counting humans. When a human joins an
+empire, a robot on that side steps out. If an empire is genocided, its robots leave and
+the rest are shared among the survivors until the galaxy resets. Robots attack every
+empire that has ships in play, so in a four-way game each empire fights its neighbours
+on two fronts. Robots are marked in the player list.
 
 ## Sound
 
@@ -472,7 +489,8 @@ This is a from-scratch reimplementation, not a port of the original C code:
 - **No accounts:** no login, ranks, persistent statistics or player database. Kills and
   deaths are tracked per session.
 - **Simpler team rules:** any empire that still owns planets can be joined. There's no
-  T-mode restriction for humans, though the robots play Federation vs Romulan.
+  T-mode restriction for humans. Robots play Federation vs Romulan unless you pass
+  `--empires`.
 - **Simplified mechanics:**
   - army growth, bombing odds and planet fire rates are simplified
   - refitting is instant
@@ -531,6 +549,8 @@ cargo run --release -- solo # run straight from source
 
 The tests include:
 
+- **`four_empire_game`:** 16 robots across all four empires. Checks every empire gets
+  its share of ships and that the fighting spreads across the galaxy.
 - **`robots_play_a_game`:** a headless 30-minute robot game. It checks the rules engine
   holds up (kills happen, no panics) and prints a summary of kills, planet captures and
   armies bombed.
