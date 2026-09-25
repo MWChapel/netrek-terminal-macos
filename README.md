@@ -177,8 +177,12 @@ tmux source ~/.tmux.conf
 ```
 
 If you run inside tmux without this setting, the client falls back to blocks mode and
-shows a one-line hint. The outer terminal must itself support SIXEL. Terminal.app
-doesn't, even inside tmux.
+shows a one-line hint. The outer terminal must itself support SIXEL. Inside tmux, the
+client checks which app is hosting your tmux client (by walking its process tree). If
+that's Terminal.app (or another terminal without SIXEL), it stays in blocks mode and
+suggests attaching from iTerm2. The same tmux session can be attached from Terminal.app
+and from iTerm2 at different times, and the client picks the right mode each time it
+starts.
 
 ### Terminal.app
 

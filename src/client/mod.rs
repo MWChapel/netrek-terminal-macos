@@ -59,18 +59,68 @@ struct Image {
     data: Vec<u8>,
 }
 
+/// What we found out about the terminal's image support.
+pub struct SixelCheck {
+    pub supported: bool,
+    /// Advice to show the player when images aren't available.
+    pub hint: Option<&'static str>,
+}
+
+/// Terminal apps known not to display SIXEL images.
+const NO_SIXEL_APPS: [&str; 4] = ["Terminal.app", "Alacritty", "kitty", "Ghostty"];
+
+/// Inside tmux, find the terminal app hosting the tmux client that shows our
+/// pane, by walking up its process tree (e.g. tmux -> zsh -> login -> Terminal).
+fn tmux_outer_app() -> Option<String> {
+    let out = std::process::Command::new("tmux").args(["display", "-p", "#{client_pid}"]).output().ok()?;
+    let mut pid: u32 = String::from_utf8_lossy(&out.stdout).trim().parse().ok()?;
+    for _ in 0..12 {
+        let out = std::process::Command::new("ps").args(["-o", "ppid=,comm=", "-p", &pid.to_string()]).output().ok()?;
+        let line = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        let (ppid, comm) = line.split_once(char::is_whitespace)?;
+        let comm = comm.trim();
+        if comm.contains(".app/") || ["wezterm-gui", "alacritty", "kitty", "ghostty", "foot"].iter().any(|n| comm.to_lowercase().ends_with(n)) {
+            return Some(comm.to_string());
+        }
+        pid = ppid.trim().parse().ok()?;
+        if pid <= 1 {
+            break;
+        }
+    }
+    None
+}
+
 /// Whether the terminal (and tmux, if we're inside it) can show SIXEL images.
-pub fn sixel_supported() -> bool {
+pub fn sixel_check() -> SixelCheck {
     if std::env::var_os("TMUX").is_some() {
-        return std::process::Command::new("tmux")
+        if let Some(app) = tmux_outer_app() {
+            if NO_SIXEL_APPS.iter().any(|n| app.contains(n)) {
+                return SixelCheck {
+                    supported: false,
+                    hint: Some("This terminal app can't show images; attach tmux from iTerm2 for vector graphics"),
+                };
+            }
+        }
+        let tmux_sixel = std::process::Command::new("tmux")
             .args(["display", "-p", "#{client_termfeatures}"])
             .output()
             .map(|o| String::from_utf8_lossy(&o.stdout).contains("sixel"))
             .unwrap_or(false);
+        if !tmux_sixel {
+            return SixelCheck {
+                supported: false,
+                hint: Some("Tip: for vector graphics in tmux add  set -as terminal-features ',xterm*:sixel'  to ~/.tmux.conf and reattach"),
+            };
+        }
+        return SixelCheck { supported: true, hint: None };
     }
     let prog = std::env::var("TERM_PROGRAM").unwrap_or_default();
     let term = std::env::var("TERM").unwrap_or_default();
-    matches!(prog.as_str(), "iTerm.app" | "WezTerm") || ["foot", "mlterm", "contour"].iter().any(|t| term.contains(t))
+    if matches!(prog.as_str(), "iTerm.app" | "WezTerm") || ["foot", "mlterm", "contour"].iter().any(|t| term.contains(t)) {
+        return SixelCheck { supported: true, hint: None };
+    }
+    let hint = (prog == "Apple_Terminal").then_some("Terminal.app can't show images; run in iTerm2 for vector graphics");
+    SixelCheck { supported: false, hint }
 }
 
 enum NetEvent {
@@ -184,9 +234,10 @@ pub fn run(cfg: ClientConfig) -> io::Result<()> {
     let outfit_team = cfg.team;
     let outfit_ship = cfg.ship;
     let cfg_mute = cfg.mute;
-    let sixel = sixel_supported();
-    let gfx = cfg.gfx.unwrap_or(if sixel { Gfx::Vector } else { Gfx::Blocks });
-    let tmux_hint = std::env::var_os("TMUX").is_some() && !sixel && cfg.gfx.is_none();
+    let check = sixel_check();
+    let gfx = cfg.gfx.unwrap_or(if check.supported { Gfx::Vector } else { Gfx::Blocks });
+    let hint = if cfg.gfx.is_none() { check.hint } else { None };
+    let tmux_hint = hint.is_some();
     let mut app = App {
         cfg,
         writer,
@@ -217,8 +268,8 @@ pub fn run(cfg: ClientConfig) -> io::Result<()> {
         tmux_hint,
         sound: sound::Sound::new(!cfg_mute),
     };
-    if app.tmux_hint {
-        app.warn("Tip: for vector graphics in tmux add  set -as terminal-features ',xterm*:sixel'  to ~/.tmux.conf");
+    if let Some(h) = hint {
+        app.warn(h);
     }
 
     let _guard = TermGuard::enter()?;
