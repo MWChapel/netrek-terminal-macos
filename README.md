@@ -500,7 +500,7 @@ netrek solo --aliens khan,borg,doomsday --alien-interval 90
 | `vger` | **V'Ger** (*The Motion Picture*): an immense energy cloud heading for **Earth** (then the other home worlds), purging any it reaches. Ships inside the cloud crawl at warp 3, and every few seconds a plasma bolt **digitizes** a ship outright. Weapons are useless. The only way to stop it is to **join with it**: hold position at its core for 10 seconds. That ship is lost, V'Ger transcends, and the pilot gets 5 career kills. |
 | `crystal` | **The Crystalline Entity** (TNG): strips all life from planets, farming worlds first, killing their armies and their agriculture for good. It shreds ships that come close. Almost nothing hurts it, but phasers from **three different ships within 2.5 seconds** reach **resonance** and shatter it. |
 | `probe` | **The whale probe** (*Star Trek IV*): invulnerable. It travels planet to planet, **draining the power** of every ship within 10,000 units (engines drop to warp 1, shields fail, fuel stops recharging) and stopping army growth where it stops. Bring it **two armies** (the whales) to answer its call: it departs, and the courier earns 3 kills. |
-| `8472` | **Species 8472** (Voyager): three bioships from fluidic space with devastating beams. Photon torpedoes and phasers do only 10% damage; **plasma torpedoes** (our nanoprobe warheads) do full damage. When the bioships gather at a planet they focus their beams and **destroy it** (never a home world), then recharge for about 40 seconds. They're also **at war with the Borg**. |
+| `8472` | **Species 8472** (Voyager): three bioships from fluidic space with devastating beams. Photon torpedoes and phasers do only 10% damage; **plasma torpedoes** (our nanoprobe warheads) do full damage, and their beams can't shoot plasma down. When the bioships gather at a planet they focus their beams and **destroy it** (never a home world), then recharge for about 40 seconds. They're also **at war with the Borg**. |
 | `jemhadar` | **The Jem'Hadar** (DS9): a wormhole opens with a warning, and six seconds later five fast attack ships pour out. Their phased polaron beams **ignore shields**, and a fighter below 30% hull **rams** the nearest enemy for heavy damage. |
 
 **How aliens behave:**
@@ -555,7 +555,7 @@ netrek solo --aliens khan,borg,doomsday --alien-interval 90
 | V'Ger | 2 | invulnerable | | plasma bolts (instant kill), slowing cloud | 5 career kills for joining |
 | Crystalline Entity | 4 | – | 600 | crystal beam 40; shattered by resonance | 4 |
 | Whale probe | 3 | invulnerable | | power drain over 10,000 units | 3 for answering it |
-| Species 8472 bioship | 11 | – | 300 | beam 150, planet destruction; 10% damage except plasma | 2.5 |
+| Species 8472 bioship | 11 | – | 300 | beam 110, planet destruction; 10% damage except plasma | 2.5 |
 | Jem'Hadar fighter | 11 | 80 | 90 | polaron beam 90 (ignores shields), torpedo 30, ramming | 1.5 |
 
 The monsters regenerate quickly. The planet killer only takes 40% of normal weapon
@@ -593,8 +593,10 @@ damage, and a Borg cube's resistance builds as it's hit.
 - **Whale probe:** you can't hurt it. Pick up two armies (you need a kill first) and fly
   them within 4,000 units of it. Get there before its drain reaches you, because inside
   10,000 units you're stuck at warp 1 with no shields, a sitting duck for anyone else.
-- **Species 8472:** only plasma works (`f`, in a DD, CA or BB with 2 kills). When the
-  bioships gather around one of your planets, break them up before they finish charging.
+- **Species 8472:** only plasma works (`f`, in a DD, CA or BB with 2 kills). Their beams
+  reach about 6,600 units and can't stop plasma, so launch from just outside that range.
+  When the bioships gather around one of your planets, break them up before they finish
+  charging.
   If the Borg are also in the galaxy, let the two fight.
 - **Jem'Hadar:** watch for the wormhole warning. Shields don't help against their beams, so
   keep your distance and use torpedoes. Finish wounded fighters from range, or dodge

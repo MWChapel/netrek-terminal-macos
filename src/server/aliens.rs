@@ -1023,11 +1023,11 @@ fn species8472(world: &mut World, e: &mut Event, i: usize, n: usize, tick: u32) 
         }
     };
     if tick % 2 == 0 {
-        if let Some((t, d)) = nearest_enemy(world, i, 9000.0, None) {
+        if let Some((t, d)) = nearest_enemy(world, i, 7000.0, None) {
             let p = &world.players[i];
             let q = &world.players[t];
             let dir = dir_to(p.x, p.y, q.x, q.y);
-            if d < 8000.0 {
+            if d < 6000.0 {
                 cmd(world, i, ClientMsg::Phaser(dir as u8));
             }
         }

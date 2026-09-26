@@ -492,9 +492,9 @@ pub static SHIPS: [ShipStats; 18] = [
     ShipStats {
         name: "Bioship", abbr: "85", max_speed: 11, max_shield: 0.0, max_damage: 300.0,
         max_fuel: 1_000_000.0, max_armies: 0, torp_damage: 0.0, torp_speed: 10.0, torp_fuse: 30,
-        torp_cost: 0.0, phaser_damage: 150.0, phaser_cost: 0.0,
+        torp_cost: 0.0, phaser_damage: 110.0, phaser_cost: 0.0,
         plasma_damage: 0.0, plasma_speed: 0.0, plasma_fuse: 0, plasma_cost: 0.0,
-        recharge: 500.0, repair: 150.0, warp_cost: 0.0, cloak_cost: 0.0, shield_cost: 0.0,
+        recharge: 500.0, repair: 100.0, warp_cost: 0.0, cloak_cost: 0.0, shield_cost: 0.0,
         turns: 300_000.0, acc: 250, dec: 300, wpn_cool: 40.0, egn_cool: 50.0,
         max_etemp: 100_000.0, max_wtemp: 100_000.0, mass: 3000.0, tract_range: 1.0, tract_str: 3000.0,
     },

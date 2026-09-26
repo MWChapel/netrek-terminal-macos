@@ -696,8 +696,10 @@ impl World {
             }
             None => (x + vx * range, y + vy * range, false),
         };
-        // Phasers also shoot down enemy plasma along the beam.
-        for t in self.torps.iter_mut() {
+        // Phasers also shoot down enemy plasma along the beam. Bioships can't,
+        // or plasma (the only thing that hurts them) would never get through.
+        let intercepts = self.players[i].ship != ShipType::Bioship;
+        for t in self.torps.iter_mut().filter(|_| intercepts) {
             if t.kind == TorpKind::Plasma && t.team != team && t.explode == 0 {
                 let (dx, dy) = (t.x - x, t.y - y);
                 let along = dx * vx + dy * vy;
