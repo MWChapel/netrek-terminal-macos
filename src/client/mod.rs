@@ -196,7 +196,7 @@ pub struct App {
     /// Blocks mode: physical subpixels per cell (square, matching the cell shape).
     ss: (i32, i32),
     images: Vec<Image>,
-    sent: [Option<u64>; 3],
+    sent: [Option<u64>; 5],
     last_gal: Instant,
     tmux_hint: bool,
     sound: sound::Sound,
@@ -263,7 +263,7 @@ pub fn run(cfg: ClientConfig) -> io::Result<()> {
         cell_px: (8.0, 16.0),
         ss: (6, 12),
         images: Vec::new(),
-        sent: [None; 3],
+        sent: [None; 5],
         last_gal: Instant::now(),
         tmux_hint,
         sound: sound::Sound::new(!cfg_mute),
@@ -341,7 +341,7 @@ impl App {
                         Event::Resize(w, h) => {
                             screen.resize(w, h);
                             self.measure_cells();
-                            self.sent = [None; 3];
+                            self.sent = [None; 5];
                         }
                         _ => {}
                     }
@@ -357,7 +357,7 @@ impl App {
                 execute!(out, terminal::Clear(terminal::ClearType::All))?;
                 screen.resize(w, h);
                 self.measure_cells();
-                self.sent = [None; 3];
+                self.sent = [None; 5];
             }
             if dirty && last_draw.elapsed() >= Duration::from_millis(33) {
                 self.draw(&mut screen);
@@ -369,7 +369,7 @@ impl App {
                     let (w, h) = terminal::size()?;
                     execute!(out, terminal::Clear(terminal::ClearType::All))?;
                     screen.resize(w, h);
-                    self.sent = [None; 3];
+                    self.sent = [None; 5];
                     self.draw(&mut screen);
                 }
                 had_images = has_images;

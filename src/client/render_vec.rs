@@ -482,4 +482,145 @@ impl App {
         }
         c
     }
+
+    /// Text size and row height for the text-heavy panels.
+    fn panel_font(&self) -> (f32, f32) {
+        let fs = (self.cell_px.1 as f32 * 0.62).clamp(10.0, 16.0);
+        (fs, (fs * 1.55).max(fs + 4.0).round())
+    }
+
+    /// A small nose-up silhouette of a ship, for lists.
+    fn ship_icon(&self, c: &mut Canvas, x: f32, y: f32, r: f32, p: &PlayerInfo, col: Rgb) {
+        let fill = scale(col, 0.42);
+        let at = |q: (f32, f32)| (x + q.0 * r, y + q.1 * r);
+        for part in ship_parts(p.team, p.ship, p.faction) {
+            match part {
+                Part::Poly { pts, fill: filled } => {
+                    let pts: Vec<(f32, f32)> = pts.into_iter().map(at).collect();
+                    if filled {
+                        c.fill_poly(&pts, fill, 1.0);
+                    }
+                    c.polyline(&pts, true, 1.0, col, 1.0, 0.0);
+                }
+                Part::Hole { pts } => {
+                    let pts: Vec<(f32, f32)> = pts.into_iter().map(at).collect();
+                    c.fill_poly(&pts, [0.0, 0.0, 0.0], 1.0);
+                    c.polyline(&pts, true, 1.0, col, 1.0, 0.0);
+                }
+                Part::Circle { c: q, r: rr, fill: filled } => {
+                    let (cx, cy) = at(q);
+                    if filled {
+                        c.disc(cx, cy, rr * r, fill, 1.0);
+                    }
+                    c.ring(cx, cy, rr * r, 1.0, col, 1.0);
+                }
+                Part::Line { a, b } => {
+                    let (a, b) = (at(a), at(b));
+                    c.line(a.0, a.1, b.0, b.1, 1.0, col, 1.0, 0.0);
+                }
+            }
+        }
+    }
+
+    /// The message window: warning line, talk line, and the message log.
+    pub(super) fn draw_comms_vec(&self, pw: i32, ph: i32) -> Canvas {
+        let tr = &self.text;
+        let (fs, lh) = self.panel_font();
+        let mut c = Canvas::new(pw, ph, [0.0, 0.0, 0.0]);
+        let (w, h) = (pw as f32, ph as f32);
+        let pad = 6.0;
+        let base = |row: f32| pad + row * lh + lh * 0.7;
+        if let Some((text, col)) = self.warning_text() {
+            c.text(tr, pad, base(0.0), &text, fs, col);
+        }
+        let (line, col) = self.input_line_text();
+        c.text(tr, pad, base(1.0), &line, fs, col);
+        let sep = pad + 2.0 * lh + lh * 0.25;
+        c.line(pad, sep, w - pad, sep, 1.0, rgb(0x3a404c), 1.0, 0.0);
+        let my_team = self.me().map(|p| p.team).unwrap_or(Team::Ind);
+        let rows = (((h - sep - pad) / lh).floor() as usize).max(1);
+        let start = self.msgs.len().saturating_sub(rows);
+        let from_w = tr.width("MMMMMMMMM", fs);
+        for (k, m) in self.msgs.iter().skip(start).enumerate() {
+            let y = sep + lh * 0.2 + k as f32 * lh + lh * 0.7;
+            let col = match m.kind {
+                MsgKind::System if m.from == "ALERT" => rgb(0xff5cf0),
+                MsgKind::System => rgb(0xa0a6b0),
+                MsgKind::All => WHITE,
+                MsgKind::Team => team_rgb(my_team),
+                MsgKind::Indiv => rgb(0x5fd7ff),
+            };
+            c.text(tr, pad, y, &m.from, fs, if m.kind == MsgKind::System && m.from != "ALERT" { rgb(0x7a808a) } else { col });
+            c.text(tr, pad + from_w, y, &m.text, fs, col);
+        }
+        c
+    }
+
+    /// The player list, with a little silhouette of each ship.
+    pub(super) fn draw_players_vec(&self, pw: i32, ph: i32) -> Canvas {
+        let f = self.frame.as_ref().unwrap();
+        let tr = &self.text;
+        let (fs, lh) = self.panel_font();
+        let mut c = Canvas::new(pw, ph, [0.0, 0.0, 0.0]);
+        let (w, h) = (pw as f32, ph as f32);
+        let pad = 6.0;
+        let cw = tr.width("M", fs);
+        // Column positions.
+        let x_icon = pad + lh * 0.5;
+        let x_tag = pad + lh * 1.1;
+        let x_ty = x_tag + cw * 5.0;
+        let x_name = x_ty + cw * 3.5;
+        let x_kills = (x_name + cw * 18.0).min(w - cw * 14.0);
+        let x_arm = x_kills + cw * 4.0;
+        let x_status = x_arm + cw * 1.5;
+        let head = rgb(0xe8ecf2);
+        let yb = pad + lh * 0.7;
+        c.text(tr, x_tag, yb, "No", fs, head);
+        c.text(tr, x_ty, yb, "Ty", fs, head);
+        c.text(tr, x_name, yb, "Name", fs, head);
+        c.text_right(tr, x_kills, yb, "Kills", fs, head);
+        c.text_right(tr, x_arm, yb, "Arm", fs, head);
+        let line_y = pad + lh + 1.0;
+        c.line(pad, line_y, w - pad, line_y, 1.0, rgb(0x3a404c), 1.0, 0.0);
+
+        let mut ps: Vec<&PlayerInfo> = f.players.iter().filter(|p| p.state != PState::Outfit).collect();
+        ps.sort_by_key(|p| (p.faction.is_some(), p.team.idx(), p.id));
+        for (k, p) in ps.iter().enumerate() {
+            let top = line_y + 2.0 + k as f32 * lh;
+            if top + lh > h {
+                break;
+            }
+            let mid = top + lh * 0.5;
+            let y = top + lh * 0.7;
+            let alive = p.state == PState::Alive;
+            let base_col = player_rgb(p);
+            let col = if alive { base_col } else { rgb(0x5a606a) };
+            if p.id == self.slot {
+                c.round_rect(pad - 2.0, top, w - 2.0 * pad + 4.0, lh, 3.0, base_col, 0.14, None);
+            }
+            self.ship_icon(&mut c, x_icon, mid, lh * 0.4, p, col);
+            let name: String = p.name.chars().take(16).collect();
+            c.text(tr, x_tag, y, &callsign(p), fs, col);
+            c.text(tr, x_ty, y, p.ship.stats().abbr, fs, col);
+            c.text(tr, x_name, y, &name, fs, if p.id == self.slot { mix(col, WHITE, 0.4) } else { col });
+            c.text_right(tr, x_kills, y, &format!("{:.2}", p.kills), fs, col);
+            if p.armies > 0 {
+                c.text_right(tr, x_arm, y, &p.armies.to_string(), fs, col);
+            }
+            let status = if !alive {
+                "dead"
+            } else if p.faction.is_some() {
+                "alien"
+            } else if p.flags & pf::ROBOT != 0 {
+                "robot"
+            } else {
+                ""
+            };
+            if x_status + cw * 5.0 < w {
+                c.text(tr, x_status, y, status, fs * 0.9, scale(col, 0.75));
+            }
+        }
+        c
+    }
 }
+

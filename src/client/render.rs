@@ -149,7 +149,7 @@ impl App {
         use super::Gfx;
         let (w, h) = (scr.w as i32, scr.h as i32);
         let (cw, ch) = self.cell_px;
-        let bottom_min = 7;
+        let bottom_min = 9;
         let max_h = ((h - bottom_min - 2).max(6)) as f64 * ch;
         let full = max_h.min(((w - 4) / 2) as f64 * cw);
         // Prefer keeping a player-list column if the maps shrink only a little.
@@ -219,7 +219,7 @@ impl App {
             }
             scr.masks.push((gal.x, gal.y, gal.w, gal.h));
         } else {
-            self.sent = [None; 3];
+            self.sent = [None; 5];
             if self.gfx == Gfx::Braille {
                 self.draw_tactical(scr, tac, center, upd);
                 self.draw_galactic(scr, gal, center, vw, vh);
@@ -251,7 +251,14 @@ impl App {
             list_top = by + 5;
         }
         if !side_col && by + bh - 1 - list_top > 1 {
-            self.draw_player_list(scr, Rect { x: 1, y: list_top, w: sc, h: by + bh - 1 - list_top }, true);
+            let lh = by + bh - 1 - list_top;
+            if vector {
+                let img = self.draw_players_vec((sc as f64 * cw) as i32, (lh as f64 * ch) as i32);
+                self.images.push(super::Image { x: 1, y: list_top, slot: 4, data: super::sixel::encode_canvas(&img) });
+                scr.masks.push((1, list_top, sc, lh));
+            } else {
+                self.draw_player_list(scr, Rect { x: 1, y: list_top, w: sc, h: lh }, true);
+            }
         }
 
         // Bottom right: warning line, talk line, message log.
@@ -259,6 +266,19 @@ impl App {
         scr.frame(gx, by, right_end - gx, bh, "", Color::White);
         let rx = gx + 1;
         let rw = right_end - gx - 2;
+        if vector {
+            let img = self.draw_comms_vec((rw as f64 * cw) as i32, ((bh - 2) as f64 * ch) as i32);
+            self.images.push(super::Image { x: rx, y: by + 1, slot: 3, data: super::sixel::encode_canvas(&img) });
+            scr.masks.push((rx, by + 1, rw, bh - 2));
+            if side_col {
+                scr.frame(maps_right, 0, w - maps_right, h, "", Color::White);
+                let (lw, lh) = (w - maps_right - 2, h - 2);
+                let img = self.draw_players_vec((lw as f64 * cw) as i32, (lh as f64 * ch) as i32);
+                self.images.push(super::Image { x: maps_right + 1, y: 1, slot: 4, data: super::sixel::encode_canvas(&img) });
+                scr.masks.push((maps_right + 1, 1, lw, lh));
+            }
+            return;
+        }
         if let Some((text, t)) = &self.warning {
             if t.elapsed() < Duration::from_secs(if self.tmux_hint { 12 } else { 5 }) {
                 scr.text_clip(rx, by + 1, text, Color::Yellow, true, rx + rw - 1);
@@ -689,6 +709,34 @@ impl App {
             };
             let line = format!("{:<8} {}", m.from, m.text);
             scr.text_clip(r.x, r.y + k as i32, &line, col, m.kind != MsgKind::System || m.from == "ALERT", r.x + r.w - 1);
+        }
+    }
+
+    /// The current warning, if it hasn't timed out.
+    pub(super) fn warning_text(&self) -> Option<(String, [f32; 3])> {
+        let (text, t) = self.warning.as_ref()?;
+        let secs = if self.tmux_hint { 12 } else { 5 };
+        (t.elapsed() < Duration::from_secs(secs)).then(|| (text.clone(), [255.0, 220.0, 80.0]))
+    }
+
+    /// The talk/typing line in game, as text and colour (for vector mode).
+    pub(super) fn input_line_text(&self) -> (String, [f32; 3]) {
+        let (yellow, white, red) = ([255.0, 220.0, 80.0], [255.0, 255.0, 255.0], [240.0, 90.0, 80.0]);
+        match &self.mode {
+            Mode::Compose { target: None, .. } => {
+                ("Send to: [A]ll [T]eam [F/R/K/O] a team [0-9a-v] a player (Esc cancels)".into(), yellow)
+            }
+            Mode::Compose { target: Some(t), text } => {
+                let to = match t {
+                    MsgTarget::All => "ALL".to_string(),
+                    MsgTarget::Team(t) => t.abbr().to_string(),
+                    MsgTarget::Player(p) => format!("player {}", slot_char(*p)),
+                };
+                (format!("To {}> {}\u{2588}", to, text), white)
+            }
+            Mode::Refit => ("Refit to: [s]cout [d]estroyer [c]ruiser [b]attleship [a]ssault [x] starbase".into(), yellow),
+            Mode::ConfirmQuit => ("Really quit Netrek? (y/n)".into(), red),
+            Mode::Play => ("Talk to everyone: press m, then A and type. Press ? for help.".into(), red),
         }
     }
 
