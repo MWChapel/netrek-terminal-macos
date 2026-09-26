@@ -4,7 +4,7 @@
 
 use super::pixels::{mix, rgb, scale, Rgb};
 use super::vg::Canvas;
-use super::render_px::{callsign, planet_rgb, player_rgb, ship_size_units, team_rgb, torp_rgb};
+use super::render_px::{callsign, faction_rgb, planet_rgb, player_rgb, ship_size_units, team_rgb, torp_rgb, LOOT};
 use super::shipart::{engine_points, ship_parts, Part};
 use super::App;
 use crate::consts::*;
@@ -14,6 +14,70 @@ use std::f32::consts::TAU;
 const WHITE: Rgb = [255.0, 255.0, 255.0];
 const GREY: Rgb = rgb(0x8a8f99);
 const DARK_GREY: Rgb = rgb(0x50545c);
+
+/// A phaser beam: a white-hot core in a coloured halo with a shimmer wound
+/// around it, a muzzle flash, energy pulses racing down the beam, and a
+/// flare of sparks where it hits. It flashes on its first frame, then
+/// narrows and fades over its life (`age` counts frames, about six).
+fn draw_phaser(px: &mut Canvas, a: (f32, f32), b: (f32, f32), col: Rgb, hit: bool, age: u8, k: f32, seed: u64) {
+    let t = (age as f32 / 5.0).min(1.0);
+    let fade = 1.0 - t * 0.85;
+    let flash = if age == 0 { 1.0 } else { 0.0 };
+    let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+    let len = (dx * dx + dy * dy).sqrt().max(1.0);
+    let (nx, ny) = (-dy / len, dx / len);
+    let halo = mix(col, WHITE, 0.15);
+    let w = k * (1.0 - t * 0.6);
+
+    // Halo, glow and core.
+    px.line(a.0, a.1, b.0, b.1, 12.0 * w, halo, 0.14 * fade + 0.12 * flash, 0.0);
+    px.line(a.0, a.1, b.0, b.1, 5.0 * w, halo, 0.40 * fade, 0.0);
+    px.line(a.0, a.1, b.0, b.1, 2.0 * w, mix(col, WHITE, 0.6), 0.8 * fade, 0.0);
+    px.line(a.0, a.1, b.0, b.1, 0.9 * k, WHITE, fade, 0.0);
+
+    // A shimmering wave wound around the core, shifting every frame.
+    let waves = (len / (12.0 * k)).max(2.0) as usize;
+    let steps = waves * 10;
+    let pts: Vec<(f32, f32)> = (0..=steps)
+        .map(|i| {
+            let s = i as f32 / steps as f32;
+            let taper = (s * std::f32::consts::PI).sin().max(0.25);
+            let off = 3.2 * w * taper * (s * waves as f32 * TAU + age as f32 * 1.9).sin();
+            (a.0 + dx * s + nx * off, a.1 + dy * s + ny * off)
+        })
+        .collect();
+    px.polyline(&pts, false, 1.0 * k, mix(col, WHITE, 0.4), 0.75 * fade, 0.0);
+
+    // Energy pulses racing from the emitter to the target.
+    for j in 0..3 {
+        let s = (age as f32 * 0.31 + j as f32 / 3.0).fract();
+        px.glow(a.0 + dx * s, a.1 + dy * s, 5.0 * k, WHITE, 0.55 * fade);
+    }
+
+    // Muzzle flash.
+    px.glow(a.0, a.1, (9.0 + 9.0 * flash) * k, mix(col, WHITE, 0.5), 0.7 * fade);
+
+    if hit {
+        // Impact flare, a shock ring, and sparks flying outward.
+        let r = (8.0 + 10.0 * t + 8.0 * flash) * k;
+        px.glow(b.0, b.1, r * 1.7, mix(col, WHITE, 0.3), 0.75 * fade);
+        px.glow(b.0, b.1, r * 0.6, WHITE, 0.95 * fade);
+        px.ring(b.0, b.1, r * (0.5 + t), k, mix(col, WHITE, 0.5), 0.7 * (1.0 - t));
+        let mut h = seed | 1;
+        for _ in 0..9 {
+            h = h.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            let ang = (h >> 33) as f32 / (1u64 << 31) as f32 * TAU;
+            let spd = 0.5 + ((h >> 13) & 0xff) as f32 / 255.0;
+            let r0 = r * 0.3 + age as f32 * 4.5 * k * spd;
+            let r1 = r0 + 5.0 * k * spd * (1.0 - t * 0.5);
+            let (c, s) = (ang.cos(), ang.sin());
+            px.line(b.0 + c * r0, b.1 + s * r0, b.0 + c * r1, b.1 + s * r1, k, mix(col, WHITE, 0.7), 0.9 * fade, 0.0);
+        }
+    } else {
+        // A miss dissipates into space.
+        px.glow(b.0, b.1, 7.0 * k, halo, 0.4 * fade);
+    }
+}
 
 fn hash(x: i64, y: i64) -> u64 {
     let mut h = (x as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ (y as u64).wrapping_mul(0xC2B2_AE3D_27D4_EB4F);
@@ -89,6 +153,10 @@ impl App {
                         tags.push(ch);
                     }
                 }
+                if info.tribbles {
+                    tags.push('T');
+                    px.ring_dashed(x, y, pr + 4.0, 1.5, faction_rgb(Faction::Tribbles), 0.9, 3.0);
+                }
                 px.text_centered(tr, x, y + fs * 0.35, &info.armies.to_string(), fs * 0.9, col);
                 if !tags.is_empty() && pr > fs {
                     px.text_centered(tr, x, y + fs * 1.2, &tags, fs * 0.7, scale(col, 0.8));
@@ -106,6 +174,16 @@ impl App {
             px.line(a.0, a.1, b.0, b.1, 1.0, rgb(0xffd090), 0.9, 0.0);
         }
 
+        // Armies spilled from Ferengi wrecks.
+        for l in &f.loot {
+            let (x, y) = to(l.x as f64, l.y as f64);
+            let r = u(300.0).clamp(3.0, 14.0);
+            px.glow(x, y, r * 2.5, LOOT, 0.4);
+            px.disc(x, y, r, scale(LOOT, 0.35), 1.0);
+            px.ring(x, y, r, 1.3, LOOT, 1.0);
+            px.text_centered(tr, x, y + fs * 0.35, &l.armies.to_string(), fs * 0.9, LOOT);
+        }
+
         // Tractor / pressor beams.
         for p in f.players.iter().filter(|p| p.state == PState::Alive) {
             if let Some(t) = p.tractor_target.and_then(|t| f.players.iter().find(|q| q.id == t)) {
@@ -116,14 +194,14 @@ impl App {
         }
 
         // Phasers.
+        let k = (fs / 13.0).clamp(0.8, 2.2);
         for ph in &f.phasers {
             let owner = f.players.iter().find(|p| p.id == ph.owner);
-            let col = if ph.owner == self.slot { WHITE } else { owner.map_or(WHITE, |p| mix(player_rgb(p), WHITE, 0.3)) };
+            let col = owner.map_or(WHITE, player_rgb);
             let (a, b) = (to(ph.x1 as f64, ph.y1 as f64), to(ph.x2 as f64, ph.y2 as f64));
-            px.line(a.0, a.1, b.0, b.1, 1.0, col, if ph.hit { 1.0 } else { 0.7 }, if ph.hit { 0.0 } else { 2.0 });
-            if ph.hit {
-                px.ring(b.0, b.1, 3.0, 1.0, col, 0.9);
-            }
+            let age = self.phaser_age.get(&super::phaser_key(ph)).copied().unwrap_or(0);
+            let seed = hash(ph.x2 as i64 ^ ph.owner as i64, ph.y2 as i64);
+            draw_phaser(&mut px, a, b, col, ph.hit, age, k, seed);
         }
 
         // Torpedoes.
@@ -369,7 +447,7 @@ impl App {
         let label_col = rgb(0xa0a8b8);
 
         // Row 1: status lamps, lit when active.
-        let lamps: [(&str, bool, Rgb); 10] = [
+        let lamps: [(&str, bool, Rgb); 12] = [
             ("SHLD", me.flags & pf::SHIELD != 0, rgb(0x40a0ff)),
             ("CLOAK", me.flags & pf::CLOAK != 0, rgb(0xc070ff)),
             ("REPAIR", me.flags & pf::REPAIR != 0, green),
@@ -380,6 +458,8 @@ impl App {
             ("TRAC", me.flags & pf::TRACTOR != 0, green),
             ("PRES", me.flags & pf::PRESSOR != 0, rgb(0xd070ff)),
             ("LOCK", mi.lock.is_some(), WHITE),
+            ("PREY", me.flags & pf::HUNTED != 0, red),
+            ("TRIB", me.flags & pf::TRIBBLES != 0, faction_rgb(Faction::Tribbles)),
         ];
         let lfs = fs * 0.78;
         let mut x = pad;
@@ -624,3 +704,29 @@ impl App {
     }
 }
 
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Renders a phaser hit and a miss at every age of their animation into
+    /// $TMPDIR/netrek-phasers.ppm for eyeballing.
+    #[test]
+    fn phaser_gallery() {
+        let (cw, ch) = (260.0f32, 70.0f32);
+        let mut c = Canvas::new((cw * 2.0) as i32, (ch * 6.0) as i32, [0.0, 0.0, 0.0]);
+        for age in 0..6u8 {
+            let y = age as f32 * ch + ch / 2.0;
+            draw_phaser(&mut c, (20.0, y), (cw - 30.0, y - 12.0), rgb(0xf2c94c), true, age, 1.2, 7);
+            draw_phaser(&mut c, (cw + 20.0, y), (2.0 * cw - 30.0, y + 12.0), rgb(0xff5a4f), false, age, 1.2, 9);
+        }
+        let mut out = format!("P6 {} {} 255\n", c.w, c.h).into_bytes();
+        for y in 0..c.h {
+            for x in 0..c.w {
+                let p = c.get(x, y);
+                out.extend([p[0] as u8, p[1] as u8, p[2] as u8]);
+            }
+        }
+        std::fs::write(std::env::temp_dir().join("netrek-phasers.ppm"), out).unwrap();
+    }
+}

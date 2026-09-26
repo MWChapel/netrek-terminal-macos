@@ -36,7 +36,17 @@ fn ship_shape(s: ShipType) -> &'static [(f64, f64)] {
         ],
         ShipType::BorgCube => &[(-0.75, -0.75), (0.75, -0.75), (0.75, 0.75), (-0.75, 0.75)],
         ShipType::PlanetKiller => &[(-0.5, -1.0), (0.5, -1.0), (0.26, 1.0), (-0.26, 1.0)],
-        ShipType::TholianVessel | ShipType::Bioship | ShipType::JemHadarFighter => &[(0.0, -1.0), (0.55, 0.8), (0.0, 0.45), (-0.55, 0.8)],
+        ShipType::TholianVessel
+        | ShipType::Bioship
+        | ShipType::JemHadarFighter
+        | ShipType::HirogenHunter
+        | ShipType::QChampion
+        | ShipType::SwarmShip => &[(0.0, -1.0), (0.55, 0.8), (0.0, 0.45), (-0.55, 0.8)],
+        ShipType::BirdOfPrey => &[
+            (0.0, -1.0), (0.25, -0.2), (1.0, 0.45), (0.9, 0.7), (0.2, 0.5), (0.0, 0.75), (-0.2, 0.5), (-0.9, 0.7), (-1.0, 0.45), (-0.25, -0.2),
+        ],
+        ShipType::QEntity => &[(0.0, -1.0), (0.25, -0.25), (1.0, 0.0), (0.25, 0.25), (0.0, 1.0), (-0.25, 0.25), (-1.0, 0.0), (-0.25, -0.25)],
+        ShipType::FerengiMarauder => &[(0.0, -0.3), (0.55, -0.9), (0.95, 0.0), (0.5, 0.85), (-0.5, 0.85), (-0.95, 0.0), (-0.55, -0.9)],
         ShipType::WhaleProbe => &[(-0.28, -1.0), (0.28, -1.0), (0.28, 1.0), (-0.28, 1.0)],
         ShipType::Augment | ShipType::GornRaider => &[
             (0.0, -1.0), (0.6, -0.55), (0.25, 0.0), (0.8, 0.95), (0.3, 0.6), (-0.3, 0.6), (-0.8, 0.95), (-0.25, 0.0), (-0.6, -0.55),
@@ -374,6 +384,9 @@ impl App {
                 if info.flags & PL_AGRI != 0 {
                     tag.push('A');
                 }
+                if info.tribbles {
+                    tag.push('T');
+                }
                 labels.push((lx - tag.len() as i32 / 2, ly + 1, tag, DIM, false));
             }
         }
@@ -383,6 +396,13 @@ impl App {
             let (ax, ay) = to_dot(w.x1 as f64, w.y1 as f64);
             let (bx, by) = to_dot(w.x2 as f64, w.y2 as f64);
             b.line(ax, ay, bx, by, Color::DarkYellow, 3);
+        }
+
+        // Armies spilled from Ferengi wrecks.
+        for l in &f.loot {
+            let (lx, ly) = to_dot(l.x as f64, l.y as f64);
+            b.circle(lx, ly, 2.0, Color::Yellow, 3);
+            labels.push(((lx / 2.0) as i32 + 1, (ly / 4.0) as i32, format!("+{}", l.armies), Color::Yellow, true));
         }
 
         // Phasers.
@@ -613,6 +633,8 @@ impl App {
             (pf::BEAMDOWN, "BEAM-DOWN"),
             (pf::TRACTOR, "TRACTOR"),
             (pf::PRESSOR, "PRESSOR"),
+            (pf::HUNTED, "HUNTED"),
+            (pf::TRIBBLES, "TRIBBLES"),
         ] {
             if me.flags & flag != 0 {
                 line += "  ";

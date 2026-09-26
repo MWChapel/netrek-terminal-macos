@@ -41,6 +41,12 @@ pub fn faction_rgb(f: Faction) -> Rgb {
         Faction::Probe => rgb(0xb8a888),
         Faction::Species8472 => rgb(0xff7fa0),
         Faction::JemHadar => rgb(0xa070ff),
+        Faction::Tribbles => rgb(0xe8c89a),
+        Faction::Chang => rgb(0xc8504a),
+        Faction::Hirogen => rgb(0x8aa0a8),
+        Faction::Q => rgb(0xfffbe0),
+        Faction::Ferengi => rgb(0xc8843c),
+        Faction::Swarm => rgb(0xe0ff70),
     }
 }
 
@@ -83,6 +89,7 @@ pub fn ship_size_units(s: ShipType) -> f64 {
 }
 
 const WEB: Rgb = rgb(0xffb050);
+pub const LOOT: Rgb = rgb(0xffd84a);
 
 fn hash(x: i64, y: i64) -> u64 {
     let mut h = (x as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ (y as u64).wrapping_mul(0xC2B2_AE3D_27D4_EB4F);
@@ -243,6 +250,9 @@ impl App {
                         tag.push(ch);
                     }
                 }
+                if info.tribbles {
+                    tag.push('T');
+                }
                 planet_labels.push((cx - tag.len() as i32 / 2, cy + 1, tag, to_color(rgb(0x8a90a0), tc), false));
             }
         }
@@ -252,6 +262,14 @@ impl App {
             let (a, b) = (to(w.x1 as f64, w.y1 as f64), to(w.x2 as f64, w.y2 as f64));
             px.line(a.0, a.1, b.0, b.1, 1.2, WEB, 0.25, 0.0);
             px.line(a.0, a.1, b.0, b.1, 0.5, mix(WEB, WHITE, 0.3), 0.9, 0.0);
+        }
+
+        // Armies spilled from Ferengi wrecks.
+        for l in &f.loot {
+            let (x, y) = to(l.x as f64, l.y as f64);
+            px.glow(x, y, 4.0, LOOT, 0.5);
+            px.disc(x, y, 1.2, LOOT, 1.0);
+            planet_labels.push(((x / 2.0) as i32 + 1, (y as f64 / lpy) as i32, format!("+{}", l.armies), to_color(LOOT, tc), true));
         }
 
         // Tractor / pressor beams.

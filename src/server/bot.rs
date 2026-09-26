@@ -112,6 +112,8 @@ impl Bot {
             .players
             .iter()
             .filter(|q| q.alive() && q.team != team && !q.cloaked)
+            // Don't waste fire on Q, or on a champion only another empire can hurt.
+            .filter(|q| q.ship != ShipType::QEntity && q.only_hurt_by.map_or(true, |t| t == team))
             .map(|q| (q, dist(x, y, q.x, q.y)))
             .min_by(|a, b| a.1.total_cmp(&b.1))
             .map(|(q, d)| (q.id, q.x, q.y, q.dir, q.speed, d));

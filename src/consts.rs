@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 pub const DEFAULT_PORT: u16 = 2592; // the traditional Netrek port
-pub const PROTOCOL_VERSION: u32 = 3;
+pub const PROTOCOL_VERSION: u32 = 4;
 
 pub const UPS: u64 = 10; // server updates per second, like the original
 pub const GWIDTH: f64 = 100_000.0;
@@ -127,10 +127,16 @@ pub enum Faction {
     Probe,
     Species8472,
     JemHadar,
+    Tribbles,
+    Chang,
+    Hirogen,
+    Q,
+    Ferengi,
+    Swarm,
 }
 
 impl Faction {
-    pub const ALL: [Faction; 13] = [
+    pub const ALL: [Faction; 19] = [
         Faction::Khan,
         Faction::Gorn,
         Faction::Tholian,
@@ -144,6 +150,12 @@ impl Faction {
         Faction::Probe,
         Faction::Species8472,
         Faction::JemHadar,
+        Faction::Tribbles,
+        Faction::Chang,
+        Faction::Hirogen,
+        Faction::Q,
+        Faction::Ferengi,
+        Faction::Swarm,
     ];
 
     /// Name used on the command line.
@@ -162,6 +174,12 @@ impl Faction {
             Faction::Probe => "probe",
             Faction::Species8472 => "8472",
             Faction::JemHadar => "jemhadar",
+            Faction::Tribbles => "tribbles",
+            Faction::Chang => "chang",
+            Faction::Hirogen => "hirogen",
+            Faction::Q => "q",
+            Faction::Ferengi => "ferengi",
+            Faction::Swarm => "swarm",
         }
     }
 
@@ -180,6 +198,12 @@ impl Faction {
             Faction::Probe => "the whale probe",
             Faction::Species8472 => "Species 8472",
             Faction::JemHadar => "the Jem'Hadar",
+            Faction::Tribbles => "the tribbles",
+            Faction::Chang => "General Chang",
+            Faction::Hirogen => "the Hirogen",
+            Faction::Q => "Q",
+            Faction::Ferengi => "the Ferengi",
+            Faction::Swarm => "the Swarm",
         }
     }
 
@@ -199,6 +223,12 @@ impl Faction {
             Faction::Probe => "Probe",
             Faction::Species8472 => "8472",
             Faction::JemHadar => "Jem'Hadar",
+            Faction::Tribbles => "Tribbles",
+            Faction::Chang => "Chang",
+            Faction::Hirogen => "Hirogen",
+            Faction::Q => "Q",
+            Faction::Ferengi => "Ferengi",
+            Faction::Swarm => "Swarm",
         }
     }
 
@@ -218,6 +248,12 @@ impl Faction {
             Faction::Probe => "WP",
             Faction::Species8472 => "85",
             Faction::JemHadar => "JH",
+            Faction::Tribbles => "TB",
+            Faction::Chang => "CH",
+            Faction::Hirogen => "HG",
+            Faction::Q => "QQ",
+            Faction::Ferengi => "FE",
+            Faction::Swarm => "SW",
         }
     }
 
@@ -253,6 +289,12 @@ pub enum ShipType {
     WhaleProbe,
     Bioship,
     JemHadarFighter,
+    BirdOfPrey,
+    HirogenHunter,
+    QEntity,
+    QChampion,
+    FerengiMarauder,
+    SwarmShip,
 }
 
 impl ShipType {
@@ -299,6 +341,7 @@ impl ShipType {
             ShipType::VgerCloud => 1200.0,
             ShipType::CrystalEntity => 1500.0,
             ShipType::WhaleProbe => 1200.0,
+            ShipType::QEntity => 600.0,
             _ => EXPDIST,
         }
     }
@@ -343,7 +386,7 @@ pub struct ShipStats {
     pub tract_str: f64,
 }
 
-pub static SHIPS: [ShipStats; 18] = [
+pub static SHIPS: [ShipStats; 24] = [
     ShipStats {
         name: "Scout", abbr: "SC", max_speed: 12, max_shield: 75.0, max_damage: 75.0,
         max_fuel: 5000.0, max_armies: 2, torp_damage: 25.0, torp_speed: 16.0, torp_fuse: 16,
@@ -506,6 +549,60 @@ pub static SHIPS: [ShipStats; 18] = [
         recharge: 20.0, repair: 60.0, warp_cost: 2.0, cloak_cost: 20.0, shield_cost: 2.0,
         turns: 420_000.0, acc: 250, dec: 300, wpn_cool: 4.0, egn_cool: 12.0,
         max_etemp: 2000.0, max_wtemp: 1400.0, mass: 1400.0, tract_range: 0.7, tract_str: 2000.0,
+    },
+    ShipStats {
+        name: "Bird-of-Prey", abbr: "CH", max_speed: 9, max_shield: 80.0, max_damage: 110.0,
+        max_fuel: 20000.0, max_armies: 0, torp_damage: 40.0, torp_speed: 12.0, torp_fuse: 35,
+        torp_cost: 4.0 * 40.0, phaser_damage: 70.0, phaser_cost: 4.0 * 70.0,
+        plasma_damage: 0.0, plasma_speed: 0.0, plasma_fuse: 0, plasma_cost: 0.0,
+        recharge: 20.0, repair: 90.0, warp_cost: 2.0, cloak_cost: 0.0, shield_cost: 2.0,
+        turns: 250_000.0, acc: 200, dec: 300, wpn_cool: 4.0, egn_cool: 12.0,
+        max_etemp: 2000.0, max_wtemp: 1400.0, mass: 1500.0, tract_range: 0.7, tract_str: 2000.0,
+    },
+    ShipStats {
+        name: "Hirogen hunter", abbr: "HG", max_speed: 10, max_shield: 110.0, max_damage: 130.0,
+        max_fuel: 20000.0, max_armies: 0, torp_damage: 35.0, torp_speed: 13.0, torp_fuse: 35,
+        torp_cost: 4.0 * 35.0, phaser_damage: 95.0, phaser_cost: 4.0 * 95.0,
+        plasma_damage: 0.0, plasma_speed: 0.0, plasma_fuse: 0, plasma_cost: 0.0,
+        recharge: 20.0, repair: 80.0, warp_cost: 2.0, cloak_cost: 20.0, shield_cost: 2.0,
+        turns: 250_000.0, acc: 200, dec: 300, wpn_cool: 4.0, egn_cool: 12.0,
+        max_etemp: 2000.0, max_wtemp: 1400.0, mass: 1500.0, tract_range: 0.7, tract_str: 2000.0,
+    },
+    ShipStats {
+        name: "Q", abbr: "QQ", max_speed: 4, max_shield: 100_000.0, max_damage: 100_000.0,
+        max_fuel: 1_000_000.0, max_armies: 0, torp_damage: 0.0, torp_speed: 10.0, torp_fuse: 30,
+        torp_cost: 0.0, phaser_damage: 0.0, phaser_cost: 0.0,
+        plasma_damage: 0.0, plasma_speed: 0.0, plasma_fuse: 0, plasma_cost: 0.0,
+        recharge: 500.0, repair: 10_000.0, warp_cost: 0.0, cloak_cost: 0.0, shield_cost: 0.0,
+        turns: 400_000.0, acc: 300, dec: 300, wpn_cool: 50.0, egn_cool: 50.0,
+        max_etemp: 100_000.0, max_wtemp: 100_000.0, mass: 200_000.0, tract_range: 1.0, tract_str: 1.0,
+    },
+    ShipStats {
+        name: "Q's champion", abbr: "QC", max_speed: 9, max_shield: 200.0, max_damage: 250.0,
+        max_fuel: 30000.0, max_armies: 0, torp_damage: 50.0, torp_speed: 13.0, torp_fuse: 35,
+        torp_cost: 3.0 * 50.0, phaser_damage: 110.0, phaser_cost: 3.0 * 110.0,
+        plasma_damage: 0.0, plasma_speed: 0.0, plasma_fuse: 0, plasma_cost: 0.0,
+        recharge: 30.0, repair: 60.0, warp_cost: 2.0, cloak_cost: 20.0, shield_cost: 2.0,
+        turns: 200_000.0, acc: 200, dec: 300, wpn_cool: 5.0, egn_cool: 12.0,
+        max_etemp: 3000.0, max_wtemp: 2000.0, mass: 3000.0, tract_range: 1.0, tract_str: 3000.0,
+    },
+    ShipStats {
+        name: "Ferengi marauder", abbr: "FE", max_speed: 10, max_shield: 90.0, max_damage: 110.0,
+        max_fuel: 20000.0, max_armies: 6, torp_damage: 25.0, torp_speed: 12.0, torp_fuse: 30,
+        torp_cost: 4.0 * 25.0, phaser_damage: 70.0, phaser_cost: 4.0 * 70.0,
+        plasma_damage: 0.0, plasma_speed: 0.0, plasma_fuse: 0, plasma_cost: 0.0,
+        recharge: 20.0, repair: 80.0, warp_cost: 2.0, cloak_cost: 20.0, shield_cost: 2.0,
+        turns: 250_000.0, acc: 250, dec: 300, wpn_cool: 4.0, egn_cool: 12.0,
+        max_etemp: 2000.0, max_wtemp: 1400.0, mass: 1600.0, tract_range: 0.7, tract_str: 1500.0,
+    },
+    ShipStats {
+        name: "Swarm ship", abbr: "SW", max_speed: 12, max_shield: 0.0, max_damage: 20.0,
+        max_fuel: 1_000_000.0, max_armies: 0, torp_damage: 0.0, torp_speed: 10.0, torp_fuse: 30,
+        torp_cost: 0.0, phaser_damage: 0.0, phaser_cost: 0.0,
+        plasma_damage: 0.0, plasma_speed: 0.0, plasma_fuse: 0, plasma_cost: 0.0,
+        recharge: 500.0, repair: 0.0, warp_cost: 0.0, cloak_cost: 0.0, shield_cost: 0.0,
+        turns: 600_000.0, acc: 400, dec: 400, wpn_cool: 50.0, egn_cool: 50.0,
+        max_etemp: 100_000.0, max_wtemp: 100_000.0, mass: 300.0, tract_range: 1.0, tract_str: 1.0,
     },
 ];
 

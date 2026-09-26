@@ -353,6 +353,51 @@ fn alien(f: Faction, ship: ShipType) -> Vec<Part> {
             v.extend(pair(|s| line((s * 0.3, -0.65), (s * 0.18, -1.0))));
             v.push(Circle { c: (0.0, -0.2), r: 0.14, fill: false });
         }
+        Faction::Tribbles => {
+            // Never flown, but just in case: a fuzzy ball.
+            v.push(Poly {
+                pts: (0..24).map(|k| { let a = k as f32 / 24.0 * TAU; let r = if k % 2 == 0 { 0.8 } else { 0.65 }; (a.cos() * r, a.sin() * r) }).collect(),
+                fill: true,
+            });
+        }
+        Faction::Chang => {
+            // Klingon Bird-of-Prey: a head on a long neck, wings swept down.
+            v.push(circle((0.0, -0.78), 0.18));
+            v.push(capsule((0.0, -0.62), (0.0, 0.15), 0.14));
+            v.push(sym(&[(0.0, -0.05), (0.35, 0.05), (1.0, 0.5), (0.95, 0.72), (0.3, 0.52), (0.0, 0.7)]));
+            v.extend(pair(|s| line((s * 0.95, 0.5), (s * 0.95, 0.15))));
+        }
+        Faction::Hirogen => {
+            // Long predatory arrowhead with a spine and rear fins.
+            v.push(sym(&[(0.0, -1.0), (0.2, -0.45), (0.45, 0.55), (0.3, 0.95), (0.0, 0.75)]));
+            v.push(line((0.0, -0.7), (0.0, 0.6)));
+            v.extend(pair(|s| line((s * 0.3, 0.3), (s * 0.75, 0.95))));
+        }
+        Faction::Q if ship == ShipType::QChampion => {
+            // Q's champion: a dark, angular warship with a glowing core.
+            v.push(sym(&[(0.0, -1.0), (0.35, -0.25), (0.9, 0.15), (0.6, 0.9), (0.0, 0.6)]));
+            v.push(Circle { c: (0.0, 0.05), r: 0.2, fill: false });
+            v.extend(pair(|s| line((s * 0.35, -0.25), (s * 0.55, 0.55))));
+        }
+        Faction::Q => {
+            // A flash of light.
+            v.push(Poly {
+                pts: (0..16).map(|k| { let a = k as f32 / 16.0 * TAU; let r = if k % 2 == 0 { 1.0 } else { 0.3 }; (a.cos() * r, a.sin() * r) }).collect(),
+                fill: true,
+            });
+            v.push(Circle { c: (0.0, 0.0), r: 0.45, fill: false });
+        }
+        Faction::Ferengi => {
+            // D'Kora marauder: a horseshoe with its prongs forward.
+            let mut pts: Vec<(f32, f32)> = (0..=12).map(|k| { let a = (-25.0 + k as f32 * 230.0 / 12.0).to_radians(); (a.cos() * 0.95, a.sin() * 0.95) }).collect();
+            pts.extend((0..=12).rev().map(|k| { let a = (-25.0 + k as f32 * 230.0 / 12.0).to_radians(); (a.cos() * 0.5, a.sin() * 0.5) }));
+            v.push(Poly { pts, fill: true });
+            v.push(circle((0.0, 0.05), 0.22));
+        }
+        Faction::Swarm => {
+            // A tiny dart.
+            v.push(sym(&[(0.0, -1.0), (0.6, 0.8), (0.0, 0.4)]));
+        }
     }
     v
 }
@@ -365,6 +410,9 @@ pub fn engine_points(team: Team, ship: ShipType, faction: Option<Faction>) -> Ve
         Some(Faction::Gorn) => return vec![(0.6, 0.9), (-0.6, 0.9)],
         Some(Faction::Tholian) => return vec![(0.0, 0.55)],
         Some(Faction::JemHadar) => return vec![(0.45, 0.85), (-0.45, 0.85)],
+        Some(Faction::Chang) => return vec![(0.0, 0.75)],
+        Some(Faction::Hirogen) => return vec![(0.3, 0.95), (-0.3, 0.95)],
+        Some(Faction::Ferengi) => return vec![(0.0, 0.3)],
         Some(_) => return vec![],
         None => {}
     }
@@ -393,7 +441,7 @@ mod tests {
     #[test]
     fn gallery() {
         let (cell, r) = (120.0f32, 44.0f32);
-        let mut c = Canvas::new(8 * cell as i32, 6 * cell as i32, [0.0, 0.0, 0.0]);
+        let mut c = Canvas::new(8 * cell as i32, 8 * cell as i32, [0.0, 0.0, 0.0]);
         let mut rows: Vec<Vec<(Team, ShipType, Option<Faction>)>> = Team::PLAYABLE
             .iter()
             .map(|&t| ShipType::ALL.iter().map(|&s| (t, s, None)).collect())
@@ -414,6 +462,14 @@ mod tests {
             (Team::Ind, ShipType::WhaleProbe, Some(Faction::Probe)),
             (Team::Ind, ShipType::Bioship, Some(Faction::Species8472)),
             (Team::Ind, ShipType::JemHadarFighter, Some(Faction::JemHadar)),
+            (Team::Ind, ShipType::BirdOfPrey, Some(Faction::Chang)),
+            (Team::Ind, ShipType::HirogenHunter, Some(Faction::Hirogen)),
+            (Team::Ind, ShipType::QEntity, Some(Faction::Q)),
+        ]);
+        rows.push(vec![
+            (Team::Ind, ShipType::QChampion, Some(Faction::Q)),
+            (Team::Ind, ShipType::FerengiMarauder, Some(Faction::Ferengi)),
+            (Team::Ind, ShipType::SwarmShip, Some(Faction::Swarm)),
         ]);
         for (row, ships) in rows.iter().enumerate() {
             for (col, &(team, ship, faction)) in ships.iter().enumerate() {

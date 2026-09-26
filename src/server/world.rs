@@ -63,6 +63,14 @@ pub struct Player {
     pub resonance: Vec<(u32, u8)>,
     /// Whale probe: engines, shields and recharge are dead until this tick.
     pub powerless_until: u32,
+    /// Carrying tribbles (they drain fuel and infest planets we orbit).
+    pub tribbles: bool,
+    /// Marked as prey by the Hirogen.
+    pub marked: bool,
+    /// Chang's Bird-of-Prey: its exhaust is visible until this tick.
+    pub revealed_until: u32,
+    /// Q's champion: only this empire's weapons can hurt it.
+    pub only_hurt_by: Option<Team>,
 }
 
 impl Player {
@@ -112,6 +120,10 @@ impl Player {
             adapt: 1.0,
             resonance: Vec::new(),
             powerless_until: 0,
+            tribbles: false,
+            marked: false,
+            revealed_until: 0,
+            only_hurt_by: None,
         }
     }
 
@@ -180,7 +192,20 @@ pub struct Planet {
     pub alien: Option<Faction>,
     /// Whale probe: no army growth until this tick.
     pub silenced_until: u32,
+    /// Infested with tribbles: no army growth.
+    pub tribbles: bool,
 }
+
+/// Armies spilled by a destroyed Ferengi marauder, drifting in space until
+/// someone flies over them.
+pub struct Loot {
+    pub x: f64,
+    pub y: f64,
+    pub armies: u32,
+    pub ttl: i32,
+}
+
+pub const LOOT_REACH: f64 = 900.0;
 
 /// One strand of a Tholian web: damages any non-Tholian ship touching it.
 pub struct Web {
@@ -234,6 +259,7 @@ pub struct World {
     /// Warnings for a single player (the "Helmsman:" line in the original client).
     pub warnings: Vec<(u8, String)>,
     pub webs: Vec<Web>,
+    pub loot: Vec<Loot>,
     pub hit_kind: HitKind,
 }
 
@@ -250,6 +276,7 @@ impl World {
             reset_timer: 0,
             warnings: Vec::new(),
             webs: Vec::new(),
+            loot: Vec::new(),
             hit_kind: HitKind::Other,
         };
         w.reset_galaxy();
@@ -270,6 +297,7 @@ impl World {
                 known: [false; 5],
                 alien: None,
                 silenced_until: 0,
+                tribbles: false,
             })
             .collect();
         for team in Team::PLAYABLE {
@@ -298,6 +326,7 @@ impl World {
         self.torps.clear();
         self.phasers.clear();
         self.webs.clear();
+        self.loot.clear();
         self.banner = None;
         self.reset_timer = 0;
     }
@@ -319,8 +348,16 @@ impl World {
         });
     }
 
-    fn warn(&mut self, id: u8, text: impl Into<String>) {
+    pub fn warn(&mut self, id: u8, text: impl Into<String>) {
         self.warnings.push((id, text.into()));
+    }
+
+    /// An alien-incursion bulletin for everyone.
+    pub fn alert(&mut self, text: impl Into<String>) {
+        self.outbox.push(Outgoing {
+            dest: Dest::All,
+            msg: ChatMsg { kind: MsgKind::System, from: "ALERT".into(), text: text.into() },
+        });
     }
 
     // ------------------------------------------------------------------
@@ -432,6 +469,8 @@ impl World {
         p.lock = Lock::None;
         p.phaser_timer = 0;
         p.just_exploded = false;
+        p.tribbles = false;
+        p.marked = false;
         if !p.robot {
             let msg = format!("{} has joined the {} in a {}", p.label(), team.plural(), s.name);
             self.god(msg);
@@ -597,7 +636,8 @@ impl World {
         let id = i as u8;
         let p = &self.players[i];
         let s = p.stats();
-        if p.cloaked {
+        // Chang's Bird-of-Prey is the one ship that can fire while cloaked.
+        if p.cloaked && p.ship != ShipType::BirdOfPrey {
             return self.warn(id, "Weapons disabled while cloaked");
         }
         if p.w_overheat > 0 {
@@ -651,7 +691,8 @@ impl World {
         let id = i as u8;
         let p = &self.players[i];
         let s = p.stats();
-        if p.cloaked {
+        // Chang's Bird-of-Prey is the one ship that can fire while cloaked.
+        if p.cloaked && p.ship != ShipType::BirdOfPrey {
             return self.warn(id, "Weapons disabled while cloaked");
         }
         if p.w_overheat > 0 {
@@ -857,6 +898,14 @@ impl World {
         }
         self.players[i].fuel -= 100.0;
         self.players[i].wtemp += 10.0;
+        // The blast also shakes off swarm ships.
+        let swarm: Vec<usize> = (0..MAXPLAYER)
+            .filter(|&j| self.players[j].alive() && self.players[j].ship == ShipType::SwarmShip)
+            .filter(|&j| ((self.players[j].x - x).powi(2) + (self.players[j].y - y).powi(2)).sqrt() < DETDIST)
+            .collect();
+        for j in swarm {
+            self.kill(j, Some(id), "was shaken off".into());
+        }
         for t in self.torps.iter_mut() {
             if t.team != team && t.explode == 0 && t.kind == TorpKind::Photon {
                 if ((t.x - x).powi(2) + (t.y - y).powi(2)).sqrt() < DETDIST {
@@ -906,13 +955,28 @@ impl World {
 
     pub fn inflict(&mut self, i: usize, amount: f64, killer: Option<u8>, how: String) {
         let kind = std::mem::replace(&mut self.hit_kind, HitKind::Other);
+        let killer_team = killer.map(|k| self.players[k as usize].team);
+        let tick = self.tick;
         let p = &mut self.players[i];
         if !p.alive() || amount <= 0.0 {
             return;
         }
+        if p.only_hurt_by.is_some() && killer_team != p.only_hurt_by {
+            return;
+        }
+        // Any hit on Chang's Bird-of-Prey lights up its exhaust.
+        if p.ship == ShipType::BirdOfPrey {
+            let hidden = tick >= p.revealed_until;
+            p.revealed_until = tick + 20 * UPS as u32;
+            p.cloaked = false;
+            if hidden {
+                self.alert("Chang's Bird-of-Prey is hit! Its plasma exhaust gives it away. Fire at will!");
+            }
+        }
+        let p = &mut self.players[i];
         let amount = match p.ship {
             // Invulnerable: they have to be dealt with some other way.
-            ShipType::VgerCloud | ShipType::WhaleProbe => return,
+            ShipType::VgerCloud | ShipType::WhaleProbe | ShipType::QEntity => return,
             // Only resonance (several phasers at once) can shatter it.
             ShipType::CrystalEntity => amount * 0.05,
             // Impervious to conventional weapons; plasma is our "nanoprobe" warhead.
@@ -925,10 +989,7 @@ impl World {
                 let before = p.adapt;
                 p.adapt = (p.adapt * 0.99).max(0.3);
                 if before > 0.5 && p.adapt <= 0.5 {
-                    self.outbox.push(Outgoing {
-                        dest: Dest::All,
-                        msg: ChatMsg { kind: MsgKind::System, from: "ALERT".into(), text: "The Borg have adapted to your weapons!".into() },
-                    });
+                    self.alert("The Borg have adapted to your weapons!");
                 }
                 amount * before
             }
@@ -951,8 +1012,16 @@ impl World {
     }
 
     pub fn kill(&mut self, i: usize, killer: Option<u8>, how: String) {
+        self.hunt_outcome(i, killer);
         let victim_kills = self.players[i].kills + self.players[i].bounty;
         let victim_armies = self.players[i].armies;
+        // A marauder's stolen armies spill out for anyone to grab.
+        if self.players[i].faction == Some(Faction::Ferengi) && victim_armies > 0 {
+            let (x, y) = (self.players[i].x, self.players[i].y);
+            self.loot.push(Loot { x, y, armies: victim_armies, ttl: 60 * UPS as i32 });
+            let what = if victim_armies == 1 { "army" } else { "armies" };
+            self.alert(format!("A Ferengi marauder breaks up and spills {} stolen {} into space!", victim_armies, what));
+        }
         let vlabel = self.players[i].label();
         let vship = self.players[i].stats().abbr;
         {
@@ -965,6 +1034,8 @@ impl World {
             p.leave_orbit();
             p.tractor = None;
             p.lock = Lock::None;
+            p.tribbles = false;
+            p.marked = false;
         }
         let with_armies = if victim_armies > 0 { format!(" (carrying {} armies)", victim_armies) } else { String::new() };
         match killer.map(|k| k as usize).filter(|&k| k != i && self.players[k].in_use) {
@@ -995,11 +1066,37 @@ impl World {
         }
     }
 
+    /// The Hirogen hunt: prey killed by a hunter loses a trophy (half the
+    /// kills it made this life come off its career total) and the hunters
+    /// patch themselves up; prey that kills a hunter earns an extra kill.
+    fn hunt_outcome(&mut self, i: usize, killer: Option<u8>) {
+        let Some(k) = killer.map(|k| k as usize).filter(|&k| k != i && self.players[k].in_use) else { return };
+        if self.players[i].marked && self.players[k].faction == Some(Faction::Hirogen) {
+            let v = &mut self.players[i];
+            let lost = v.kills * 0.5;
+            v.total_kills = (v.total_kills - lost).max(0.0);
+            let who = v.label();
+            self.alert(format!("The Hirogen take a trophy from {} ({:.1} career kills)!", who, lost));
+            for p in self.players.iter_mut().filter(|p| p.alive() && p.faction == Some(Faction::Hirogen)) {
+                p.damage = 0.0;
+                p.shield = p.stats().max_shield;
+            }
+        }
+        if self.players[i].faction == Some(Faction::Hirogen) && self.players[k].marked {
+            let p = &mut self.players[k];
+            p.kills += 1.0;
+            p.total_kills += 1.0;
+            let who = p.label();
+            self.alert(format!("The prey bites back! {} destroys a Hirogen hunter (+1 kill).", who));
+        }
+    }
+
     fn ship_explosion(&mut self, i: usize) {
         let (x, y) = (self.players[i].x, self.players[i].y);
         let base = match self.players[i].ship {
             ShipType::Starbase => 200.0,
             ShipType::Scout => 75.0,
+            ShipType::SwarmShip => 5.0,
             s if s.is_alien() && s.hit_radius() > EXPDIST => 250.0,
             _ => 100.0,
         };
@@ -1071,6 +1168,7 @@ impl World {
         self.update_tractors();
         self.update_torps();
         self.update_webs();
+        self.update_loot();
         if self.tick % 5 == 0 {
             self.planet_fire();
         }
@@ -1284,6 +1382,7 @@ impl World {
                     let n = if p.ship == ShipType::Assault { 2 } else { 1 };
                     let n = n.min(self.planets[k].armies - 4);
                     self.planets[k].armies -= n;
+                    self.planets[k].tribbles = false;
                     p.kills += 0.02 * n as f64;
                     p.total_kills += 0.02 * n as f64;
                 }
@@ -1511,6 +1610,31 @@ impl World {
         self.webs.retain(|w| w.ttl > 0);
     }
 
+    /// Spilled armies go to the first empire ship to fly over them.
+    fn update_loot(&mut self) {
+        for n in 0..self.loot.len() {
+            let (x, y) = (self.loot[n].x, self.loot[n].y);
+            let taker = (0..MAXPLAYER).find(|&j| {
+                let p = &self.players[j];
+                p.alive()
+                    && p.faction.is_none()
+                    && p.armies < p.stats().max_armies
+                    && (p.x - x).powi(2) + (p.y - y).powi(2) < LOOT_REACH * LOOT_REACH
+            });
+            if let Some(j) = taker {
+                let p = &mut self.players[j];
+                let n_taken = self.loot[n].armies.min(p.stats().max_armies - p.armies);
+                p.armies += n_taken;
+                self.loot[n].armies -= n_taken;
+                let who = p.label();
+                let what = if n_taken == 1 { "army" } else { "armies" };
+                self.god(format!("{} recovers {} {} from the Ferengi wreckage", who, n_taken, what));
+            }
+            self.loot[n].ttl -= 1;
+        }
+        self.loot.retain(|l| l.armies > 0 && l.ttl > 0);
+    }
+
     fn planet_fire(&mut self) {
         for k in 0..self.planets.len() {
             let (px, py, owner, armies, name) = {
@@ -1538,7 +1662,7 @@ impl World {
         let mut rng = rand::thread_rng();
         let tick = self.tick;
         for pl in self.planets.iter_mut() {
-            if pl.owner == Team::Ind || pl.armies >= 60 || tick < pl.silenced_until {
+            if pl.owner == Team::Ind || pl.armies >= 60 || tick < pl.silenced_until || pl.tribbles {
                 continue;
             }
             let chance = if pl.flags & PL_AGRI != 0 { 1.0 / 12.0 } else { 1.0 / 30.0 };
@@ -1595,6 +1719,8 @@ impl World {
                 set(&mut flags, p.robot, pf::ROBOT);
                 set(&mut flags, p.w_overheat > 0, pf::WEAPON_HOT);
                 set(&mut flags, p.e_overheat > 0, pf::ENGINE_HOT);
+                set(&mut flags, p.marked, pf::HUNTED);
+                set(&mut flags, p.tribbles, pf::TRIBBLES);
                 PlayerInfo {
                     id: p.id,
                     name: p.name.clone(),
@@ -1632,6 +1758,7 @@ impl World {
                     flags: if known { pl.flags } else { 0 },
                     known,
                     alien: if known { pl.alien } else { None },
+                    tribbles: known && pl.tribbles,
                 }
             })
             .collect();
@@ -1667,6 +1794,7 @@ impl World {
             phasers,
             planets,
             webs: self.webs.iter().map(|w| WebInfo { x1: w.x1 as i32, y1: w.y1 as i32, x2: w.x2 as i32, y2: w.y2 as i32 }).collect(),
+            loot: self.loot.iter().map(|l| LootInfo { x: l.x as i32, y: l.y as i32, armies: l.armies.min(255) as u8 }).collect(),
             open_teams: self.open_teams(),
             team_planets: [Team::Fed, Team::Rom, Team::Kli, Team::Ori].map(|t| self.team_planet_count(t) as u8),
             starbase_teams: Team::PLAYABLE.into_iter().filter(|&t| self.has_starbase(t, me)).collect(),

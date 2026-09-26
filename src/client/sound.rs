@@ -201,12 +201,45 @@ fn at(secs: f32) -> usize {
     (secs * RATE as f32) as usize
 }
 
+/// Phaser: a Trek-style energy whine. Two slightly detuned sawtooths near
+/// 1.6 kHz beat against each other, with a sub-octave and a shimmering
+/// overtone, a 46 Hz power buzz, a bright crackle as the beam lances out,
+/// and a drooping pitch as it dies, all softened by a low-pass filter.
+fn phaser() -> Vec<f32> {
+    let dur = 0.55;
+    let n = (dur * RATE as f32) as usize;
+    let rate = RATE as f32;
+    let mut noise = Noise(29);
+    let (mut p1, mut p2, mut p3, mut p4) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
+    let (mut lp, mut crackle_lp) = (0.0f32, 0.0f32);
+    (0..n)
+        .map(|i| {
+            let secs = i as f32 / rate;
+            let t = i as f32 / n as f32;
+            let f = 1650.0 + 70.0 * (secs * TAU * 24.0).sin() - 380.0 * t * t;
+            p1 += f / rate;
+            p2 += f * 1.0072 / rate;
+            p3 += f * 0.5 / rate;
+            p4 += f * 2.003 / rate;
+            let tone = 0.45 * saw(p1) + 0.45 * saw(p2) + 0.22 * square(p3) + 0.18 * (p4 * TAU).sin();
+            let buzz = 1.0 - 0.35 * (0.5 + 0.5 * (secs * TAU * 46.0).sin());
+            lp += (tone * buzz - lp) * 0.3;
+            // High-passed noise burst for the initial crackle.
+            let nz = noise.next();
+            crackle_lp += (nz - crackle_lp) * 0.2;
+            let crackle = (nz - crackle_lp) * (1.0 - secs / 0.06).max(0.0) * 0.9;
+            let release = if t < 0.6 { 1.0 } else { (1.0 - (t - 0.6) / 0.4).powf(1.5) };
+            let env = (secs * 300.0).min(1.0) * release;
+            (lp * env + crackle) * 0.32
+        })
+        .collect()
+}
+
 fn synth(fx: Sfx) -> Vec<f32> {
     match fx {
         // Classic "pew": square wave diving from high to low.
         Sfx::Torp => sweep(0.14, square, |t| 1300.0 * (1.0 - t) + 250.0, 0.25),
-        // Phaser: buzzing sawtooth with fast vibrato.
-        Sfx::Phaser => sweep(0.32, saw, |t| 1900.0 + 350.0 * (t * TAU * 38.0).sin() - 600.0 * t, 0.22),
+        Sfx::Phaser => phaser(),
         // Plasma: slow, heavy warble.
         Sfx::Plasma => sweep(0.5, square, |t| 180.0 + 90.0 * (t * TAU * 9.0).sin() + 120.0 * t, 0.25),
         Sfx::Explosion => {

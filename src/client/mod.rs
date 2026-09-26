@@ -19,7 +19,7 @@ use crossterm::event::{
     MouseButton, MouseEvent, MouseEventKind,
 };
 use crossterm::{cursor, execute, terminal};
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::io::{self, BufReader, BufWriter};
 use std::net::TcpStream;
 use std::sync::mpsc::{self, Receiver};
@@ -169,6 +169,13 @@ struct Layout {
     cpx: (f64, f64),
 }
 
+/// Identifies one phaser shot across frames.
+type PhaserKey = (u8, i32, i32, i32, i32);
+
+fn phaser_key(p: &PhaserInfo) -> PhaserKey {
+    (p.owner, p.x1, p.y1, p.x2, p.y2)
+}
+
 pub struct App {
     cfg: ClientConfig,
     writer: BufWriter<TcpStream>,
@@ -198,6 +205,9 @@ pub struct App {
     images: Vec<Image>,
     sent: [Option<u64>; 5],
     last_gal: Instant,
+    /// How many frames each phaser beam on screen has been visible (for its
+    /// flash-and-fade animation).
+    phaser_age: HashMap<PhaserKey, u8>,
     tmux_hint: bool,
     sound: sound::Sound,
 }
@@ -265,6 +275,7 @@ pub fn run(cfg: ClientConfig) -> io::Result<()> {
         images: Vec::new(),
         sent: [None; 5],
         last_gal: Instant::now(),
+        phaser_age: HashMap::new(),
         tmux_hint,
         sound: sound::Sound::new(!cfg_mute),
     };
@@ -440,6 +451,7 @@ impl App {
                 if let Some(old) = &old {
                     self.frame_sounds(old, &f);
                 }
+                self.phaser_age = f.phasers.iter().map(|p| (phaser_key(p), self.phaser_age.get(&phaser_key(p)).map_or(0, |a| a.saturating_add(1)))).collect();
                 self.frame = Some(*f);
             }
             ServerMsg::Msg(m) => {
@@ -487,9 +499,8 @@ impl App {
         if count(new, TorpKind::Plasma) > count(old, TorpKind::Plasma) {
             plays.push((Sfx::Plasma, 0.7));
         }
-        let key = |p: &PhaserInfo| (p.owner, p.x1, p.y1, p.x2, p.y2);
         for ph in &new.phasers {
-            if !old.phasers.iter().any(|q| key(q) == key(ph)) {
+            if !old.phasers.iter().any(|q| phaser_key(q) == phaser_key(ph)) {
                 let v = if ph.owner == me { 0.6 } else { near(dist(ph.x1, ph.y1)) * 0.4 };
                 plays.push((Sfx::Phaser, v));
             }
@@ -829,7 +840,7 @@ impl App {
                         if pl.flags & PL_REPAIR != 0 { " • REPAIR" } else { "" },
                         if pl.flags & PL_FUEL != 0 { " • FUEL" } else { "" },
                         if pl.flags & PL_AGRI != 0 { " • AGRI" } else { "" },
-                    )
+                    ) + if pl.tribbles { " • TRIBBLES" } else { "" }
                 } else {
                     format!("{} — not yet scouted", def.name)
                 }

@@ -76,6 +76,10 @@ pub mod pf {
     pub const ROBOT: u16 = 512;
     pub const WEAPON_HOT: u16 = 1024;
     pub const ENGINE_HOT: u16 = 2048;
+    /// Marked as prey by the Hirogen.
+    pub const HUNTED: u16 = 4096;
+    /// Carrying tribbles.
+    pub const TRIBBLES: u16 = 8192;
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -138,6 +142,16 @@ pub struct PlanetInfo {
     /// Held by an alien power (Khan's stronghold, Terran Empire conquests),
     /// or `Some(Doomsday)` when the planet killer has devoured it.
     pub alien: Option<Faction>,
+    /// Infested with tribbles.
+    pub tribbles: bool,
+}
+
+/// Armies dropped by a destroyed Ferengi marauder, free for anyone to pick up.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct LootInfo {
+    pub x: i32,
+    pub y: i32,
+    pub armies: u8,
 }
 
 /// One strand of a Tholian web.
@@ -179,6 +193,7 @@ pub struct Frame {
     pub phasers: Vec<PhaserInfo>,
     pub planets: Vec<PlanetInfo>,
     pub webs: Vec<WebInfo>,
+    pub loot: Vec<LootInfo>,
     /// Teams that are currently allowed to be joined.
     pub open_teams: Vec<Team>,
     /// Planets held by Fed, Rom, Kli, Ori (public knowledge, like the team window).

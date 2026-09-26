@@ -16,9 +16,9 @@ that runs entirely inside a terminal window on macOS.
 - **Trek-style ships:** each empire has its own ship designs (Federation saucers and
   nacelles, Klingon D7s and Birds-of-Prey, Romulan warbirds, Orion raiders).
 - **Robots:** AI pilots fight, bomb, carry armies and capture planets, so you can play solo.
-- **Alien incursions** (optional): thirteen Star Trek threats, from Khan, the Borg and the
-  planet killer to V'Ger, the Crystalline Entity, the whale probe, Species 8472 and the
-  Jem'Hadar, drop into the game.
+- **Alien incursions** (optional): nineteen Star Trek threats, from Khan, the Borg and the
+  planet killer to V'Ger, Species 8472, the Jem'Hadar, General Chang, Q and a plague of
+  tribbles, drop into the game.
 - **Sound:** synthesized retro sound effects, with no audio libraries required.
 - **Mouse and keyboard:** aim and steer with the mouse, with the classic Netrek key bindings.
 
@@ -125,7 +125,7 @@ netrek <COMMAND>
 | `-b, --bind <ADDR>` | `0.0.0.0` | Address to bind; use `127.0.0.1` for local-only |
 | `--bots <N>` | `6` | Robot players kept in the game |
 | `-e, --empires <LIST>` | `fed,rom` | Empires the robots play for: `all`, or a comma list such as `fed,rom,kli` |
-| `--aliens [LIST]` | off | Alien incursions: bare `--aliens` for all thirteen, or a list such as `khan,borg,vger`. See [Alien incursions](#alien-incursions) |
+| `--aliens [LIST]` | off | Alien incursions: bare `--aliens` for all nineteen, or a list such as `khan,borg,vger`. See [Alien incursions](#alien-incursions) |
 | `--alien-interval <SECS>` | `150` | Average seconds between incursions |
 
 The server logs connections, joins, kills and planet captures to stdout.
@@ -483,7 +483,7 @@ variation), and at most **two** are active at once. Each arrival, defeat and wit
 is announced to everyone as a magenta **ALERT** message with a klaxon.
 
 ```sh
-netrek server --empires all --bots 12 --aliens            # all thirteen
+netrek server --empires all --bots 12 --aliens            # all nineteen
 netrek solo --aliens khan,borg,doomsday --alien-interval 90
 ```
 
@@ -502,6 +502,12 @@ netrek solo --aliens khan,borg,doomsday --alien-interval 90
 | `probe` | **The whale probe** (*Star Trek IV*): invulnerable. It travels planet to planet, **draining the power** of every ship within 10,000 units (engines drop to warp 1, shields fail, fuel stops recharging) and stopping army growth where it stops. Bring it **two armies** (the whales) to answer its call: it departs, and the courier earns 3 kills. |
 | `8472` | **Species 8472** (Voyager): three bioships from fluidic space with devastating beams. Photon torpedoes and phasers do only 10% damage; **plasma torpedoes** (our nanoprobe warheads) do full damage, and their beams can't shoot plasma down. When the bioships gather at a planet they focus their beams and **destroy it** (never a home world), then recharge for about 40 seconds. They're also **at war with the Borg**. |
 | `jemhadar` | **The Jem'Hadar** (DS9): a wormhole opens with a warning, and six seconds later five fast attack ships pour out. Their phased polaron beams **ignore shields**, and a fighter below 30% hull **rams** the nearest enemy for heavy damage. |
+| `tribbles` | **Tribbles** (*The Trouble with Tribbles*): an outbreak with no ships. An infested planet (marked `T`) stops growing armies and slowly loses them as its food is eaten, and every 30 seconds the tribbles breed their way to a neighbouring world. Ships that orbit an infested planet **pick them up**: they drain fuel, and the ship **infests the next planet it orbits**. **Tribbles hate Klingons**: Klingon planets are never infested, a Klingon ship orbiting an infested planet clears it in 3 seconds, and they flee any ship a Klingon comes within 2,000 units of. Bombing a planet also clears it. The outbreak is over when no planet or ship carries them. |
+| `chang` | **General Chang** (*The Undiscovered Country*): a Klingon Bird-of-Prey that **fires while cloaked**, quoting Shakespeare. You see only a fuzzy blip and its torpedoes. **Any hit** (a stray torpedo, a phaser, even planetary fire) lights up its exhaust and makes it **visible for 20 seconds**. |
+| `hirogen` | **Hirogen hunters** (Voyager): three hunters mark the **best pilot in the galaxy** (most kills this life) as their **prey** and chase only them, fending off anyone who gets close. If they kill their prey they take a **trophy**: half the kills the prey made that life come off its career total, and the hunters repair. Then they pick the next prey. A prey that destroys a hunter earns **an extra kill**. |
+| `q` | **Q** (TNG): appears near the home world of the empire holding the most planets and puts it **on trial** for 90 seconds, with one of three tests: **hold** your territory (lose no more than two planets), bring Q a **tribute** of five armies, or destroy Q's **champion**, a warship only that empire's weapons can hurt. Pass and every ship of that empire is repaired and refuelled and its home world gains 5 armies. Fail and Q hands its richest colony to the weakest empire. Q himself is invulnerable. |
+| `ferengi` | **Ferengi marauders** (*The Last Outpost*): three marauders loot armies from undefended colonies, tractor passing ships to siphon their fuel, and once full (6 armies) run for the edge of the galaxy. If one escapes, its armies are gone. Destroy one and its stolen armies **spill into space** (shown as a gold `+N`), where the first ship of any empire to fly over them takes them. Marauders **surrender** to any battleship or starbase that gets within 2,500 units (+1 kill). |
+| `swarm` | **The Swarm** (Voyager): eight tiny, fast ships that **latch onto hulls**, draining fuel and slowly eating the ship. Detonating (`d`) shakes off every swarm ship within range, and the swarm always leaves enough fuel in the tank to do it. Each swarm ship is worth only a fifth of a kill. |
 
 **How aliens behave:**
 
@@ -515,11 +521,14 @@ netrek solo --aliens khan,borg,doomsday --alien-interval 90
 - **Rewards:** destroying an alien is worth more than a normal kill. Fleet ships give 1.5
   kills, Khan's ships 2, and the monsters 3 to 5.
 - **Planets:** planets taken by Khan or the Terran Empire are shown in the alien's colour.
-  Planets devoured by the planet killer or destroyed by Species 8472 turn grey. All of
+  Planets devoured by the planet killer or destroyed by Species 8472 turn grey.
+  Planets infested with tribbles are marked `T` (and shown with a dashed ring in vector
+  mode). All of
   them can be retaken with armies, and everything is
   restored when the galaxy resets.
-- **Ending:** an incursion ends when all its ships are destroyed (or V'Ger is joined, or
-  the probe answered), or it withdraws after 4–6 minutes. If an empire loses its last planet to aliens, it has been wiped out by
+- **Ending:** an incursion ends when all its ships are destroyed (or V'Ger is joined, the
+  probe answered, Q's trial judged, or the last tribble cleared), or it withdraws after
+  4–6 minutes. If an empire loses its last planet to aliens, it has been wiped out by
   alien invaders.
 
 **Who's who on screen:**
@@ -539,6 +548,14 @@ netrek solo --aliens khan,borg,doomsday --alien-interval 90
 | Whale probe | bronze | `WP` | A long cylinder with a small sphere at one end |
 | Species 8472 | pink | `85` | Organic bioship with a spine and swept claws |
 | Jem'Hadar | violet | `JH` | Beetle-shaped attack ship with forward prongs |
+| General Chang | crimson | `CH` | Bird-of-Prey: a head on a long neck, wings swept down |
+| Hirogen | gunmetal | `HG` | A long arrowhead with a spine and rear fins |
+| Q | warm white | `QQ` | A flash of light; his champion is a dark angular warship |
+| Ferengi | copper | `FE` | A horseshoe with its prongs forward; spilled armies are a gold `+N` |
+| Swarm | lime | `SW` | A tiny dart |
+
+The status line shows **HUNTED** (vector mode: **PREY**) when the Hirogen are after you,
+and **TRIBBLES** (**TRIB**) when you're carrying them.
 
 **Alien vessels:**
 
@@ -557,6 +574,12 @@ netrek solo --aliens khan,borg,doomsday --alien-interval 90
 | Whale probe | 3 | invulnerable | | power drain over 10,000 units | 3 for answering it |
 | Species 8472 bioship | 11 | – | 300 | beam 110, planet destruction; 10% damage except plasma | 2.5 |
 | Jem'Hadar fighter | 11 | 80 | 90 | polaron beam 90 (ignores shields), torpedo 30, ramming | 1.5 |
+| Chang's Bird-of-Prey | 9 | 80 | 110 | torpedo 40, phaser 70, fires while cloaked | 3 |
+| Hirogen hunter | 10 | 110 | 130 | torpedo 35, phaser 95 | 2 (3 for their prey) |
+| Q | 4 | invulnerable | | trials | – |
+| Q's champion | 9 | 200 | 250 | torpedo 50, phaser 110; only the accused can hurt it | 2.5 |
+| Ferengi marauder | 10 | 90 | 110 | torpedo 25, phaser 70, tractor, fuel siphon | 1.5 (+0.1 per army carried) |
+| Swarm ship | 12 | – | 20 | latches on, drains fuel | 0.2 |
 
 The monsters regenerate quickly. The planet killer only takes 40% of normal weapon
 damage, and a Borg cube's resistance builds as it's hit.
@@ -601,6 +624,23 @@ damage, and a Borg cube's resistance builds as it's hit.
 - **Jem'Hadar:** watch for the wormhole warning. Shields don't help against their beams, so
   keep your distance and use torpedoes. Finish wounded fighters from range, or dodge
   them: a badly damaged one will try to ram you.
+- **Tribbles:** don't orbit an infested planet (`T`) unless you're a Klingon, and if you
+  pick some up, don't orbit your own planets until they're gone. Klingon players are the
+  cure, so other empires may want to ask them for help. Robots don't know any of this.
+- **General Chang:** watch where the torpedoes come from, then fire a spread or phasers
+  that way. The first hit reveals him for 20 seconds, so call it out and pile on. He
+  can't hide near enemy planets: their fire lights him up.
+- **Hirogen:** if you're the prey (**HUNTED**), fly back to your team and let them
+  escort you, or turn and fight: each hunter you kill is worth 3 kills to you. Anyone
+  else can pick the hunters off while they chase.
+- **Q:** read the trial carefully. For a tribute, beam up armies and fly them within
+  3,000 units of Q. For the champion, only your empire's weapons count, so don't expect
+  help. Rivals may try to make you fail a hold trial.
+- **Ferengi:** they go for colonies with no ships nearby, so parking a ship over a planet
+  protects it. Kill them while they're loaded, then race for the loot. A battleship
+  simply makes them surrender.
+- **Swarm:** as soon as they latch on, press `d`. One detonation clears everything within
+  about 1,700 units.
 - **Borg:** a cube assimilates a ship it holds in its tractor beam within about 2,600
   units for four seconds. Its tractor is far stronger than any pressor, so don't try to
   push free. Instead stay out of range, and if you're caught, run at full speed: cubes
@@ -762,11 +802,15 @@ The tests include:
 
 - **`four_empire_game`:** 16 robots across all four empires. Checks every empire gets
   its share of ships and that the fighting spreads across the galaxy.
-- **`every_incursion_plays_out`:** runs each of the thirteen alien incursions against a
+- **`every_incursion_plays_out`:** runs each of the nineteen alien incursions against a
   four-empire robot war and checks it arrives, acts and ends cleanly.
 - **Alien mechanics:** `vger_merge_ends_the_threat`, `crystal_shatters_on_resonance`,
   `whale_probe_drains_and_is_answered`, `bioships_only_fear_plasma`,
-  `polaron_beams_ignore_shields` and `borg_and_8472_fight_each_other`.
+  `polaron_beams_ignore_shields`, `borg_and_8472_fight_each_other`,
+  `chang_fires_cloaked_until_hit`, `tribbles_spread_by_ship_and_flee_klingons`,
+  `hirogen_trophy_and_bonus`, `q_champion_only_hurt_by_the_accused`, `q_tribute_trial`,
+  `ferengi_loot_is_dropped_and_recovered` and
+  `swarm_latches_and_detonation_shakes_it_off`.
 - **`retaking_alien_planets`:** liberated and resettled planets lose their alien mark.
 - **`incursions_do_not_repeat_while_active`:** long games with all the aliens, checking
   at most two are active at once and none repeats while it's still active.

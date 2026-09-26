@@ -6,7 +6,7 @@
 //! Their special powers (webs, planet eating, assimilation...) live here.
 
 use super::bot::lead;
-use super::world::{Dest, Lock, Outgoing, PhaserShot, Web, World};
+use super::world::{Dest, Lock, Loot, Outgoing, PhaserShot, Web, World};
 use crate::consts::*;
 use crate::proto::{ChatMsg, ClientMsg, MsgKind, PState, PhaserInfo};
 use rand::seq::SliceRandom;
@@ -42,6 +42,32 @@ struct Event {
     progress: HashMap<u8, i32>,
     /// Whale probe: ticks spent at the current planet.
     dwell: i32,
+    /// Hirogen: the ship being hunted.
+    prey: Option<u8>,
+    /// Swarm: swarm ship -> the ship it has latched onto.
+    latched: HashMap<u8, u8>,
+    /// Q: the trial under way.
+    trial: Option<Trial>,
+}
+
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum TrialKind {
+    /// Lose no more than two of your planets.
+    Hold,
+    /// Bring Q five armies.
+    Tribute,
+    /// Destroy Q's champion (only your weapons can hurt it).
+    Champion,
+}
+
+struct Trial {
+    team: Team,
+    kind: TrialKind,
+    deadline: u32,
+    /// Hold: the planets the empire owned when the trial began.
+    owned: Vec<usize>,
+    /// Tribute: armies delivered so far.
+    tribute: u32,
 }
 
 pub struct Director {
@@ -66,7 +92,7 @@ fn announce(world: &mut World, text: impl Into<String>) {
 fn duration(kind: Faction) -> u32 {
     let mins = match kind {
         Faction::Khan | Faction::Gorn | Faction::Mirror | Faction::Tholian => 6,
-        Faction::Borg | Faction::Vger | Faction::Species8472 => 5,
+        Faction::Borg | Faction::Vger | Faction::Species8472 | Faction::Tribbles | Faction::Hirogen => 5,
         _ => 4,
     };
     mins * 60 * UPS as u32
@@ -127,19 +153,35 @@ impl Director {
                 !gone
             });
             let timed_out = world.tick.saturating_sub(e.started) > duration(e.kind);
-            if e.ships.is_empty() || timed_out {
+            if beaten(world, e) || timed_out {
                 ended.push(k);
             }
         }
         for k in ended.into_iter().rev() {
             let e = self.events.remove(k);
-            if e.ships.is_empty() {
+            if beaten(world, &e) {
                 announce(world, defeat_text(e.kind));
             } else {
                 for &id in &e.ships {
                     world.remove_player(id);
                 }
                 announce(world, withdraw_text(e.kind));
+            }
+            match e.kind {
+                Faction::Tribbles => {
+                    for pl in world.planets.iter_mut() {
+                        pl.tribbles = false;
+                    }
+                    for p in world.players.iter_mut() {
+                        p.tribbles = false;
+                    }
+                }
+                Faction::Hirogen => {
+                    for p in world.players.iter_mut() {
+                        p.marked = false;
+                    }
+                }
+                _ => {}
             }
         }
     }
@@ -172,6 +214,8 @@ impl Director {
             Faction::Khan | Faction::Tholian | Faction::Species8472 => 3,
             Faction::Gorn | Faction::Mirror => 4,
             Faction::JemHadar => 5,
+            Faction::Swarm => 8,
+            Faction::Tribbles => 0,
             _ => 1,
         };
         if free < need {
@@ -197,6 +241,7 @@ impl Director {
             (x + rng.gen_range(-spread..spread), y + rng.gen_range(-spread..spread))
         };
         let mut ships = Vec::new();
+        let mut trial = None;
         let mut spawn = |world: &mut World, name: &str, ship: ShipType, (x, y): (f64, f64), bounty: f64| {
             if let Some(id) = world.spawn_alien(name, kind, ship, x, y, bounty) {
                 ships.push(id);
@@ -284,8 +329,76 @@ impl Director {
                 spawn(world, "Locutus", ShipType::BorgCube, edge(), 30.0);
                 "We are the Borg. Your biological and technological distinctiveness will be added to our own. Resistance is futile.".to_string()
             }
+            Faction::Tribbles => {
+                // Outbreak on a colony (never a Klingon one: tribbles hate Klingons).
+                let colonies: Vec<usize> = (0..world.planets.len())
+                    .filter(|&k| {
+                        let pl = &world.planets[k];
+                        Team::PLAYABLE.contains(&pl.owner) && pl.owner != Team::Kli && pl.flags & PL_HOME == 0 && pl.armies > 0
+                    })
+                    .collect();
+                let Some(&k) = colonies.choose(&mut rng) else { return };
+                world.planets[k].tribbles = true;
+                format!(
+                    "Tribbles have been found on {}! They breed fast and eat everything, and ships that orbit there carry them away. Tribbles hate Klingons: a Klingon ship in orbit drives them off.",
+                    world.planets[k].name
+                )
+            }
+            Faction::Chang => {
+                spawn(world, "Chang", ShipType::BirdOfPrey, near(ax, ay, 8000.0), 20.0);
+                "A Klingon Bird-of-Prey that can fire while cloaked is loose in the sector: General Chang! Any hit lights up its exhaust.".to_string()
+            }
+            Faction::Hirogen => {
+                let (x, y) = edge();
+                for n in ["Idrin", "Hirogen", "Hirogen"] {
+                    spawn(world, n, ShipType::HirogenHunter, near(x, y, 1500.0), 10.0);
+                }
+                "Hirogen hunters have entered the sector, looking for worthy prey.".to_string()
+            }
+            Faction::Q => {
+                let Some(team) = leading_empire(world) else { return };
+                let (hx, hy) = (world.planets[team.home_planet()].x, world.planets[team.home_planet()].y);
+                let (qx, qy) = ((hx * 0.7 + 50_000.0 * 0.3), (hy * 0.7 + 50_000.0 * 0.3));
+                spawn(world, "Q", ShipType::QEntity, (qx, qy), 0.0);
+                let kind = *[TrialKind::Hold, TrialKind::Tribute, TrialKind::Champion].choose(&mut rng).unwrap();
+                let kind = if kind == TrialKind::Champion && free < 2 { TrialKind::Hold } else { kind };
+                trial = Some(Trial {
+                    team,
+                    kind,
+                    deadline: world.tick + 90 * UPS as u32,
+                    owned: (0..world.planets.len()).filter(|&k| world.planets[k].owner == team).collect(),
+                    tribute: 0,
+                });
+                if kind == TrialKind::Champion {
+                    spawn(world, "Champion", ShipType::QChampion, near(qx, qy, 1500.0), 15.0);
+                    if let Some(&c) = ships.get(1) {
+                        world.players[c as usize].only_hurt_by = Some(team);
+                    }
+                }
+                let task = match kind {
+                    TrialKind::Hold => "Hold your territory for 90 seconds: lose more than two planets and you fail.".to_string(),
+                    TrialKind::Tribute => "Bring me five armies within 90 seconds. I'm waiting near your home world.".to_string(),
+                    TrialKind::Champion => "Defeat my champion within 90 seconds. Only your weapons can touch it.".to_string(),
+                };
+                format!("Q appears in a flash of light! \"The {} stand accused of being... winning. {}\"", team.plural(), task)
+            }
+            Faction::Ferengi => {
+                let (x, y) = edge();
+                for n in ["Bok", "Ferengi", "Ferengi"] {
+                    spawn(world, n, ShipType::FerengiMarauder, near(x, y, 1500.0), 5.0);
+                }
+                "Ferengi marauders have entered the sector to plunder lightly defended colonies. Destroy them to recover the armies they steal!".to_string()
+            }
+            Faction::Swarm => {
+                let (x, y) = near(ax, ay, 6000.0);
+                for _ in 0..8 {
+                    // Each tiny ship is worth only a fifth of a kill.
+                spawn(world, "Swarm", ShipType::SwarmShip, near(x, y, 1000.0), -8.0);
+                }
+                "A swarm of tiny ships has entered the sector! They latch onto hulls and drain power. Detonate (d) to shake them off.".to_string()
+            }
         };
-        if ships.is_empty() {
+        if ships.is_empty() && kind != Faction::Tribbles {
             return;
         }
         announce(world, text);
@@ -302,7 +415,28 @@ impl Director {
             lost_any: false,
             progress: HashMap::new(),
             dwell: 0,
+            prey: None,
+            latched: HashMap::new(),
+            trial,
         });
+    }
+}
+
+/// The empire holding the most planets.
+fn leading_empire(world: &World) -> Option<Team> {
+    Team::PLAYABLE
+        .into_iter()
+        .filter(|&t| world.team_planet_count(t) > 0)
+        .max_by_key(|&t| world.team_planet_count(t))
+}
+
+/// Whether an incursion has been defeated (tribbles have no ships: they're
+/// beaten when no planet or ship carries them any more).
+fn beaten(world: &World, e: &Event) -> bool {
+    if e.kind == Faction::Tribbles {
+        !world.planets.iter().any(|pl| pl.tribbles) && !world.players.iter().any(|p| p.tribbles)
+    } else {
+        e.ships.is_empty()
     }
 }
 
@@ -321,6 +455,12 @@ fn defeat_text(kind: Faction) -> String {
         Faction::Probe => "The probe's call has been answered. It departs, and power returns.".into(),
         Faction::Species8472 => "The Species 8472 bioships have been destroyed. The rift to fluidic space closes.".into(),
         Faction::JemHadar => "The Jem'Hadar strike force has been destroyed.".into(),
+        Faction::Tribbles => "The last of the tribbles are gone. The quadrotriticale is safe.".into(),
+        Faction::Chang => "General Chang's Bird-of-Prey has been destroyed. \"To be... or not to be.\"".into(),
+        Faction::Hirogen => "The Hirogen hunters have been destroyed. The hunt is over.".into(),
+        Faction::Q => "Q snaps his fingers and vanishes in a flash of light.".into(),
+        Faction::Ferengi => "The Ferengi marauders are gone.".into(),
+        Faction::Swarm => "The Swarm has been scattered.".into(),
     }
 }
 
@@ -339,6 +479,12 @@ fn withdraw_text(kind: Faction) -> String {
         Faction::Probe => "The probe gives up its search and departs. Power returns.".into(),
         Faction::Species8472 => "The Species 8472 bioships withdraw into fluidic space.".into(),
         Faction::JemHadar => "The surviving Jem'Hadar withdraw through the wormhole.".into(),
+        Faction::Tribbles => "The tribbles gorge themselves on poisoned grain and die off.".into(),
+        Faction::Chang => "General Chang's Bird-of-Prey slips away under cloak. \"Cry havoc, and let slip the dogs of war!\"".into(),
+        Faction::Hirogen => "The Hirogen break off the hunt and withdraw.".into(),
+        Faction::Q => "Q grows bored and vanishes in a flash of light.".into(),
+        Faction::Ferengi => "The Ferengi marauders warp out in search of better profits.".into(),
+        Faction::Swarm => "The Swarm moves on to other territory.".into(),
     }
 }
 
@@ -470,7 +616,16 @@ fn run_event(world: &mut World, e: &mut Event) {
             Faction::Probe => probe(world, e, i, tick),
             Faction::Species8472 => species8472(world, e, i, n, tick),
             Faction::JemHadar => jemhadar(world, i, tick),
+            Faction::Tribbles => {}
+            Faction::Chang => chang(world, i, tick),
+            Faction::Hirogen => hirogen(world, e, i, tick),
+            Faction::Q => q(world, e, i, tick),
+            Faction::Ferengi => ferengi(world, i, tick),
+            Faction::Swarm => swarm(world, e, i, n, tick),
         }
+    }
+    if e.kind == Faction::Tribbles {
+        tribbles(world, e, tick);
     }
     if e.kind == Faction::Tholian {
         e.web_radius = (e.web_radius + 2.5).min(9000.0);
@@ -1105,6 +1260,394 @@ fn jemhadar(world: &mut World, i: usize, tick: u32) {
     }
 }
 
+const TRIBBLE_CAP: usize = 12;
+
+/// Tribbles: they breed on planets (stopping army growth and slowly eating
+/// the armies' food), stow away on ships that orbit there, and spread from
+/// world to world. Tribbles hate Klingons: a Klingon ship in orbit drives
+/// them off a planet, and they flee any ship a Klingon comes near.
+fn tribbles(world: &mut World, e: &mut Event, tick: u32) {
+    let mut rng = rand::thread_rng();
+    for pl in world.planets.iter_mut().filter(|pl| pl.owner == Team::Kli) {
+        pl.tribbles = false;
+    }
+    for j in 0..MAXPLAYER {
+        let p = &world.players[j];
+        if !p.alive() || p.faction.is_some() {
+            continue;
+        }
+        let id = j as u8;
+        let (x, y, orbiting) = (p.x, p.y, p.orbiting);
+        if p.team == Team::Kli {
+            match orbiting.filter(|&k| world.planets[k].tribbles) {
+                Some(k) => {
+                    let t = e.progress.entry(id).or_insert(0);
+                    *t += 1;
+                    if *t >= 30 {
+                        e.progress.remove(&id);
+                        world.planets[k].tribbles = false;
+                        let (name, who) = (world.planets[k].name, world.players[j].label());
+                        announce(world, format!("The tribbles on {} flee screeching from {}!", name, who));
+                    }
+                }
+                None => {
+                    e.progress.remove(&id);
+                }
+            }
+            for q in empire_ships_near(world, x, y, 2000.0) {
+                if world.players[q].tribbles {
+                    world.players[q].tribbles = false;
+                    world.warn(q as u8, "The tribbles aboard flee screeching from the Klingon ship!");
+                }
+            }
+            continue;
+        }
+        if let Some(k) = orbiting {
+            let infested = world.planets.iter().filter(|pl| pl.tribbles).count();
+            if world.planets[k].tribbles && !world.players[j].tribbles {
+                world.players[j].tribbles = true;
+                world.warn(id, "Tribbles have come aboard! They're eating the ship's stores. Don't take them anywhere else!");
+            } else if world.players[j].tribbles && !world.planets[k].tribbles && world.planets[k].owner != Team::Kli && infested < TRIBBLE_CAP {
+                world.planets[k].tribbles = true;
+                let (name, who) = (world.planets[k].name, world.players[j].label());
+                announce(world, format!("{} has carried tribbles to {}!", who, name));
+            }
+        }
+        if world.players[j].tribbles {
+            let q = &mut world.players[j];
+            q.fuel = (q.fuel - 12.0).max(0.0);
+        }
+    }
+    // Infested planets slowly lose armies as the tribbles eat their food.
+    if tick % 150 == 0 {
+        for pl in world.planets.iter_mut().filter(|pl| pl.tribbles && pl.armies > 1) {
+            pl.armies -= 1;
+        }
+    }
+    // Every 30 seconds they spread to a neighbouring world.
+    if tick % 300 == 0 {
+        let infested: Vec<usize> = (0..world.planets.len()).filter(|&k| world.planets[k].tribbles).collect();
+        if infested.len() >= TRIBBLE_CAP {
+            return;
+        }
+        let Some(&k) = infested.choose(&mut rng) else { return };
+        let (x, y) = (world.planets[k].x, world.planets[k].y);
+        let next = (0..world.planets.len())
+            .filter(|&m| {
+                let pl = &world.planets[m];
+                !pl.tribbles && Team::PLAYABLE.contains(&pl.owner) && pl.owner != Team::Kli
+            })
+            .min_by(|&a, &b| {
+                let (pa, pb) = (&world.planets[a], &world.planets[b]);
+                dist(x, y, pa.x, pa.y).total_cmp(&dist(x, y, pb.x, pb.y))
+            });
+        if let Some(m) = next {
+            world.planets[m].tribbles = true;
+            let (from, to) = (world.planets[k].name, world.planets[m].name);
+            announce(world, format!("The tribbles have bred their way from {} to {}!", from, to));
+        }
+    }
+}
+
+const CHANG_QUOTES: [&str; 5] = [
+    "Cry havoc, and let slip the dogs of war!",
+    "Once more unto the breach, dear friends, once more!",
+    "I am constant as the northern star.",
+    "Tickle us, do we not laugh? Prick us, do we not bleed? Wrong us, shall we not revenge?",
+    "Our revels now are ended.",
+];
+
+/// General Chang: hunt ships under cloak, firing all the while. Any hit
+/// lights up the Bird-of-Prey's exhaust for 20 seconds.
+fn chang(world: &mut World, i: usize, tick: u32) {
+    let mut rng = rand::thread_rng();
+    let revealed = tick < world.players[i].revealed_until;
+    world.players[i].cloaked = !revealed;
+    if tick % 350 == 0 && rng.gen_bool(0.6) {
+        let quote = CHANG_QUOTES.choose(&mut rng).unwrap();
+        world.outbox.push(Outgoing {
+            dest: Dest::All,
+            msg: ChatMsg { kind: MsgKind::All, from: "Chang".into(), text: format!("\"{}\"", quote) },
+        });
+    }
+    if tick % 2 != 0 {
+        return;
+    }
+    if let Some((t, _)) = nearest_enemy(world, i, 30_000.0, None) {
+        fight(world, i, t);
+    }
+}
+
+/// Hirogen: mark the best pilot in the galaxy as prey and hunt them down,
+/// fending off anyone else who gets close.
+fn hirogen(world: &mut World, e: &mut Event, i: usize, tick: u32) {
+    let prey_ok = e.prey.map_or(false, |p| world.players[p as usize].alive() && world.players[p as usize].marked);
+    if !prey_ok {
+        e.prey = None;
+        let best = (0..MAXPLAYER)
+            .filter(|&j| world.players[j].alive() && world.players[j].faction.is_none())
+            .max_by(|&a, &b| {
+                let (pa, pb) = (&world.players[a], &world.players[b]);
+                pa.kills.total_cmp(&pb.kills).then(pa.total_kills.total_cmp(&pb.total_kills))
+            });
+        if let Some(j) = best {
+            for p in world.players.iter_mut() {
+                p.marked = false;
+            }
+            world.players[j].marked = true;
+            e.prey = Some(j as u8);
+            let who = world.players[j].label();
+            announce(world, format!("The Hirogen have chosen their prey: {}! The hunt begins.", who));
+            world.warn(j as u8, "You are being hunted by the Hirogen! Stay with your allies, or fight back: a hunter is worth an extra kill to you.");
+        }
+    }
+    if tick % 2 != 0 {
+        return;
+    }
+    if let Some((t, d)) = nearest_enemy(world, i, 2500.0, None) {
+        if Some(t as u8) != e.prey && d < 2500.0 {
+            fight(world, i, t);
+            return;
+        }
+    }
+    match e.prey {
+        Some(p) => fight(world, i, p as usize),
+        None => {
+            if let Some((t, _)) = nearest_enemy(world, i, 20_000.0, None) {
+                fight(world, i, t);
+            }
+        }
+    }
+}
+
+/// Q: judge the leading empire, then vanish. His champion (if he summoned
+/// one) hunts only the empire on trial.
+fn q(world: &mut World, e: &mut Event, i: usize, tick: u32) {
+    let Some(trial) = e.trial.as_mut() else { return };
+    let team = trial.team;
+    if world.players[i].ship == ShipType::QChampion {
+        let (x, y) = (world.players[i].x, world.players[i].y);
+        let target = (0..MAXPLAYER)
+            .filter(|&j| world.players[j].alive() && world.players[j].team == team && world.players[j].faction.is_none())
+            .min_by(|&a, &b| {
+                let (pa, pb) = (&world.players[a], &world.players[b]);
+                dist(x, y, pa.x, pa.y).total_cmp(&dist(x, y, pb.x, pb.y))
+            });
+        if let (Some(t), 0) = (target, tick % 2) {
+            fight(world, i, t);
+        }
+        return;
+    }
+    if world.players[i].desired_speed != 0 {
+        cmd(world, i, ClientMsg::Speed(0));
+    }
+    let verdict = match trial.kind {
+        TrialKind::Hold => {
+            let lost = trial.owned.iter().filter(|&&k| world.planets[k].owner != team).count();
+            if lost > 2 {
+                Some(false)
+            } else if tick >= trial.deadline {
+                Some(true)
+            } else {
+                None
+            }
+        }
+        TrialKind::Tribute => {
+            let (x, y) = (world.players[i].x, world.players[i].y);
+            for j in empire_ships_near(world, x, y, 3000.0) {
+                let p = &mut world.players[j];
+                if p.team != team || p.armies == 0 {
+                    continue;
+                }
+                let (n, who) = (p.armies, p.label());
+                p.armies = 0;
+                trial.tribute += n;
+                let got = trial.tribute.min(5);
+                announce(world, format!("{} offers Q {} armies ({} of 5).", who, n, got));
+            }
+            if trial.tribute >= 5 {
+                Some(true)
+            } else if tick >= trial.deadline {
+                Some(false)
+            } else {
+                None
+            }
+        }
+        TrialKind::Champion => {
+            let champion = e.ships.iter().any(|&s| world.players[s as usize].ship == ShipType::QChampion && world.players[s as usize].alive());
+            if !champion {
+                Some(true)
+            } else if tick >= trial.deadline {
+                Some(false)
+            } else {
+                None
+            }
+        }
+    };
+    let Some(passed) = verdict else { return };
+    if passed {
+        // Reward: every ship made whole, and reinforcements at home.
+        for p in world.players.iter_mut().filter(|p| p.alive() && p.team == team && p.faction.is_none()) {
+            let s = p.stats();
+            p.damage = 0.0;
+            p.shield = s.max_shield;
+            p.fuel = s.max_fuel;
+        }
+        let home = team.home_planet();
+        let bonus = if world.planets[home].owner == team {
+            world.planets[home].armies += 5;
+            format!(" Their ships are restored and {} gains 5 armies.", world.planets[home].name)
+        } else {
+            " Their ships are restored.".to_string()
+        };
+        announce(world, format!("Q: \"Oh, very well. The {} pass... this time.\"{}", team.plural(), bonus));
+    } else {
+        // Penalty: Q hands the empire's richest colony to the weakest empire.
+        let colony = (0..world.planets.len())
+            .filter(|&k| world.planets[k].owner == team && world.planets[k].flags & PL_HOME == 0)
+            .max_by_key(|&k| world.planets[k].armies);
+        let weakest = Team::PLAYABLE
+            .into_iter()
+            .filter(|&t| t != team && world.team_planet_count(t) > 0)
+            .min_by_key(|&t| world.team_planet_count(t));
+        match (colony, weakest) {
+            (Some(k), Some(w)) => {
+                let pl = &mut world.planets[k];
+                pl.owner = w;
+                pl.known[w.idx()] = true;
+                let name = pl.name;
+                announce(world, format!("Q: \"How disappointing.\" He snaps his fingers and gives {} to the {}.", name, w.plural()));
+                world.check_genocide(team, w);
+            }
+            _ => announce(world, "Q: \"How disappointing.\""),
+        }
+    }
+    for s in e.ships.clone() {
+        world.remove_player(s);
+    }
+}
+
+/// Ferengi: plunder armies from poorly defended colonies and run for the
+/// edge of the galaxy with them. They surrender to anything big.
+fn ferengi(world: &mut World, i: usize, tick: u32) {
+    let id = i as u8;
+    let (x, y) = (world.players[i].x, world.players[i].y);
+    let armies = world.players[i].armies;
+    let big = empire_ships_near(world, x, y, 2500.0)
+        .into_iter()
+        .find(|&j| matches!(world.players[j].ship, ShipType::Battleship | ShipType::Starbase));
+    if let Some(j) = big {
+        if armies > 0 {
+            world.loot.push(Loot { x, y, armies, ttl: 60 * UPS as i32 });
+        }
+        let p = &mut world.players[j];
+        p.kills += 1.0;
+        p.total_kills += 1.0;
+        let who = p.label();
+        let loot = match armies {
+            0 => String::new(),
+            1 => " and hands over 1 stolen army".to_string(),
+            n => format!(" and hands over {} stolen armies", n),
+        };
+        announce(world, format!("A Ferengi marauder surrenders to {}{}! (+1 kill)", who, loot));
+        world.remove_player(id);
+        return;
+    }
+    if armies >= world.players[i].stats().max_armies {
+        // Run for the nearest edge of the galaxy with the loot.
+        let (ex, ey) = if x.min(GWIDTH - x) < y.min(GWIDTH - y) {
+            (if x < GWIDTH / 2.0 { 0.0 } else { GWIDTH }, y)
+        } else {
+            (x, if y < GWIDTH / 2.0 { 0.0 } else { GWIDTH })
+        };
+        if tick % 3 == 0 {
+            let max = world.players[i].stats().max_speed;
+            steer_to(world, i, ex, ey, max);
+        }
+        if x.min(GWIDTH - x).min(y).min(GWIDTH - y) < 1500.0 {
+            announce(world, format!("A Ferengi marauder escapes with {} stolen armies!", armies));
+            world.remove_player(id);
+        }
+        return;
+    }
+    // Tractor passing ships and siphon their fuel.
+    if tick % 20 == 0 {
+        let near = nearest_enemy(world, i, 3500.0, None);
+        match near {
+            Some((t, _)) if world.players[i].tractor.is_none() => {
+                cmd(world, i, ClientMsg::Tractor { target: Some(t as u8), pressor: false });
+            }
+            None if world.players[i].tractor.is_some() => {
+                cmd(world, i, ClientMsg::Tractor { target: None, pressor: false });
+            }
+            _ => {}
+        }
+    }
+    if let Some((t, false)) = world.players[i].tractor {
+        let q = &mut world.players[t as usize];
+        q.fuel = (q.fuel - 60.0).max(0.0);
+    }
+    if tick % 12 == 0 {
+        if let Some((t, d)) = nearest_enemy(world, i, 4500.0, None) {
+            if d < 4500.0 {
+                let q = &world.players[t];
+                let dir = dir_to(x, y, q.x, q.y);
+                cmd(world, i, ClientMsg::Phaser(dir as u8));
+            }
+        }
+    }
+    // Loot the nearest undefended colony (any colony, failing that).
+    let rich = |pl: &super::world::Planet| Team::PLAYABLE.contains(&pl.owner) && pl.flags & PL_HOME == 0 && pl.armies >= 3;
+    let goal = nearest_planet(world, i, |pl| rich(pl) && empire_ships_near(world, pl.x, pl.y, 8000.0).is_empty())
+        .or_else(|| nearest_planet(world, i, rich));
+    let Some(k) = goal else { return };
+    if go_orbit(world, i, k) && tick % 8 == 0 {
+        world.planets[k].armies -= 1;
+        world.players[i].armies += 1;
+    }
+}
+
+/// The Swarm: tiny ships that latch onto hulls and drain them. They keep
+/// just enough fuel in the tank for the victim to detonate them off.
+fn swarm(world: &mut World, e: &mut Event, i: usize, n: usize, tick: u32) {
+    let id = i as u8;
+    if let Some(&t) = e.latched.get(&id) {
+        let ti = t as usize;
+        if world.players[ti].alive() {
+            let a = n as f64 * TAU / 8.0 + tick as f64 * 0.05;
+            let (tx, ty) = (world.players[ti].x, world.players[ti].y);
+            let p = &mut world.players[i];
+            p.x = tx + a.cos() * 300.0;
+            p.y = ty + a.sin() * 300.0;
+            p.speed = 0;
+            p.desired_speed = 0;
+            let q = &mut world.players[ti];
+            if q.fuel > 200.0 {
+                q.fuel = (q.fuel - 25.0).max(200.0);
+            }
+            if tick % 10 == 0 {
+                world.inflict(ti, 1.5, Some(id), "was eaten away by the Swarm".into());
+            }
+            return;
+        }
+        e.latched.remove(&id);
+    }
+    if tick % 3 != 0 {
+        return;
+    }
+    let Some((t, d)) = nearest_enemy(world, i, 40_000.0, None) else { return };
+    if d < 700.0 {
+        let first = !e.latched.values().any(|&v| v == t as u8);
+        e.latched.insert(id, t as u8);
+        if first {
+            world.warn(t as u8, "Swarm ships have latched onto your hull! Detonate (d) to shake them off.");
+        }
+        return;
+    }
+    let (tx, ty) = (world.players[t].x, world.players[t].y);
+    steer_to(world, i, tx, ty, 12);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1143,7 +1686,8 @@ mod tests {
                 .iter()
                 .filter(|m| {
                     ["Khan", "Gorn", "Tholian", "Fesarius", "Balok", "Terran", "planet killer", "amoeba", "Borg", "V'Ger",
-                        "Crystalline", "probe", "8472", "Jem'Hadar", "wormhole"]
+                        "Crystalline", "probe", "8472", "Jem'Hadar", "wormhole", "ribble", "Chang", "Hirogen", "Q", "Ferengi",
+                        "warm"]
                         .iter()
                         .any(|k| m.contains(k))
                 })
@@ -1152,7 +1696,8 @@ mod tests {
             for m in alien_msgs.iter().take(8) {
                 println!("  {}", m);
             }
-            assert!(peak_aliens > 0, "{:?} never arrived", kind);
+            // Tribbles have no ships: they arrive on a planet.
+            assert!(peak_aliens > 0 || kind == Faction::Tribbles, "{:?} never arrived", kind);
             assert!(!alien_msgs.is_empty(), "{:?} made no announcements", kind);
         }
     }
@@ -1338,5 +1883,150 @@ mod tests {
         assert!(!w.at_war(b, g), "other aliens don't fight each other");
         assert!(nearest_enemy(&w, s, 20_000.0, None).map(|t| t.0) == Some(b));
     }
-}
 
+    #[test]
+    fn chang_fires_cloaked_until_hit() {
+        let (mut w, kirk) = with_cruiser(50_000.0, 50_000.0);
+        let c = w.spawn_alien("Chang", Faction::Chang, ShipType::BirdOfPrey, 54_000.0, 50_000.0, 20.0).unwrap() as usize;
+        chang(&mut w, c, 1);
+        assert!(w.players[c].cloaked);
+        let dir = dir_to(54_000.0, 50_000.0, 50_000.0, 50_000.0);
+        w.handle(c as u8, ClientMsg::Torp(dir as u8));
+        assert_eq!(w.torps.len(), 1, "fires while cloaked");
+        w.inflict(c, 5.0, Some(kirk), "torp".into());
+        assert!(!w.players[c].cloaked, "a hit reveals it");
+        let now = w.tick;
+        chang(&mut w, c, now + 1);
+        assert!(!w.players[c].cloaked, "stays visible for a while");
+        chang(&mut w, c, now + 20 * UPS as u32 + 1);
+        assert!(w.players[c].cloaked, "then cloaks again");
+    }
+
+    #[test]
+    fn tribbles_spread_by_ship_and_flee_klingons() {
+        let (mut w, kirk) = with_cruiser(50_000.0, 50_000.0);
+        let mut e = test_event(Faction::Tribbles);
+        let (a, b) = (3, 4);
+        w.planets[a].tribbles = true;
+        w.players[kirk as usize].orbiting = Some(a);
+        tribbles(&mut w, &mut e, 1);
+        assert!(w.players[kirk as usize].tribbles, "picked up tribbles in orbit");
+        w.players[kirk as usize].orbiting = Some(b);
+        tribbles(&mut w, &mut e, 2);
+        assert!(w.planets[b].tribbles, "carried them to the next planet");
+        let growth = w.planets[b].armies;
+        for _ in 0..200 {
+            w.tick();
+        }
+        assert!(w.planets[b].armies <= growth, "no growth while infested");
+        // A Klingon in orbit clears the planet, and scares them off the cruiser.
+        let k = w.add_player("Koloth", false).unwrap();
+        w.join(k, Team::Kli, ShipType::Cruiser).unwrap();
+        let (bx, by) = (w.players[kirk as usize].x, w.players[kirk as usize].y);
+        w.players[k as usize].x = bx;
+        w.players[k as usize].y = by;
+        w.players[k as usize].orbiting = Some(b);
+        for t in 0..31 {
+            tribbles(&mut w, &mut e, 10 + t);
+        }
+        assert!(!w.planets[b].tribbles);
+        assert!(!w.players[kirk as usize].tribbles);
+    }
+
+    #[test]
+    fn hirogen_trophy_and_bonus() {
+        let (mut w, kirk) = with_cruiser(50_000.0, 50_000.0);
+        let kirk = kirk as usize;
+        w.players[kirk].kills = 4.0;
+        w.players[kirk].total_kills = 10.0;
+        let h = w.spawn_alien("Hirogen", Faction::Hirogen, ShipType::HirogenHunter, 55_000.0, 50_000.0, 10.0).unwrap() as usize;
+        let mut e = test_event(Faction::Hirogen);
+        hirogen(&mut w, &mut e, h, 1);
+        assert_eq!(e.prey, Some(kirk as u8));
+        assert!(w.players[kirk].marked);
+        // The prey kills a hunter: 1 + bounty credit, plus the bonus kill.
+        w.kill(h, Some(kirk as u8), "test".into());
+        assert!((w.players[kirk].kills - (4.0 + 2.0 + 1.0)).abs() < 1e-6, "{}", w.players[kirk].kills);
+        // A hunter kills the prey: half this life's kills come off the career.
+        let h2 = w.spawn_alien("Hirogen", Faction::Hirogen, ShipType::HirogenHunter, 55_000.0, 50_000.0, 10.0).unwrap() as usize;
+        let before = w.players[kirk].total_kills;
+        w.kill(kirk, Some(h2 as u8), "test".into());
+        assert!((w.players[kirk].total_kills - (before - 3.5)).abs() < 1e-6);
+        assert!(!w.players[kirk].marked);
+    }
+
+    #[test]
+    fn q_champion_only_hurt_by_the_accused() {
+        let (mut w, kirk) = with_cruiser(50_000.0, 50_000.0);
+        let r = w.add_player("Tomalak", false).unwrap();
+        w.join(r, Team::Rom, ShipType::Cruiser).unwrap();
+        let c = w.spawn_alien("Champion", Faction::Q, ShipType::QChampion, 52_000.0, 50_000.0, 15.0).unwrap() as usize;
+        w.players[c].only_hurt_by = Some(Team::Fed);
+        w.players[c].shields_up = false;
+        w.inflict(c, 50.0, Some(r), "test".into());
+        assert_eq!(w.players[c].damage, 0.0, "Romulan weapons pass through");
+        w.inflict(c, 50.0, Some(kirk), "test".into());
+        assert_eq!(w.players[c].damage, 50.0);
+    }
+
+    #[test]
+    fn q_tribute_trial() {
+        let (mut w, kirk) = with_cruiser(50_000.0, 50_000.0);
+        let qid = w.spawn_alien("Q", Faction::Q, ShipType::QEntity, 51_000.0, 50_000.0, 0.0).unwrap() as usize;
+        let mut e = test_event(Faction::Q);
+        e.ships = vec![qid as u8];
+        e.trial = Some(Trial { team: Team::Fed, kind: TrialKind::Tribute, deadline: 1000, owned: vec![], tribute: 0 });
+        let home = w.planets[0].armies;
+        w.players[kirk as usize].armies = 5;
+        q(&mut w, &mut e, qid, 1);
+        assert_eq!(w.players[kirk as usize].armies, 0);
+        assert_eq!(w.planets[0].armies, home + 5, "reward");
+        assert!(!w.players[qid].in_use, "Q departs");
+    }
+
+    #[test]
+    fn ferengi_loot_is_dropped_and_recovered() {
+        let (mut w, kirk) = with_cruiser(50_000.0, 50_000.0);
+        let f = w.spawn_alien("Bok", Faction::Ferengi, ShipType::FerengiMarauder, 50_400.0, 50_000.0, 5.0).unwrap() as usize;
+        w.players[f].armies = 4;
+        w.kill(f, Some(kirk), "test".into());
+        assert_eq!(w.loot.len(), 1);
+        w.tick();
+        assert_eq!(w.players[kirk as usize].armies, 4, "flew over the loot");
+        assert!(w.loot.is_empty());
+    }
+
+    #[test]
+    fn swarm_latches_and_detonation_shakes_it_off() {
+        let (mut w, kirk) = with_cruiser(50_000.0, 50_000.0);
+        let mut e = test_event(Faction::Swarm);
+        let s = w.spawn_alien("Swarm", Faction::Swarm, ShipType::SwarmShip, 50_500.0, 50_000.0, -8.0).unwrap() as usize;
+        swarm(&mut w, &mut e, s, 0, 3);
+        assert_eq!(e.latched.get(&(s as u8)), Some(&kirk));
+        let fuel = w.players[kirk as usize].fuel;
+        swarm(&mut w, &mut e, s, 0, 4);
+        assert!(w.players[kirk as usize].fuel < fuel, "drains fuel");
+        w.handle(kirk, ClientMsg::DetEnemy);
+        assert!(!w.players[s].alive(), "detonation kills it");
+    }
+
+    fn test_event(kind: Faction) -> Event {
+        Event {
+            kind,
+            ships: Vec::new(),
+            started: 0,
+            anchor: 0,
+            goals: HashMap::new(),
+            holds: HashMap::new(),
+            waypoint: (0.0, 0.0),
+            web_radius: 0.0,
+            web_angle: 0.0,
+            lost_any: false,
+            progress: HashMap::new(),
+            dwell: 0,
+            prey: None,
+            latched: HashMap::new(),
+            trial: None,
+        }
+    }
+}
