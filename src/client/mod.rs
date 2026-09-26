@@ -173,52 +173,151 @@ struct Layout {
 }
 
 /// A mouse click reaches us as an escape sequence like `ESC [<0;45;12M`
-/// (the release ends in `m`). If the terminal's bytes arrive split, the
-/// input reader can report the ESC on its own and the rest as ordinary
-/// keys: digits set the speed and the final `m` opens the message prompt.
-/// This spots those fragments and drops them.
+/// (the release ends in `m`). When the terminal's bytes arrive split, the
+/// input reader reports the ESC on its own as the Esc key and the rest as
+/// ordinary keys: digits set the speed, `m` opens the message prompt, and
+/// the Esc cancels whatever you were typing. The pieces can be a frame or
+/// more apart, so this holds a lone Esc back briefly; if the rest of a mouse
+/// report (or an arrow key) follows, it's put back together, otherwise the
+/// keys go through as typed.
 #[derive(Default)]
 struct LeakFilter {
-    /// When we last saw something that can start a mouse report.
-    armed: Option<Instant>,
-    /// Inside a leaked report: dropping keys until its final `M` or `m`.
-    inside: bool,
+    /// An Esc we're holding back, and when it came.
+    esc: Option<(KeyEvent, Instant)>,
+    /// Characters of a sequence being reassembled (after "ESC").
+    seq: Option<String>,
+}
+
+enum Leak {
+    /// An ordinary key: handle it.
+    Pass,
+    /// Part of a sequence: nothing to do yet.
+    Swallow,
+    /// A false alarm: handle these keys in order.
+    Replay(Vec<KeyEvent>),
+    /// A reassembled mouse report.
+    Mouse(MouseEvent),
+    /// A reassembled arrow key.
+    Key(KeyEvent),
+}
+
+enum Seq {
+    Partial,
+    Broken,
+    Mouse(MouseEvent),
+    Key(KeyEvent),
 }
 
 impl LeakFilter {
-    /// Leaked bytes arrive in a burst straight after the ESC.
-    const WINDOW: Duration = Duration::from_millis(80);
+    /// How long a lone Esc waits for the rest of a sequence (a slow frame
+    /// can sit between the pieces).
+    const HOLD: Duration = Duration::from_millis(250);
 
-    /// True if this key is part of a leaked mouse report.
-    fn swallow(&mut self, k: &KeyEvent) -> bool {
-        let recent = self.armed.map_or(false, |t| t.elapsed() < Self::WINDOW);
-        let KeyCode::Char(c) = k.code else {
-            self.inside = false;
-            if k.code == KeyCode::Esc {
-                self.armed = Some(Instant::now());
+    fn feed(&mut self, k: &KeyEvent) -> Leak {
+        if let Some(seq) = self.seq.as_mut() {
+            if let KeyCode::Char(c) = k.code {
+                seq.push(c);
+                return match parse_seq(seq) {
+                    Seq::Partial => Leak::Swallow,
+                    Seq::Mouse(m) => {
+                        self.seq = None;
+                        Leak::Mouse(m)
+                    }
+                    Seq::Key(key) => {
+                        self.seq = None;
+                        Leak::Key(key)
+                    }
+                    Seq::Broken => Leak::Replay(self.take_seq()),
+                };
             }
-            return false;
-        };
-        if self.inside {
-            match c {
-                '0'..='9' | ';' | '<' => return true,
-                'M' | 'm' => {
-                    self.inside = false;
-                    self.armed = None;
-                    return true;
+            let mut keys = self.take_seq();
+            keys.push(*k);
+            return Leak::Replay(keys);
+        }
+        let held = self.esc.take();
+        match k.code {
+            // "ESC [" read together can also come through as Alt-[.
+            KeyCode::Char('[') if held.is_some() || k.modifiers.contains(KeyModifiers::ALT) => {
+                self.seq = Some("[".into());
+                Leak::Swallow
+            }
+            KeyCode::Esc => {
+                self.esc = Some((*k, Instant::now()));
+                match held {
+                    Some((e, _)) => Leak::Replay(vec![e]),
+                    None => Leak::Swallow,
                 }
-                _ => self.inside = false,
             }
-            return false;
+            _ => match held {
+                Some((e, _)) => Leak::Replay(vec![e, *k]),
+                None => Leak::Pass,
+            },
         }
-        // "ESC [" may also come through as Alt-[.
-        let alt_bracket = c == '[' && k.modifiers.contains(KeyModifiers::ALT);
-        if alt_bracket || (recent && matches!(c, '[' | '<')) {
-            self.armed = Some(Instant::now());
-            self.inside = c == '<';
-            return true;
+    }
+
+    /// An Esc that's waited long enough with nothing after it was a real
+    /// keypress; so was a sequence that never finished.
+    fn expire(&mut self) -> Vec<KeyEvent> {
+        match self.esc {
+            Some((e, t)) if t.elapsed() >= Self::HOLD && self.seq.is_none() => {
+                self.esc = None;
+                vec![e]
+            }
+            _ => Vec::new(),
         }
-        false
+    }
+
+    fn take_seq(&mut self) -> Vec<KeyEvent> {
+        let s = self.seq.take().unwrap_or_default();
+        s.chars().map(|c| KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE)).collect()
+    }
+}
+
+/// Reassemble what followed a lone ESC: an SGR mouse report
+/// `[<button;col;row` + `M`/`m`, or an arrow key `[A`..`[D`.
+fn parse_seq(s: &str) -> Seq {
+    let b = s.as_bytes();
+    if b.len() < 2 {
+        return Seq::Partial;
+    }
+    match b[1] {
+        b'A' | b'B' | b'C' | b'D' if b.len() == 2 => {
+            let code = match b[1] {
+                b'A' => KeyCode::Up,
+                b'B' => KeyCode::Down,
+                b'C' => KeyCode::Right,
+                _ => KeyCode::Left,
+            };
+            return Seq::Key(KeyEvent::new(code, KeyModifiers::NONE));
+        }
+        b'<' => {}
+        _ => return Seq::Broken,
+    }
+    let body = &s[2..];
+    let last = body.chars().last();
+    if let Some(end @ ('M' | 'm')) = last {
+        let nums: Vec<Option<u16>> = body[..body.len() - 1].split(';').map(|n| n.parse().ok()).collect();
+        let [Some(btn), Some(col), Some(row)] = nums[..] else { return Seq::Broken };
+        let button = match btn & 3 {
+            0 => MouseButton::Left,
+            1 => MouseButton::Middle,
+            _ => MouseButton::Right,
+        };
+        let kind = if btn & 64 != 0 {
+            if btn & 1 == 0 { MouseEventKind::ScrollUp } else { MouseEventKind::ScrollDown }
+        } else if btn & 32 != 0 {
+            MouseEventKind::Moved
+        } else if end == 'M' {
+            MouseEventKind::Down(button)
+        } else {
+            MouseEventKind::Up(button)
+        };
+        return Seq::Mouse(MouseEvent { kind, column: col.saturating_sub(1), row: row.saturating_sub(1), modifiers: KeyModifiers::NONE });
+    }
+    if body.chars().all(|c| c.is_ascii_digit() || c == ';') && body.len() < 16 {
+        Seq::Partial
+    } else {
+        Seq::Broken
     }
 }
 
@@ -414,6 +513,10 @@ impl App {
                         break;
                     }
                 }
+            }
+            for k in self.leak.expire() {
+                self.handle_key(k);
+                dirty = true;
             }
             if self.redraw {
                 self.redraw = false;
@@ -682,6 +785,11 @@ impl App {
 
     fn on_mouse(&mut self, m: MouseEvent) {
         self.pointer = Some((m.column as i32, m.row as i32));
+        // A click with a popup open just closes it (the maps are covered).
+        if self.popup != Popup::None && matches!(m.kind, MouseEventKind::Down(_)) {
+            self.popup = Popup::None;
+            return;
+        }
         if self.my_state() != PState::Alive || self.mode != Mode::Play {
             return;
         }
@@ -705,9 +813,16 @@ impl App {
     }
 
     fn on_key(&mut self, k: KeyEvent) {
-        if self.leak.swallow(&k) {
-            return;
+        match self.leak.feed(&k) {
+            Leak::Pass => self.handle_key(k),
+            Leak::Swallow => {}
+            Leak::Replay(keys) => keys.into_iter().for_each(|k| self.handle_key(k)),
+            Leak::Mouse(m) => self.on_mouse(m),
+            Leak::Key(k) => self.handle_key(k),
         }
+    }
+
+    fn handle_key(&mut self, k: KeyEvent) {
         if k.modifiers.contains(KeyModifiers::CONTROL) && matches!(k.code, KeyCode::Char('c') | KeyCode::Char('d')) {
             self.quit = true;
             return;
@@ -1009,25 +1124,52 @@ mod tests {
         KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE)
     }
 
-    /// A mouse report split after its ESC is dropped whole, and normal
-    /// typing (including `m` and digits) still gets through.
+    fn feed_all(f: &mut LeakFilter, keys: &[KeyEvent]) -> Vec<String> {
+        let mut out = Vec::new();
+        for k in keys {
+            match f.feed(k) {
+                Leak::Pass => out.push(format!("{:?}", k.code)),
+                Leak::Swallow => {}
+                Leak::Replay(v) => out.extend(v.iter().map(|k| format!("{:?}", k.code))),
+                Leak::Mouse(m) => out.push(format!("{:?}@{},{}", m.kind, m.column, m.row)),
+                Leak::Key(k) => out.push(format!("{:?}", k.code)),
+            }
+        }
+        out
+    }
+
+    fn esc() -> KeyEvent {
+        KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)
+    }
+
+    /// A mouse report split after its ESC becomes the click it was, and
+    /// normal typing (including `m`, digits and Esc) still gets through.
     #[test]
-    fn leaked_mouse_reports_are_dropped() {
+    fn split_mouse_reports_are_reassembled() {
         let mut f = LeakFilter::default();
-        assert!(!f.swallow(&KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
-        for c in "[<0;45;12M".chars() {
-            assert!(f.swallow(&key(c)), "{:?} leaked", c);
-        }
-        assert!(!f.swallow(&key('m')), "a real m afterwards works");
-        assert!(!f.swallow(&key('5')));
+        let mut keys = vec![esc()];
+        keys.extend("[<0;45;12M".chars().map(key));
+        assert_eq!(feed_all(&mut f, &keys), vec!["Down(Left)@44,11"]);
+        let mut keys = vec![esc()];
+        keys.extend("[<35;3;4M".chars().map(key));
+        assert_eq!(feed_all(&mut f, &keys), vec!["Moved@2,3"]);
         // Alt-[ (ESC and [ read together) starts one too.
-        assert!(f.swallow(&KeyEvent::new(KeyCode::Char('['), KeyModifiers::ALT)));
-        for c in "<0;3;4m".chars() {
-            assert!(f.swallow(&key(c)), "{:?} leaked", c);
-        }
-        // Without a preceding ESC, [ and < are ordinary keys.
+        let mut keys = vec![KeyEvent::new(KeyCode::Char('['), KeyModifiers::ALT)];
+        keys.extend("<2;10;10m".chars().map(key));
+        assert_eq!(feed_all(&mut f, &keys), vec!["Up(Right)@9,9"]);
+        // Arrow keys split the same way.
+        let keys = vec![esc(), key('['), key('D')];
+        assert_eq!(feed_all(&mut f, &keys), vec!["Left"]);
+        // Ordinary typing.
+        assert_eq!(feed_all(&mut f, &[key('m'), key('5'), key('[')]), vec!["Char('m')", "Char('5')", "Char('[')"]);
+        // A real Esc followed by a real key comes through in order.
+        assert_eq!(feed_all(&mut f, &[esc(), key('q')]), vec!["Esc", "Char('q')"]);
+        // A lone real Esc is released once it has waited.
         let mut f = LeakFilter::default();
-        assert!(!f.swallow(&key('[')));
-        assert!(!f.swallow(&key('<')));
+        assert!(feed_all(&mut f, &[esc()]).is_empty());
+        f.esc.as_mut().unwrap().1 -= LeakFilter::HOLD;
+        assert_eq!(f.expire().len(), 1);
+        // "ESC [" then something else: the keys are replayed, not lost.
+        assert_eq!(feed_all(&mut f, &[esc(), key('['), key('x')]), vec!["Char('[')", "Char('x')"]);
     }
 }

@@ -725,7 +725,11 @@ impl App {
         let x_tag = pad + lh * 1.1;
         let x_ty = x_tag + cw * 5.0;
         let x_name = x_ty + cw * 3.5;
-        let x_kills = (x_name + cw * 18.0).min(w - cw * 14.0);
+        // With ranks on (server --ranks), a Rank column after the name.
+        // Name (16), gap, Rank (4), gap, then Kills right-aligned (5 wide).
+        let ranks = f.players.iter().any(|p| p.rank.is_some()) && x_name + cw * 27.0 <= w - cw * 14.0;
+        let x_rank = x_name + cw * 16.5;
+        let x_kills = (x_name + cw * if ranks { 27.0 } else { 18.0 }).min(w - cw * 14.0);
         let x_arm = x_kills + cw * 4.0;
         let x_status = x_arm + cw * 1.5;
         let head = rgb(0xe8ecf2);
@@ -733,6 +737,9 @@ impl App {
         c.text(tr, x_tag, yb, "No", fs, head);
         c.text(tr, x_ty, yb, "Ty", fs, head);
         c.text(tr, x_name, yb, "Name", fs, head);
+        if ranks {
+            c.text(tr, x_rank, yb, "Rank", fs, head);
+        }
         c.text_right(tr, x_kills, yb, "Kills", fs, head);
         c.text_right(tr, x_arm, yb, "Arm", fs, head);
         let line_y = pad + lh + 1.0;
@@ -754,13 +761,10 @@ impl App {
                 c.round_rect(pad - 2.0, top, w - 2.0 * pad + 4.0, lh, 3.0, base_col, 0.14, None);
             }
             self.ship_icon(&mut c, x_icon, mid, lh * 0.4, p, col);
-            let name: String = match p.rank {
-                Some(r) => format!("{} {}", RANKS[r as usize].1, p.name),
-                None => p.name.clone(),
+            let name: String = p.name.chars().take(16).collect();
+            if let (true, Some(r)) = (ranks, p.rank) {
+                c.text(tr, x_rank, y, RANKS[r as usize].1, fs, col);
             }
-            .chars()
-            .take(18)
-            .collect();
             c.text(tr, x_tag, y, &callsign(p), fs, col);
             c.text(tr, x_ty, y, p.ship.stats().abbr, fs, col);
             c.text(tr, x_name, y, &name, fs, if p.id == self.slot { mix(col, WHITE, 0.4) } else { col });
@@ -772,6 +776,8 @@ impl App {
                 "dead"
             } else if p.faction.is_some() {
                 "alien"
+            } else if p.ship == ShipType::Freighter {
+                "convoy"
             } else if p.flags & pf::ROBOT != 0 {
                 "robot"
             } else {

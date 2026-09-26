@@ -2125,7 +2125,12 @@ impl World {
                     speed: p.speed as u8,
                     flags,
                     kills: p.kills as f32,
-                    armies: if friendly { p.armies as u8 } else { 0 },
+                    // A freighter's "armies" are the supplies in its hold.
+                    armies: match (friendly, p.ship) {
+                        (false, _) => 0,
+                        (true, ShipType::Freighter) => p.cargo.min(255) as u8,
+                        (true, _) => p.armies as u8,
+                    },
                     tractor_target: if fuzzy { None } else { p.tractor.map(|t| t.0) },
                     fuzzy,
                     explode_frame: if p.state == PState::Exploding { (11 - p.state_timer).max(1) as u8 } else { 0 },

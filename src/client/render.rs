@@ -764,7 +764,10 @@ impl App {
         if r.h < 1 {
             return;
         }
-        let header = format!("{:<4}{:<3}{:<16}{:>7}{:>6}  {}", "No", "Ty", "Name", "Kills", "Arm", "");
+        // With ranks on (server --ranks), a Rank column after the name.
+        let ranks = f.players.iter().any(|p| p.rank.is_some());
+        let rank_col = |s: &str| if ranks { format!("{:<5}", s) } else { String::new() };
+        let header = format!("{:<4}{:<3}{:<16}{}{:>7}{:>6}  {}", "No", "Ty", "Name", rank_col("Rank"), "Kills", "Arm", "");
         scr.text_clip(r.x, r.y, &header, Color::White, true, maxx);
         for (k, p) in ps.iter().enumerate() {
             let y = r.y + 1 + k as i32;
@@ -773,19 +776,18 @@ impl App {
             }
             let arm = if p.armies > 0 { p.armies.to_string() } else { String::new() };
             let status = match p.state {
+                PState::Alive if p.ship == ShipType::Freighter => "convoy",
                 PState::Alive if p.flags & pf::ROBOT != 0 => "robot",
                 PState::Alive => "",
                 _ => "dead",
             };
-            let name = match p.rank {
-                Some(r) => format!("{} {}", RANKS[r as usize].1, p.name),
-                None => p.name.clone(),
-            };
+            let rank = rank_col(p.rank.map_or("", |r| RANKS[r as usize].1));
             let line = format!(
-                "{:<4}{:<3}{:<16.16}{:>7.2}{:>6}  {}",
+                "{:<4}{:<3}{:<16.16}{}{:>7.2}{:>6}  {}",
                 super::palette::callsign(p),
                 p.ship.stats().abbr,
-                name,
+                p.name,
+                rank,
                 p.kills,
                 arm,
                 status
