@@ -1,7 +1,7 @@
 //! Everything that draws to the screen.
 
 use super::canvas::{Braille, Screen};
-use super::{App, Layout, Mode, Popup, Rect};
+use super::{App, Layout, Mode, Popup, Rect, IMAGE_SLOTS, POPUP_SLOT};
 use crate::consts::*;
 use crate::proto::*;
 use crossterm::style::Color;
@@ -86,14 +86,14 @@ impl App {
     /// Terminal colour for a ship: alien faction colour or empire colour.
     fn player_color(&self, p: &PlayerInfo) -> Color {
         match p.faction {
-            Some(f) => super::pixels::to_color(super::render_px::faction_rgb(f), self.truecolor),
+            Some(f) => super::palette::to_color(super::palette::faction_rgb(f), self.truecolor),
             None => team_color(p.team),
         }
     }
 
     fn planet_color(&self, info: &PlanetInfo) -> Color {
         match info.alien {
-            Some(_) => super::pixels::to_color(super::render_px::planet_rgb(info), self.truecolor),
+            Some(_) => super::palette::to_color(super::palette::planet_rgb(info), self.truecolor),
             None => team_color(info.owner),
         }
     }
@@ -110,17 +110,53 @@ impl App {
             scr.text(2, 1, "Waiting for the server...", Color::Grey, false);
             return;
         }
-        if self.my_state() == PState::Outfit {
+        let in_game = self.my_state() != PState::Outfit;
+        if in_game {
+            self.draw_game(scr);
+        } else {
             self.draw_title(scr);
             self.draw_outfit(scr);
             let (y, maxx) = (scr.h as i32 - 1, scr.w as i32 - 1);
             self.draw_input_line(scr, 1, y, maxx);
-        } else {
-            self.draw_game(scr);
         }
+        let vector = in_game && self.gfx == super::Gfx::Vector;
         if self.popup != Popup::None {
-            self.draw_popup(scr);
+            if vector {
+                // Keep the maps as images and float the popup over them.
+                self.draw_popup_image(scr);
+            } else {
+                self.draw_popup(scr);
+            }
+        } else if self.sent[POPUP_SLOT].is_some() {
+            // The popup just closed: repaint everything it was covering.
+            self.sent = [None; IMAGE_SLOTS];
+            scr.repaint();
         }
+    }
+
+    /// Size (in cells) and title of the open popup.
+    fn popup_size(&self) -> (i32, i32, &'static str) {
+        match self.popup {
+            Popup::Help => (76, HELP.len() as i32 + 3, "Help — press ? or Esc to close"),
+            Popup::Players => {
+                let n = self.frame.as_ref().map_or(0, |f| f.players.iter().filter(|p| p.state != PState::Outfit).count());
+                (64, n as i32 + 3, "Players — L or Esc to close")
+            }
+            Popup::Planets => (72, 24, "Planets — P or Esc to close"),
+            Popup::None => (0, 0, ""),
+        }
+    }
+
+    /// Vector mode: the popup as an image floating over the maps.
+    fn draw_popup_image(&mut self, scr: &mut Screen) {
+        let (want_w, want_h, title) = self.popup_size();
+        let (w, h) = (scr.w as i32, scr.h as i32);
+        let (bw, bh) = (want_w.min(w - 2), want_h.min(h - 2));
+        let (x, y) = ((w - bw) / 2, (h - bh) / 2);
+        let (cw, ch) = self.cell_px;
+        let img = self.draw_popup_vec((bw as f64 * cw) as i32, (bh as f64 * ch) as i32, title);
+        self.images.push(super::Image { x, y, slot: POPUP_SLOT, data: super::sixel::encode_canvas(&img) });
+        scr.masks.push((x, y, bw, bh));
     }
 
     fn draw_title(&self, scr: &mut Screen) {
@@ -179,10 +215,9 @@ impl App {
             Some(p) if p.state != PState::Outfit => (p.x as f64, p.y as f64),
             _ => self.last_center,
         };
-        let vector = self.gfx == Gfx::Vector && self.popup == Popup::None;
+        let vector = self.gfx == Gfx::Vector;
         let cpx = match self.gfx {
             Gfx::Vector => self.cell_px,
-            Gfx::Blocks => (2.0, self.logical_per_row()),
             Gfx::Braille => (2.0, 4.0),
         };
         let (pw, ph) = ((tac.w as f64 * cpx.0) as i32, (tac.h as f64 * cpx.1) as i32);
@@ -229,14 +264,9 @@ impl App {
             }
             scr.masks.push((gal.x, gal.y, gal.w, gal.h));
         } else {
-            self.sent = [None; 5];
-            if self.gfx == Gfx::Braille {
-                self.draw_tactical(scr, tac, center, upd);
-                self.draw_galactic(scr, gal, center, vw, vh);
-            } else {
-                self.draw_tactical_px(scr, tac, center, upd);
-                self.draw_galactic_px(scr, gal, center, vw, vh);
-            }
+            self.sent = [None; IMAGE_SLOTS];
+            self.draw_tactical(scr, tac, center, upd);
+            self.draw_galactic(scr, gal, center, vw, vh);
             if let Some(b) = &f.banner {
                 let bx = tac.x + (tac.w - b.chars().count() as i32) / 2;
                 scr.text(bx.max(tac.x), tac.y + tac.h / 2, b, Color::White, true);
@@ -498,7 +528,7 @@ impl App {
                 };
                 b.arc(x, y, sr + 2.5, shield_col, prio - 1, 1);
             }
-            let tag = super::render_px::callsign(p);
+            let tag = super::palette::callsign(p);
             labels.push((((x + sr + 3.0) / 2.0) as i32, (y / 4.0) as i32, tag, if cloaked { DIM } else { self.player_color(p) }, is_me));
         }
 
@@ -561,7 +591,7 @@ impl App {
             let (text, col) = if p.fuzzy {
                 ("??".to_string(), DIM)
             } else {
-                (super::render_px::callsign(p), if is_me { Color::White } else { self.player_color(p) })
+                (super::palette::callsign(p), if is_me { Color::White } else { self.player_color(p) })
             };
             labels.push((cx, cy, text, col, true));
         }
@@ -650,21 +680,18 @@ impl App {
         }
     }
 
-    /// A triangular ramp gauge (green → yellow → red), two rows tall.
+    /// A rising ramp gauge (green → yellow → red), two rows tall, drawn with
+    /// eighth-block glyphs.
     fn draw_ramp(&self, scr: &mut Screen, x: i32, y: i32, w: i32, frac: f64, label: &str) {
-        use super::pixels::{mix, rgb, to_color, Pixels};
-        let (pw, ph) = (w * 2, 8);
-        let mut px = Pixels::new(pw, ph);
+        use super::palette::{mix, rgb, to_color};
+        const BARS: [char; 9] = [' ', '▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
         let tc = self.truecolor;
         let (green, yellow, red) = (rgb(0x20c040), rgb(0xf0e020), rgb(0xe02020));
         let frac = frac.clamp(0.0, 1.0) as f32;
-        px.fill_with(|xx, yy| {
-            let t = xx as f32 / pw as f32;
-            let top = ph as f32 * (1.0 - t * 0.9) - 0.5;
-            if (yy as f32 - 0.5) < top {
-                return [0.0, 0.0, 0.0];
-            }
-            if t <= frac {
+        let lx = x + w - label.chars().count() as i32 - 1;
+        for c in 0..w {
+            let t = (c as f32 + 0.5) / w as f32;
+            let col = if t <= frac {
                 if t < 0.5 {
                     mix(green, yellow, t * 2.0)
                 } else {
@@ -672,13 +699,18 @@ impl App {
                 }
             } else {
                 [40.0, 42.0, 48.0]
+            };
+            let fg = to_color(col, tc);
+            // Height in eighths of a cell, over two rows.
+            let e = ((0.1 + 0.9 * t) * 16.0).round() as usize;
+            let (low, high) = (e.min(8), e.saturating_sub(8));
+            scr.put(x + c, y, BARS[high], fg, false);
+            let k = x + c - lx;
+            match label.chars().nth(k.max(0) as usize).filter(|_| k >= 0) {
+                // The label sits in the full-height part of the ramp.
+                Some(ch) => scr.put_cell(x + c, y + 1, ch, to_color([255.0, 255.0, 255.0], tc), fg, true),
+                None => scr.put(x + c, y + 1, BARS[low], fg, false),
             }
-        });
-        px.blit(scr, x, y, tc);
-        let lx = x + w - label.len() as i32 - 1;
-        for (k, ch) in label.chars().enumerate() {
-            let bg = px.cell_color((lx - x) + k as i32, 1);
-            scr.put_cell(lx + k as i32, y + 1, ch, to_color([255.0, 255.0, 255.0], tc), to_color(bg, tc), true);
         }
     }
 
@@ -705,7 +737,7 @@ impl App {
             };
             let line = format!(
                 "{:<4}{:<3}{:<16.16}{:>7.2}{:>6}  {}",
-                super::render_px::callsign(p),
+                super::palette::callsign(p),
                 p.ship.stats().abbr,
                 p.name,
                 p.kills,
@@ -905,7 +937,8 @@ impl App {
         match self.popup {
             Popup::Help => {
                 let lines = HELP;
-                let r = self.popup_box(scr, 76, lines.len() as i32 + 3, "Help — press ? or Esc to close");
+                let (bw, bh, title) = self.popup_size();
+                let r = self.popup_box(scr, bw, bh, title);
                 for (k, (keys, what)) in lines.iter().enumerate() {
                     if k as i32 >= r.h {
                         break;
@@ -915,13 +948,14 @@ impl App {
                 }
             }
             Popup::Players => {
-                let n = self.frame.as_ref().map_or(0, |f| f.players.iter().filter(|p| p.state != PState::Outfit).count());
-                let r = self.popup_box(scr, 64, n as i32 + 2, "Players — L or Esc to close");
+                let (bw, bh, title) = self.popup_size();
+                let r = self.popup_box(scr, bw, bh, title);
                 self.draw_player_list(scr, r, true);
             }
             Popup::Planets => {
                 let f = self.frame.as_ref().unwrap();
-                let r = self.popup_box(scr, 72, 45, "Planets — P or Esc to close");
+                let (bw, bh, title) = self.popup_size();
+                let r = self.popup_box(scr, bw, bh, title);
                 let cols = if r.w >= 68 { 2 } else { 1 };
                 let per_col = (40 + cols - 1) / cols;
                 for (k, def) in PLANETS.iter().enumerate() {
@@ -952,7 +986,7 @@ impl App {
     }
 }
 
-const HELP: &[(&str, &str)] = &[
+pub(super) const HELP: &[(&str, &str)] = &[
     ("mouse", "move to aim; left click torp, right click steer, middle click phaser"),
     ("k", "steer toward the mouse pointer (arrows ← → also turn)"),
     ("0-9 ) ! @", "set speed 0-9, 10, 11, 12   % max speed   # half speed   ↑ ↓ adjust"),
@@ -971,7 +1005,7 @@ const HELP: &[(&str, &str)] = &[
     ("m", "send a message (then A, T, F/R/K/O or a player slot)"),
     ("L / P", "player list / planet list"),
     ("+ / -", "zoom tactical view (or mouse wheel)"),
-    ("g", "cycle graphics: vector / color blocks / braille"),
+    ("g", "switch graphics: vector / braille"),
     ("S", "sound effects on / off"),
     ("Ctrl-L", "redraw screen"),
     ("q", "quit"),

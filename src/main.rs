@@ -80,8 +80,8 @@ struct Who {
     /// Preferred ship: SC, DD, CA, BB, AS or SB
     #[arg(short, long, default_value = "CA", value_parser = parse_ship)]
     ship: ShipType,
-    /// Graphics for the maps: auto, vector (sixel images), blocks or braille
-    #[arg(short, long, default_value = "auto", value_parser = ["auto", "vector", "sixel", "blocks", "braille"])]
+    /// Graphics for the maps: auto, vector (sixel images) or braille
+    #[arg(short, long, default_value = "auto", value_parser = ["auto", "vector", "sixel", "braille"])]
     gfx: String,
     /// Start with sound effects turned off (toggle in game with S)
     #[arg(long)]
@@ -139,7 +139,6 @@ fn parse_ship(s: &str) -> Result<ShipType, String> {
 fn parse_gfx(s: &str) -> Option<client::Gfx> {
     match s {
         "vector" | "sixel" => Some(client::Gfx::Vector),
-        "blocks" => Some(client::Gfx::Blocks),
         "braille" => Some(client::Gfx::Braille),
         _ => None,
     }

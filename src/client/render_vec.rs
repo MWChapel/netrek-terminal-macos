@@ -2,11 +2,12 @@
 //! pixel images with thin anti-aliased lines, outlined planets and small
 //! text, like the classic X11 client. Sent to the terminal as SIXEL.
 
-use super::pixels::{mix, rgb, scale, Rgb};
+use super::palette::{mix, rgb, scale, Rgb};
 use super::vg::Canvas;
-use super::render_px::{callsign, faction_rgb, planet_rgb, player_rgb, ship_size_units, team_rgb, torp_rgb, LOOT};
+use super::palette::{callsign, faction_rgb, planet_rgb, player_rgb, ship_size_units, team_rgb, torp_rgb, LOOT};
 use super::shipart::{engine_points, ship_parts, Part};
-use super::App;
+use super::render::HELP;
+use super::{App, Popup};
 use crate::consts::*;
 use crate::proto::*;
 use std::f32::consts::TAU;
@@ -637,6 +638,70 @@ impl App {
     }
 
     /// The player list, with a little silhouette of each ship.
+    /// A popup (help, players or planets) drawn as an image, so vector mode
+    /// keeps its maps on screen underneath it.
+    pub(super) fn draw_popup_vec(&self, pw: i32, ph: i32, title: &str) -> Canvas {
+        let tr = &self.text;
+        let (fs, lh) = self.panel_font();
+        let mut c = Canvas::new(pw, ph, [0.0, 0.0, 0.0]);
+        let (w, h) = (pw as f32, ph as f32);
+        let pad = 14.0;
+        c.round_rect(1.5, 1.5, w - 3.0, h - 3.0, 6.0, rgb(0x9aa0ac), 1.0, Some(1.5));
+        c.text(tr, pad, 4.0 + lh * 0.75, title, fs, WHITE);
+        let top = 4.0 + lh * 1.15;
+        c.line(pad * 0.6, top, w - pad * 0.6, top, 1.0, rgb(0x3a404c), 1.0, 0.0);
+        match self.popup {
+            Popup::Help => {
+                let key_w = HELP.iter().map(|(k, _)| tr.width(k, fs)).fold(0.0, f32::max) + fs * 1.5;
+                for (k, (keys, what)) in HELP.iter().enumerate() {
+                    let y = top + 4.0 + (k as f32 + 0.75) * lh;
+                    if y > h - 4.0 {
+                        break;
+                    }
+                    c.text(tr, pad, y, keys, fs, rgb(0xf0d030));
+                    c.text(tr, pad + key_w, y, what, fs, rgb(0xc8ccd4));
+                }
+            }
+            Popup::Players => {
+                let list = self.draw_players_vec((w - 2.0 * pad) as i32, (h - top - 8.0) as i32);
+                c.draw_canvas(&list, pad as i32, (top + 2.0) as i32);
+            }
+            Popup::Planets => {
+                let f = self.frame.as_ref().unwrap();
+                let cw = tr.width("M", fs);
+                let col_w = (w - 2.0 * pad) / 2.0;
+                for (k, def) in PLANETS.iter().enumerate() {
+                    let (col, row) = (k / 20, k % 20);
+                    let x = pad + col as f32 * col_w;
+                    let y = top + 4.0 + (row as f32 + 0.75) * lh;
+                    if y > h - 4.0 {
+                        continue;
+                    }
+                    let info = &f.planets[k];
+                    if !info.known {
+                        c.text(tr, x, y, def.name, fs, GREY);
+                        c.text(tr, x + cw * 15.0, y, "?", fs, GREY);
+                        continue;
+                    }
+                    let pc = planet_rgb(info);
+                    c.text(tr, x, y, def.name, fs, pc);
+                    c.text(tr, x + cw * 15.0, y, &info.owner.letter().to_string(), fs, pc);
+                    c.text_right(tr, x + cw * 20.0, y, &info.armies.to_string(), fs, pc);
+                    let mut tags = String::new();
+                    for (flag, ch) in [(PL_REPAIR, 'R'), (PL_FUEL, 'F'), (PL_AGRI, 'A')] {
+                        tags.push(if info.flags & flag != 0 { ch } else { ' ' });
+                    }
+                    if info.tribbles {
+                        tags.push('T');
+                    }
+                    c.text(tr, x + cw * 21.5, y, &tags, fs, scale(pc, 0.8));
+                }
+            }
+            Popup::None => {}
+        }
+        c
+    }
+
     pub(super) fn draw_players_vec(&self, pw: i32, ph: i32) -> Canvas {
         let f = self.frame.as_ref().unwrap();
         let tr = &self.text;

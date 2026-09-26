@@ -2,9 +2,8 @@
 //! the tactical and galactic displays with braille graphics.
 
 mod canvas;
-mod pixels;
+mod palette;
 mod render;
-mod render_px;
 mod render_vec;
 mod shipart;
 mod sixel;
@@ -45,11 +44,14 @@ pub struct ClientConfig {
 pub enum Gfx {
     /// Real pixel images (SIXEL) with thin anti-aliased vector drawing.
     Vector,
-    /// Color block glyphs, 2x4 pixels per cell.
-    Blocks,
     /// Braille line art.
     Braille,
 }
+
+/// Image slots: tactical, galactic, dashboard, comms, players, popup.
+const IMAGE_SLOTS: usize = 6;
+/// The popup is drawn over the other images, so it's always painted last.
+const POPUP_SLOT: usize = 5;
 
 /// An encoded image waiting to be sent after the text layer.
 struct Image {
@@ -169,6 +171,56 @@ struct Layout {
     cpx: (f64, f64),
 }
 
+/// A mouse click reaches us as an escape sequence like `ESC [<0;45;12M`
+/// (the release ends in `m`). If the terminal's bytes arrive split, the
+/// input reader can report the ESC on its own and the rest as ordinary
+/// keys: digits set the speed and the final `m` opens the message prompt.
+/// This spots those fragments and drops them.
+#[derive(Default)]
+struct LeakFilter {
+    /// When we last saw something that can start a mouse report.
+    armed: Option<Instant>,
+    /// Inside a leaked report: dropping keys until its final `M` or `m`.
+    inside: bool,
+}
+
+impl LeakFilter {
+    /// Leaked bytes arrive in a burst straight after the ESC.
+    const WINDOW: Duration = Duration::from_millis(80);
+
+    /// True if this key is part of a leaked mouse report.
+    fn swallow(&mut self, k: &KeyEvent) -> bool {
+        let recent = self.armed.map_or(false, |t| t.elapsed() < Self::WINDOW);
+        let KeyCode::Char(c) = k.code else {
+            self.inside = false;
+            if k.code == KeyCode::Esc {
+                self.armed = Some(Instant::now());
+            }
+            return false;
+        };
+        if self.inside {
+            match c {
+                '0'..='9' | ';' | '<' => return true,
+                'M' | 'm' => {
+                    self.inside = false;
+                    self.armed = None;
+                    return true;
+                }
+                _ => self.inside = false,
+            }
+            return false;
+        }
+        // "ESC [" may also come through as Alt-[.
+        let alt_bracket = c == '[' && k.modifiers.contains(KeyModifiers::ALT);
+        if alt_bracket || (recent && matches!(c, '[' | '<')) {
+            self.armed = Some(Instant::now());
+            self.inside = c == '<';
+            return true;
+        }
+        false
+    }
+}
+
 /// Identifies one phaser shot across frames.
 type PhaserKey = (u8, i32, i32, i32, i32);
 
@@ -200,14 +252,14 @@ pub struct App {
     text: sixel::TextRenderer,
     /// Size of one character cell in screen pixels.
     cell_px: (f64, f64),
-    /// Blocks mode: physical subpixels per cell (square, matching the cell shape).
-    ss: (i32, i32),
     images: Vec<Image>,
-    sent: [Option<u64>; 5],
+    sent: [Option<u64>; IMAGE_SLOTS],
     last_gal: Instant,
     /// How many frames each phaser beam on screen has been visible (for its
     /// flash-and-fade animation).
     phaser_age: HashMap<PhaserKey, u8>,
+    /// Guard against mouse reports that leak through as keystrokes.
+    leak: LeakFilter,
     tmux_hint: bool,
     sound: sound::Sound,
 }
@@ -245,7 +297,7 @@ pub fn run(cfg: ClientConfig) -> io::Result<()> {
     let outfit_ship = cfg.ship;
     let cfg_mute = cfg.mute;
     let check = sixel_check();
-    let gfx = cfg.gfx.unwrap_or(if check.supported { Gfx::Vector } else { Gfx::Blocks });
+    let gfx = cfg.gfx.unwrap_or(if check.supported { Gfx::Vector } else { Gfx::Braille });
     let hint = if cfg.gfx.is_none() { check.hint } else { None };
     let tmux_hint = hint.is_some();
     let mut app = App {
@@ -268,14 +320,14 @@ pub fn run(cfg: ClientConfig) -> io::Result<()> {
         motd,
         redraw: false,
         gfx,
-        truecolor: pixels::truecolor_supported(),
+        truecolor: palette::truecolor_supported(),
         text: sixel::TextRenderer::load(),
         cell_px: (8.0, 16.0),
-        ss: (6, 12),
         images: Vec::new(),
-        sent: [None; 5],
+        sent: [None; IMAGE_SLOTS],
         last_gal: Instant::now(),
         phaser_age: HashMap::new(),
+        leak: LeakFilter::default(),
         tmux_hint,
         sound: sound::Sound::new(!cfg_mute),
     };
@@ -352,7 +404,7 @@ impl App {
                         Event::Resize(w, h) => {
                             screen.resize(w, h);
                             self.measure_cells();
-                            self.sent = [None; 5];
+                            self.sent = [None; IMAGE_SLOTS];
                         }
                         _ => {}
                     }
@@ -368,7 +420,7 @@ impl App {
                 execute!(out, terminal::Clear(terminal::ClearType::All))?;
                 screen.resize(w, h);
                 self.measure_cells();
-                self.sent = [None; 5];
+                self.sent = [None; IMAGE_SLOTS];
             }
             if dirty && last_draw.elapsed() >= Duration::from_millis(33) {
                 self.draw(&mut screen);
@@ -380,7 +432,7 @@ impl App {
                     let (w, h) = terminal::size()?;
                     execute!(out, terminal::Clear(terminal::ClearType::All))?;
                     screen.resize(w, h);
-                    self.sent = [None; 5];
+                    self.sent = [None; IMAGE_SLOTS];
                     self.draw(&mut screen);
                 }
                 had_images = has_images;
@@ -401,19 +453,23 @@ impl App {
                 self.cell_px = (ws.width as f64 / ws.columns as f64, ws.height as f64 / ws.rows as f64);
             }
         }
-        let ratio = (self.cell_px.1 / self.cell_px.0).clamp(1.2, 3.0);
-        self.ss = (6, ((6.0 * ratio).round() as i32).clamp(8, 18));
     }
 
     fn send_images(&mut self, out: &mut impl io::Write) -> io::Result<()> {
         use std::hash::{Hash, Hasher};
-        for img in std::mem::take(&mut self.images) {
+        let mut images = std::mem::take(&mut self.images);
+        images.sort_by_key(|img| img.slot == POPUP_SLOT);
+        let mut painted = false;
+        for img in images {
             let mut hs = std::collections::hash_map::DefaultHasher::new();
             img.data.hash(&mut hs);
             let h = hs.finish();
-            if self.sent[img.slot] == Some(h) {
+            // The popup must be repainted whenever anything beneath it was.
+            let covered = img.slot == POPUP_SLOT && painted;
+            if self.sent[img.slot] == Some(h) && !covered {
                 continue;
             }
+            painted = true;
             crossterm::queue!(out, cursor::MoveTo(img.x as u16, img.y as u16))?;
             out.write_all(&img.data)?;
             self.sent[img.slot] = Some(h);
@@ -648,6 +704,9 @@ impl App {
     }
 
     fn on_key(&mut self, k: KeyEvent) {
+        if self.leak.swallow(&k) {
+            return;
+        }
         if k.modifiers.contains(KeyModifiers::CONTROL) && matches!(k.code, KeyCode::Char('c') | KeyCode::Char('d')) {
             self.quit = true;
             return;
@@ -739,14 +798,12 @@ impl App {
             'm' => self.mode = Mode::Compose { target: None, text: String::new() },
             'g' => {
                 self.gfx = match self.gfx {
-                    Gfx::Vector => Gfx::Blocks,
-                    Gfx::Blocks => Gfx::Braille,
+                    Gfx::Vector => Gfx::Braille,
                     Gfx::Braille => Gfx::Vector,
                 };
                 self.redraw = true;
                 self.warn(match self.gfx {
                     Gfx::Vector => "Graphics: vector (sixel images)",
-                    Gfx::Blocks => "Graphics: color blocks",
                     Gfx::Braille => "Graphics: braille line art",
                 });
             }
@@ -807,7 +864,7 @@ impl App {
             (Some((p, d)), Some((_, pd))) if d < pd => {
                 let s = p.ship.stats();
                 match p.faction {
-                    Some(fac) => format!("{} {} — {} • {} • speed {}", render_px::callsign(&p), p.name, fac.name(), s.name, p.speed),
+                    Some(fac) => format!("{} {} — {} • {} • speed {}", palette::callsign(&p), p.name, fac.name(), s.name, p.speed),
                     None => format!(
                         "{}{} {} — {} {} • speed {} • kills {:.2}{}",
                         p.team.letter(),
@@ -937,5 +994,36 @@ impl App {
             }
             _ => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn key(c: char) -> KeyEvent {
+        KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE)
+    }
+
+    /// A mouse report split after its ESC is dropped whole, and normal
+    /// typing (including `m` and digits) still gets through.
+    #[test]
+    fn leaked_mouse_reports_are_dropped() {
+        let mut f = LeakFilter::default();
+        assert!(!f.swallow(&KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
+        for c in "[<0;45;12M".chars() {
+            assert!(f.swallow(&key(c)), "{:?} leaked", c);
+        }
+        assert!(!f.swallow(&key('m')), "a real m afterwards works");
+        assert!(!f.swallow(&key('5')));
+        // Alt-[ (ESC and [ read together) starts one too.
+        assert!(f.swallow(&KeyEvent::new(KeyCode::Char('['), KeyModifiers::ALT)));
+        for c in "<0;3;4m".chars() {
+            assert!(f.swallow(&key(c)), "{:?} leaked", c);
+        }
+        // Without a preceding ESC, [ and < are ordinary keys.
+        let mut f = LeakFilter::default();
+        assert!(!f.swallow(&key('[')));
+        assert!(!f.swallow(&key('<')));
     }
 }

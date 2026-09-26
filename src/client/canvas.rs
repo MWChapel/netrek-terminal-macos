@@ -31,6 +31,11 @@ impl Screen {
         Screen { w, h, cells: vec![BLANK; n], prev: vec![BLANK; n], force: true, masks: Vec::new() }
     }
 
+    /// Rewrite every cell on the next flush (e.g. after an image covered them).
+    pub fn repaint(&mut self) {
+        self.force = true;
+    }
+
     pub fn resize(&mut self, w: u16, h: u16) {
         *self = Screen::new(w, h);
     }

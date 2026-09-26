@@ -2,7 +2,7 @@
 //! and tmux 3.4+ when the outer terminal supports it), plus text rendering
 //! into images using the system's monospace font.
 
-use super::pixels::Rgb;
+use super::palette::Rgb;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt::Write as _;

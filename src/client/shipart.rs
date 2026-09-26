@@ -433,7 +433,7 @@ pub fn engine_points(team: Team, ship: ShipType, faction: Option<Faction>) -> Ve
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::client::render_px::team_rgb;
+    use crate::client::palette::team_rgb;
     use crate::client::vg::Canvas;
 
     /// Renders every empire's ships into a PPM contact sheet
@@ -475,7 +475,7 @@ mod tests {
             for (col, &(team, ship, faction)) in ships.iter().enumerate() {
                 let (x, y) = (col as f32 * cell + cell / 2.0, row as f32 * cell + cell / 2.0);
                 let team_c = match faction {
-                    Some(f) => crate::client::render_px::faction_rgb(f),
+                    Some(f) => crate::client::palette::faction_rgb(f),
                     None => team_rgb(team),
                 };
                 let fill = [team_c[0] * 0.42, team_c[1] * 0.42, team_c[2] * 0.42];

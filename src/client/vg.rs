@@ -2,7 +2,7 @@
 //! anti-aliased strokes with proper joins, dashes, circles, polygons,
 //! gradients and text. The result is shipped to the terminal as an image.
 
-use super::pixels::Rgb;
+use super::palette::Rgb;
 use super::sixel::TextRenderer;
 use tiny_skia::{
     Color, FillRule, GradientStop, LineCap, LineJoin, LinearGradient, Paint, PathBuilder, Pixmap, Point,
@@ -41,6 +41,11 @@ impl Canvas {
         let mut pm = Pixmap::new(w.max(1) as u32, h.max(1) as u32).expect("pixmap");
         pm.fill(color(bg, 1.0));
         Canvas { w: w.max(1), h: h.max(1), pm }
+    }
+
+    /// Paint another canvas onto this one with its top-left corner at (x, y).
+    pub fn draw_canvas(&mut self, other: &Canvas, x: i32, y: i32) {
+        self.pm.draw_pixmap(x, y, other.pm.as_ref(), &tiny_skia::PixmapPaint::default(), Transform::identity(), None);
     }
 
     pub fn get(&self, x: i32, y: i32) -> Rgb {

@@ -9,7 +9,7 @@ that runs entirely inside a terminal window on macOS.
   dashboard, player list and message window underneath, like the original X11 client.
 - **Real graphics in the terminal:** vector-style maps and control panel drawn with
   [tiny-skia](https://github.com/linebender/tiny-skia) and sent as SIXEL images. On
-  terminals without image support it falls back to color block glyphs or braille.
+  terminals without image support it falls back to braille line art.
 - **Authentic rules:** the 40-planet galaxy, the six ship classes, and weapons, fuel,
   heat, orbiting, bombing, army carrying and planet capture use numbers from the
   Vanilla Netrek server source.
@@ -143,7 +143,7 @@ Starts a server on a random localhost port in the background and connects to it.
 | `-n, --name <NAME>` | `$USER` | Your callsign |
 | `-t, --team <TEAM>` | `fed` | Preferred team: `fed`, `rom`, `kli`, `ori` |
 | `-s, --ship <SHIP>` | `CA` | Preferred ship: `SC`, `DD`, `CA`, `BB`, `AS`, `SB` |
-| `-g, --gfx <MODE>` | `auto` | Map graphics: `auto`, `vector` (alias `sixel`), `blocks`, `braille` |
+| `-g, --gfx <MODE>` | `auto` | Map graphics: `auto`, `vector` (alias `sixel`), `braille` |
 | `--mute` | off | Start with sound effects off |
 
 ### `netrek play [HOST]`
@@ -159,17 +159,17 @@ Enter to launch.
 
 ## Terminal setup and graphics modes
 
-The client picks the best graphics your terminal supports. Press `g` in game to cycle
-through the modes, or force one with `--gfx`.
+The client picks the best graphics your terminal supports. Press `g` in game to switch
+between the modes, or force one with `--gfx`.
 
 | Mode | Looks like | Works in |
 |---|---|---|
 | **vector** | Real pixel images: thin anti-aliased lines, outlined planets, crisp labels, graphical dashboard | iTerm2, WezTerm, foot, mlterm; tmux 3.4+ when configured (below) |
-| **blocks** | Color block glyphs (▀ ▌ ▚ ▂ ▆ …) from a supersampled rasterizer, about 6×15 pixels per character cell | Any terminal with 256 colors; 24-bit color when available (Terminal.app, iTerm2, …) |
 | **braille** | Braille-dot line art | Any Unicode terminal |
 
-In every mode the layout is sized in real screen pixels, so the maps stay square
-whatever your font's cell shape.
+In both modes the layout is sized in real screen pixels, so the maps stay square
+whatever your font's cell shape. In vector mode the help, player and planet popups are
+drawn as images over the maps, so the maps stay in vector mode while a popup is open.
 
 ### iTerm2
 
@@ -193,19 +193,18 @@ tmux source ~/.tmux.conf
 # prefix + d, then: tmux attach
 ```
 
-If you run inside tmux without this setting, the client falls back to blocks mode and
+If you run inside tmux without this setting, the client falls back to braille mode and
 shows a one-line hint. The outer terminal must itself support SIXEL. Inside tmux, the
 client checks which app is hosting your tmux client (by walking its process tree). If
-that's Terminal.app (or another terminal without SIXEL), it stays in blocks mode and
+that's Terminal.app (or another terminal without SIXEL), it stays in braille mode and
 suggests attaching from iTerm2. The same tmux session can be attached from Terminal.app
 and from iTerm2 at different times, and the client picks the right mode each time it
 starts.
 
 ### Terminal.app
 
-Terminal.app can't display images, so it uses **blocks** mode. That still gives shaded
-planets, ship silhouettes and thin phaser beams. For the full vector look, run in
-iTerm2 instead.
+Terminal.app can't display images, so it uses **braille** line art. For the full vector
+look, run in iTerm2 instead.
 
 ### Colors and fonts
 
@@ -297,7 +296,7 @@ map. With no mouse, they fire along your current heading.
 | `P` | Planet list |
 | `?` or `h` | Help |
 | `+` / `-`, mouse wheel | Zoom the tactical view |
-| `g` | Cycle graphics: vector / blocks / braille |
+| `g` | Switch graphics: vector / braille |
 | `S` | Sound on / off |
 | `Ctrl-L` | Redraw the screen |
 | `q` | Quit (asks to confirm); `Ctrl-C` quits immediately |
@@ -693,7 +692,7 @@ checked when a client connects).
 
 ## Troubleshooting
 
-**It's in blocks mode, but I'm using iTerm2.**
+**It's in braille mode, but I'm using iTerm2.**
 You're probably inside tmux without the SIXEL feature enabled. See [tmux](#tmux). Check
 with `tmux display -p '#{client_termfeatures}'`: it should list `sixel`. Also check the
 outer terminal really is iTerm2. `tmux show-environment -g TERM_PROGRAM` shows what tmux
@@ -766,11 +765,10 @@ src/
   client/
     mod.rs              connection, input handling, graphics-mode detection, sound triggers
     render.rs           layout, outfit screen, text dashboard, player list, messages, popups
-    render_vec.rs       vector-mode maps and graphical control panel
-    render_px.rs        blocks-mode maps
+    render_vec.rs       vector-mode maps, graphical control panel and popups
+    palette.rs          colours for empires, aliens and planets; terminal colour conversion
     shipart.rs          per-empire ship designs
     vg.rs               vector canvas on tiny-skia (paths, dashes, gradients, text)
-    pixels.rs           supersampling rasterizer + block-glyph matcher for blocks mode
     sixel.rs            SIXEL encoder with adaptive palette; font rendering (fontdue)
     canvas.rs           diffing terminal screen buffer; braille canvas
     sound.rs            sound synthesis and playback
@@ -785,10 +783,9 @@ src/
 3. **Client, graphics:**
    - In **vector** mode the maps and control panel are drawn with tiny-skia, encoded as
      SIXEL and placed over reserved cells. The text layer never writes into those cells.
-     Images are only re-sent when they change.
-   - In **blocks** mode the maps are rasterized at about 6×15 pixels per cell, and each
-     cell becomes the block character and foreground/background color pair that best
-     matches it.
+     Images are only re-sent when they change. A popup is its own image, painted last
+     so it stays on top.
+   - In **braille** mode the maps are drawn as braille-dot line art in the text layer.
 
 ## Development
 
