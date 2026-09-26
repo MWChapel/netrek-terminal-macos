@@ -3,6 +3,10 @@
 
 pub mod aliens;
 pub mod bot;
+pub mod orders;
+pub mod ranks;
+pub mod supply;
+pub mod terrain;
 pub mod world;
 
 use crate::consts::*;
@@ -14,7 +18,7 @@ use std::sync::mpsc::{self, Receiver, Sender, SyncSender, TrySendError};
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
-use world::{Dest, World};
+use world::{Dest, Features, World};
 
 #[derive(Clone)]
 pub struct ServerConfig {
@@ -27,6 +31,10 @@ pub struct ServerConfig {
     pub aliens: Vec<Faction>,
     /// Average seconds between alien incursions.
     pub alien_interval: u64,
+    /// Optional rules (ranks, orders, diplomacy, terrain, supply).
+    pub features: Features,
+    /// Where service records are kept (with ranks; None = memory only).
+    pub records: Option<std::path::PathBuf>,
     pub quiet: bool,
 }
 
@@ -67,6 +75,18 @@ fn serve(listener: TcpListener, cfg: ServerConfig) -> io::Result<()> {
         if !cfg.aliens.is_empty() {
             let kinds: Vec<&str> = cfg.aliens.iter().map(|f| f.key()).collect();
             println!("alien incursions every ~{}s: {}", cfg.alien_interval, kinds.join(", "));
+        }
+        let f = cfg.features;
+        let on: Vec<&str> = [(f.ranks, "ranks"), (f.orders, "orders"), (f.diplomacy, "diplomacy"), (f.terrain, "terrain"), (f.supply, "supply")]
+            .into_iter()
+            .filter(|x| x.0)
+            .map(|x| x.1)
+            .collect();
+        if !on.is_empty() {
+            println!("extras: {}", on.join(", "));
+        }
+        if let (true, Some(p)) = (f.ranks, &cfg.records) {
+            println!("service records: {}", p.display());
         }
     }
     let game_cfg = cfg.clone();
@@ -139,10 +159,13 @@ fn send(c: &Conn, msg: &ServerMsg) -> bool {
 }
 
 fn game_loop(rx: Receiver<Event>, cfg: ServerConfig) {
-    let mut world = World::new();
+    let mut world = World::with_features(cfg.features);
     let mut conns: HashMap<u64, Conn> = HashMap::new();
     let mut bots: Vec<bot::Bot> = Vec::new();
     let mut director = aliens::Director::new(aliens::AlienConfig { kinds: cfg.aliens.clone(), interval: cfg.alien_interval });
+    let mut logistics = supply::Logistics::new();
+    let mut orders = orders::Orders::new();
+    let mut careers = cfg.features.ranks.then(|| ranks::Careers::new(cfg.records.clone()));
     let tick_len = Duration::from_millis(1000 / UPS);
     let mut next = Instant::now();
     let log = |s: String| {
@@ -201,10 +224,12 @@ fn game_loop(rx: Receiver<Event>, cfg: ServerConfig) {
             balance_bots(&mut world, &mut bots, cfg.bots, &cfg.empires);
         }
         director.tick(&mut world);
+        logistics.tick(&mut world);
         for b in bots.iter_mut() {
             b.think(&mut world);
         }
         world.tick();
+        run_extras(&mut world, &logistics, &mut orders, careers.as_mut());
 
         // Deliver chat and warnings.
         for out in world.outbox.drain(..) {
@@ -242,6 +267,34 @@ fn game_loop(rx: Receiver<Event>, cfg: ServerConfig) {
             thread::sleep(next - now);
         } else {
             next = now;
+        }
+    }
+}
+
+/// Hand this tick's events and slash commands to the orders and career
+/// systems (when they're switched on).
+fn run_extras(world: &mut World, logistics: &supply::Logistics, orders: &mut orders::Orders, careers: Option<&mut ranks::Careers>) {
+    let mut events = std::mem::take(&mut world.events);
+    let commands = std::mem::take(&mut world.commands);
+    if world.features.orders {
+        orders.tick(world, logistics, &events, &commands);
+        events.extend(std::mem::take(&mut world.events));
+    }
+    match careers {
+        Some(c) => c.tick(world, &events, &commands),
+        None => {
+            for (id, cmd) in &commands {
+                if cmd == "record" {
+                    world.reply(*id, "Service records are off on this server (start it with --ranks).");
+                }
+            }
+        }
+    }
+    if !world.features.orders {
+        for (id, cmd) in &commands {
+            if cmd.starts_with("order") {
+                world.reply(*id, "Orders are off on this server (start it with --orders).");
+            }
         }
     }
 }
@@ -375,5 +428,106 @@ mod tests {
         }
         let fighting = ['F', 'R', 'K', 'O'].iter().filter(|c| kills_by.get(c).copied().unwrap_or(0) > 0).count();
         assert!(fighting >= 3, "expected most empires to score kills: {:?}", kills_by);
+    }
+
+    /// A long robot war with every extra switched on (and the aliens), two
+    /// robots standing in for human players so they get orders and careers.
+    #[test]
+    fn extras_game() {
+        let features = Features { ranks: true, orders: true, diplomacy: true, terrain: true, supply: true };
+        let mut world = World::with_features(features);
+        let mut bots = Vec::new();
+        let all = Team::PLAYABLE;
+        balance_bots(&mut world, &mut bots, 12, &all);
+        for b in bots.iter().take(2) {
+            world.players[b.id as usize].robot = false;
+        }
+        let mut director = aliens::Director::new(aliens::AlienConfig { kinds: Faction::ALL.to_vec(), interval: 60 });
+        let mut logistics = supply::Logistics::new();
+        let mut orders = orders::Orders::new();
+        let mut careers = Some(ranks::Careers::new(None));
+        let mut log = Vec::new();
+        let mut orders_given = 0;
+        for tick in 0..(UPS as u32 * 60 * 20) {
+            if tick % UPS as u32 == 0 {
+                balance_bots(&mut world, &mut bots, 12, &all);
+            }
+            director.tick(&mut world);
+            logistics.tick(&mut world);
+            for b in bots.iter_mut() {
+                b.think(&mut world);
+            }
+            world.tick();
+            run_extras(&mut world, &logistics, &mut orders, careers.as_mut());
+            if tick % 50 == 0 {
+                for id in world.players.iter().filter(|p| p.in_use).map(|p| p.id).collect::<Vec<_>>() {
+                    let _ = encode(&ServerMsg::Frame(Box::new(world.frame_for(id))));
+                }
+                orders_given += world.players.iter().filter(|p| p.order.is_some()).count();
+            }
+            log.extend(world.outbox.drain(..).map(|o| o.msg.text));
+            world.warnings.clear();
+        }
+        let has = |s: &str| log.iter().filter(|m| m.contains(s)).count();
+        println!(
+            "deliveries={} upgrades={} salvages={} treaties={} black-hole={} promotions={} orders-seen={}",
+            has("convoy delivers"),
+            has("Upgrade:"),
+            has("salvages"),
+            has("signed a treaty"),
+            has("black hole") + has("singularity"),
+            has("promoted"),
+            orders_given
+        );
+        for m in log.iter().filter(|m| m.contains("treaty") || m.contains("salvages") || m.contains("promoted") || m.contains("convoy")).take(15) {
+            println!("  {}", m);
+        }
+        assert!(world.terrain.len() >= 10);
+        assert!(orders_given > 0, "nobody ever got orders");
+        assert!(world.players.iter().any(|p| p.rank.is_some()), "no service records");
+        assert!(log.iter().any(|m| m.contains("was kill")), "no fighting");
+    }
+
+    /// Over a real connection: a server with every extra sends terrain,
+    /// supplies and a service record, and answers slash commands.
+    #[test]
+    fn extras_over_the_wire() {
+        let records = std::env::temp_dir().join(format!("netrek-wire-{}.tsv", std::process::id()));
+        let cfg = ServerConfig {
+            bind: "127.0.0.1".into(),
+            port: 0,
+            bots: 4,
+            empires: vec![Team::Fed, Team::Rom],
+            aliens: Vec::new(),
+            alien_interval: 150,
+            features: Features { ranks: true, orders: true, diplomacy: true, terrain: true, supply: true },
+            records: Some(records.clone()),
+            quiet: true,
+        };
+        let port = spawn_background(cfg).unwrap();
+        let stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        stream.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+        let mut w = stream.try_clone().unwrap();
+        let mut r = BufReader::new(stream);
+        write_msg(&mut w, &ClientMsg::Hello { name: "Tester".into(), version: PROTOCOL_VERSION }).unwrap();
+        write_msg(&mut w, &ClientMsg::Join { team: Team::Fed, ship: ShipType::Cruiser }).unwrap();
+        write_msg(&mut w, &ClientMsg::Message { to: MsgTarget::All, text: "/record".into() }).unwrap();
+        let (mut terrain, mut supply, mut service, mut reply) = (false, false, false, false);
+        for _ in 0..200 {
+            match read_msg::<ServerMsg, _>(&mut r).unwrap() {
+                ServerMsg::Frame(f) => {
+                    terrain |= f.terrain.len() >= 10;
+                    supply |= f.me_info.supply.is_some();
+                    service |= f.me_info.service.is_some();
+                }
+                ServerMsg::Msg(m) => reply |= m.from == "COMMAND" && m.text.contains("points"),
+                _ => {}
+            }
+            if terrain && supply && service && reply {
+                break;
+            }
+        }
+        let _ = std::fs::remove_file(&records);
+        assert!(terrain && supply && service && reply, "terrain {} supply {} service {} reply {}", terrain, supply, service, reply);
     }
 }

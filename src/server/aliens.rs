@@ -6,7 +6,7 @@
 //! Their special powers (webs, planet eating, assimilation...) live here.
 
 use super::bot::lead;
-use super::world::{Dest, Lock, Loot, Outgoing, PhaserShot, Web, World};
+use super::world::{Dest, GameEvent, Lock, Loot, Outgoing, PhaserShot, Web, World};
 use crate::consts::*;
 use crate::proto::{ChatMsg, ClientMsg, MsgKind, PState, PhaserInfo};
 use rand::seq::SliceRandom;
@@ -1029,6 +1029,7 @@ fn vger(world: &mut World, e: &mut Event, i: usize, tick: u32) {
         }
         if *t >= 100 {
             let who = world.players[j].label();
+            world.events.push(GameEvent::Honour { player: j as u8, text: "Joined with V'Ger".into() });
             world.players[j].total_kills += 5.0;
             world.kill(j, None, "joined with V'Ger".into());
             announce(world, format!("{} has joined with V'Ger, and a new life form is born. Earth is saved!", who));
@@ -1145,6 +1146,7 @@ fn probe(world: &mut World, e: &mut Event, i: usize, tick: u32) {
         q.kills += 3.0;
         q.total_kills += 3.0;
         let who = q.label();
+        world.events.push(GameEvent::Honour { player: j as u8, text: "Answered the whale probe".into() });
         announce(world, format!("{} answers the probe with the song of the humpback whales!", who));
         world.remove_player(id);
     }
@@ -1287,6 +1289,7 @@ fn tribbles(world: &mut World, e: &mut Event, tick: u32) {
                         e.progress.remove(&id);
                         world.planets[k].tribbles = false;
                         let (name, who) = (world.planets[k].name, world.players[j].label());
+                        world.events.push(GameEvent::Honour { player: id, text: "Tribble exterminator".into() });
                         announce(world, format!("The tribbles on {} flee screeching from {}!", name, who));
                     }
                 }
@@ -1487,6 +1490,9 @@ fn q(world: &mut World, e: &mut Event, i: usize, tick: u32) {
     let Some(passed) = verdict else { return };
     if passed {
         // Reward: every ship made whole, and reinforcements at home.
+        for p in world.players.iter().filter(|p| p.alive() && p.team == team && p.faction.is_none()) {
+            world.events.push(GameEvent::Honour { player: p.id, text: "Passed the trial of Q".into() });
+        }
         for p in world.players.iter_mut().filter(|p| p.alive() && p.team == team && p.faction.is_none()) {
             let s = p.stats();
             p.damage = 0.0;

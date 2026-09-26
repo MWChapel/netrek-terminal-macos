@@ -111,7 +111,9 @@ impl Bot {
         let enemy = world
             .players
             .iter()
-            .filter(|q| q.alive() && q.team != team && !q.cloaked)
+            .filter(|q| q.alive() && world.hostile(q.team, team) && (!q.cloaked || q.detected))
+            // Ships hidden in a nebula or ion storm only show up close by.
+            .filter(|q| !q.hidden || dist(x, y, q.x, q.y) < super::terrain::SENSOR_RANGE)
             // Don't waste fire on Q, or on a champion only another empire can hurt.
             .filter(|q| q.ship != ShipType::QEntity && q.only_hurt_by.map_or(true, |t| t == team))
             .map(|q| (q, dist(x, y, q.x, q.y)))
@@ -122,7 +124,7 @@ impl Bot {
         let threats = world
             .torps
             .iter()
-            .filter(|t| t.team != team && t.explode == 0 && dist(x, y, t.x, t.y) < DETDIST)
+            .filter(|t| world.hostile(t.team, team) && t.explode == 0 && dist(x, y, t.x, t.y) < DETDIST)
             .count();
 
         // Empires worth attacking: teams with ships in play (T-mode style),
@@ -131,7 +133,9 @@ impl Bot {
             .into_iter()
             .filter(|&t| t != team && world.players.iter().any(|q| q.in_use && q.team == t && q.state != PState::Outfit))
             .collect();
-        let is_target = |owner: Team| owner != team && (active.is_empty() || owner == Team::Ind || active.contains(&owner));
+        let is_target = |owner: Team| {
+            world.hostile(owner, team) && (active.is_empty() || owner == Team::Ind || active.contains(&owner))
+        };
 
         let hurt = p.damage / s.max_damage;
         let low_fuel = p.fuel / s.max_fuel < 0.25;
@@ -185,7 +189,7 @@ impl Bot {
         let hostile_planet = world
             .planets
             .iter()
-            .any(|pl| pl.owner != team && pl.armies > 0 && dist(x, y, pl.x, pl.y) < PFIREDIST * 2.0);
+            .any(|pl| world.hostile(pl.owner, team) && pl.armies > 0 && dist(x, y, pl.x, pl.y) < PFIREDIST * 2.0);
         let danger = threats > 0 || hostile_planet || matches!(enemy, Some((.., d)) if d < 9000.0);
         if danger != p.shields_up && p.fuel > 300.0 && !(self.goal == Goal::Retreat && p.orbiting.is_some()) {
             cmds.push(ClientMsg::Shields);
@@ -252,6 +256,17 @@ impl Bot {
                 } else {
                     self.go_to(world, i, k, &mut cmds);
                 }
+            }
+        }
+
+        // Terrain: steer clear of black holes, stars and comets, and slow
+        // down among asteroids.
+        if world.features.terrain {
+            if let Some(dir) = super::terrain::escape(world, x, y) {
+                cmds.push(ClientMsg::Course(dir as u8));
+                cmds.push(ClientMsg::Speed(s.max_speed as u8));
+            } else if super::terrain::in_asteroids(world, x, y) && p.speed > 4 {
+                cmds.push(ClientMsg::Speed(4));
             }
         }
 

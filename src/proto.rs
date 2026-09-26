@@ -80,6 +80,8 @@ pub mod pf {
     pub const HUNTED: u16 = 4096;
     /// Carrying tribbles.
     pub const TRIBBLES: u16 = 8192;
+    /// Hidden from sensors (nebula or ion storm) — only set on your own ship.
+    pub const HIDDEN: u16 = 16384;
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -103,6 +105,8 @@ pub struct PlayerInfo {
     pub explode_frame: u8,
     /// Set for alien ships (the --aliens incursions).
     pub faction: Option<Faction>,
+    /// Career rank index into `RANKS` (with --ranks; humans only).
+    pub rank: Option<u8>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
@@ -146,6 +150,56 @@ pub struct PlanetInfo {
     pub tribbles: bool,
 }
 
+/// Space terrain (the --terrain option).
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum TerrainKind {
+    /// Hides ships from distant sensors; no shields, warp 6 at most.
+    Nebula,
+    /// A drifting storm: scrambles sensors, knocks out phasers, throws lightning.
+    IonStorm,
+    /// Rocks: fast ships take hull damage, torpedoes are soaked up.
+    Asteroids,
+    /// Pulls ships and torpedoes in; the event horizon destroys them.
+    BlackHole,
+    /// Sweeps its surroundings with a radiation pulse every ten seconds.
+    Pulsar,
+    /// A pair of linked mouths (x, y) and (x2, y2).
+    Wormhole,
+    /// A wreck to salvage for fuel, repairs or stranded colonists.
+    Derelict,
+    /// A subspace slipstream from (x, y) to (x2, y2): +3 warp, no fuel cost.
+    Corridor,
+    /// A star: its corona refuels ships but heats them up; the core burns.
+    Star,
+    /// Crosses the galaxy; its tail refuels, its head hurts.
+    Comet,
+    /// Reveals cloaked ships inside it.
+    TachyonGrid,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct TerrainInfo {
+    pub kind: TerrainKind,
+    pub x: i32,
+    pub y: i32,
+    pub r: i32,
+    /// Second point: the other wormhole mouth, the corridor's far end, or
+    /// the end of a comet's tail.
+    pub x2: i32,
+    pub y2: i32,
+    /// Animation state (pulsar: ticks until the next pulse).
+    pub phase: u8,
+    pub name: String,
+}
+
+/// A career on the leaderboard (with --ranks).
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct LeaderInfo {
+    pub name: String,
+    pub rank: u8,
+    pub points: f32,
+}
+
 /// Armies dropped by a destroyed Ferengi marauder, free for anyone to pick up.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct LootInfo {
@@ -181,6 +235,12 @@ pub struct SelfInfo {
     pub orbiting: Option<u8>,
     pub deaths: u32,
     pub total_kills: f32,
+    /// Current orders from command (with --orders).
+    pub order: Option<String>,
+    /// Your empire's supply stockpile and upgrade levels (with --supply).
+    pub supply: Option<(u32, [u8; 5])>,
+    /// One-line service record (with --ranks).
+    pub service: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -194,6 +254,11 @@ pub struct Frame {
     pub planets: Vec<PlanetInfo>,
     pub webs: Vec<WebInfo>,
     pub loot: Vec<LootInfo>,
+    pub terrain: Vec<TerrainInfo>,
+    /// Allied empires (with --diplomacy).
+    pub treaties: Vec<(Team, Team)>,
+    /// Top careers (with --ranks).
+    pub leaders: Vec<LeaderInfo>,
     /// Teams that are currently allowed to be joined.
     pub open_teams: Vec<Team>,
     /// Planets held by Fed, Rom, Kli, Ori (public knowledge, like the team window).

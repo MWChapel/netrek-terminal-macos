@@ -125,6 +125,9 @@ impl App {
             }
         }
 
+        // Space terrain (with the server's --terrain option).
+        super::render_terrain::draw_vec(&mut px, f, &to, &u, true, tr, fs);
+
         // Edge of the galaxy.
         let corners = [(0.0, 0.0), (GWIDTH, 0.0), (GWIDTH, GWIDTH), (0.0, GWIDTH)];
         for k in 0..4 {
@@ -367,6 +370,9 @@ impl App {
         for (p, q) in [((a.0, a.1), (b.0, a.1)), ((b.0, a.1), (b.0, b.1)), ((b.0, b.1), (a.0, b.1)), ((a.0, b.1), (a.0, a.1))] {
             px.line(p.0, p.1, q.0, q.1, 1.0, DARK_GREY, 0.9, 3.0);
         }
+
+        let ug = |units: f64| (units * sx) as f32;
+        super::render_terrain::draw_vec(&mut px, f, &to, &ug, false, tr, fs);
 
         for w in &f.webs {
             let (a, b) = (to(w.x1 as f64, w.y1 as f64), to(w.x2 as f64, w.y2 as f64));
@@ -616,7 +622,11 @@ impl App {
         }
         let (line, col) = self.input_line_text();
         c.text(tr, pad, base(1.0), &line, fs, col);
-        let sep = pad + 2.0 * lh + lh * 0.25;
+        let status = self.status_lines();
+        for (k, (text, col)) in status.iter().enumerate() {
+            c.text(tr, pad, base(2.0 + k as f32), text, fs, *col);
+        }
+        let sep = pad + (2.0 + status.len() as f32) * lh + lh * 0.25;
         c.line(pad, sep, w - pad, sep, 1.0, rgb(0x3a404c), 1.0, 0.0);
         let my_team = self.me().map(|p| p.team).unwrap_or(Team::Ind);
         let rows = (((h - sep - pad) / lh).floor() as usize).max(1);
@@ -744,7 +754,13 @@ impl App {
                 c.round_rect(pad - 2.0, top, w - 2.0 * pad + 4.0, lh, 3.0, base_col, 0.14, None);
             }
             self.ship_icon(&mut c, x_icon, mid, lh * 0.4, p, col);
-            let name: String = p.name.chars().take(16).collect();
+            let name: String = match p.rank {
+                Some(r) => format!("{} {}", RANKS[r as usize].1, p.name),
+                None => p.name.clone(),
+            }
+            .chars()
+            .take(18)
+            .collect();
             c.text(tr, x_tag, y, &callsign(p), fs, col);
             c.text(tr, x_ty, y, p.ship.stats().abbr, fs, col);
             c.text(tr, x_name, y, &name, fs, if p.id == self.slot { mix(col, WHITE, 0.4) } else { col });

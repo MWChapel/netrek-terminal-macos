@@ -35,6 +35,7 @@ fn ship_shape(s: ShipType) -> &'static [(f64, f64)] {
             (0.0, -1.0), (0.7, -0.7), (1.0, 0.0), (0.7, 0.7), (0.0, 1.0), (-0.7, 0.7), (-1.0, 0.0), (-0.7, -0.7),
         ],
         ShipType::BorgCube => &[(-0.75, -0.75), (0.75, -0.75), (0.75, 0.75), (-0.75, 0.75)],
+        ShipType::Freighter => &[(0.0, -1.0), (0.4, -0.75), (0.45, 0.95), (-0.45, 0.95), (-0.4, -0.75)],
         ShipType::PlanetKiller => &[(-0.5, -1.0), (0.5, -1.0), (0.26, 1.0), (-0.26, 1.0)],
         ShipType::TholianVessel
         | ShipType::Bioship
@@ -159,6 +160,37 @@ impl App {
         scr.masks.push((x, y, bw, bh));
     }
 
+    /// Whether two empires are allied (from the server's treaty list).
+    pub(super) fn allied(&self, a: Team, b: Team) -> bool {
+        self.frame.as_ref().map_or(false, |f| f.treaties.iter().any(|&(x, y)| (x == a && y == b) || (x == b && y == a)))
+    }
+
+    /// Extra status rows for the message panel: current orders, and your
+    /// alliance and supplies (only when the server has those options on).
+    pub(super) fn status_lines(&self) -> Vec<(String, [f32; 3])> {
+        let mut out = Vec::new();
+        let Some(f) = self.frame.as_ref() else { return out };
+        let mi = &f.me_info;
+        if let Some(o) = &mi.order {
+            out.push((format!("Orders: {}", o), [255.0, 200.0, 90.0]));
+        }
+        let mut info = Vec::new();
+        if let Some(me) = self.me() {
+            if let Some(&(a, b)) = f.treaties.iter().find(|&&(a, b)| a == me.team || b == me.team) {
+                let ally = if a == me.team { b } else { a };
+                info.push(format!("Allied with the {}", ally.plural()));
+            }
+        }
+        if let Some((stock, levels)) = mi.supply {
+            let lv: Vec<String> = UPGRADES.iter().zip(levels).map(|((n, _), l)| format!("{}{}", &n[..1].to_uppercase(), l)).collect();
+            info.push(format!("Supplies {} • upgrades {}", stock, lv.join(" ")));
+        }
+        if !info.is_empty() {
+            out.push((info.join("  •  "), [140.0, 210.0, 255.0]));
+        }
+        out
+    }
+
     fn draw_title(&self, scr: &mut Screen) {
         let f = self.frame.as_ref().unwrap();
         scr.fill(0, 0, scr.w as i32, 1, ' ', Color::Reset);
@@ -230,7 +262,7 @@ impl App {
                 let near = f
                     .players
                     .iter()
-                    .filter(|q| q.state == PState::Alive && q.team != p.team && !q.fuzzy)
+                    .filter(|q| q.state == PState::Alive && q.team != p.team && !self.allied(q.team, p.team) && !q.fuzzy)
                     .map(|q| (((q.x - p.x) as f64).powi(2) + ((q.y - p.y) as f64).powi(2)).sqrt())
                     .fold(f64::MAX, f64::min);
                 if near < 7000.0 {
@@ -325,10 +357,16 @@ impl App {
             }
         }
         self.draw_input_line(scr, rx, by + 2, rx + rw - 1);
-        for x in rx..rx + rw {
-            scr.put(x, by + 3, '─', DIM, false);
+        let status = self.status_lines();
+        for (k, (text, col)) in status.iter().enumerate() {
+            let c = super::palette::to_color(*col, self.truecolor);
+            scr.text_clip(rx, by + 3 + k as i32, text, c, false, rx + rw - 1);
         }
-        self.draw_messages(scr, Rect { x: rx, y: by + 4, w: rw, h: bh - 5 });
+        let sep = by + 3 + status.len() as i32;
+        for x in rx..rx + rw {
+            scr.put(x, sep, '─', DIM, false);
+        }
+        self.draw_messages(scr, Rect { x: rx, y: sep + 1, w: rw, h: (by + bh - 1 - sep - 1).max(0) });
 
         // Side column: the player list, full height.
         if side_col {
@@ -369,6 +407,9 @@ impl App {
                 b.dotf(dx, dy, DIM, 0);
             }
         }
+
+        // Space terrain (with the server's --terrain option).
+        super::render_terrain::draw_braille(&mut b, f, &to_dot, upd, true, &mut labels);
 
         // Edge of the galaxy.
         for (ax, ay, bx, by) in [
@@ -571,6 +612,7 @@ impl App {
         b.line_pattern(ax, by, ax, ay, DIM, 1, 2);
 
         let mut labels: Vec<(i32, i32, String, Color, bool)> = Vec::new();
+        super::render_terrain::draw_braille(&mut b, f, &to_dot, 1.0 / sx, false, &mut labels);
         for (k, def) in PLANETS.iter().enumerate() {
             let info = &f.planets[k];
             let col = if info.known { self.planet_color(info) } else { DIM };
@@ -735,11 +777,15 @@ impl App {
                 PState::Alive => "",
                 _ => "dead",
             };
+            let name = match p.rank {
+                Some(r) => format!("{} {}", RANKS[r as usize].1, p.name),
+                None => p.name.clone(),
+            };
             let line = format!(
                 "{:<4}{:<3}{:<16.16}{:>7.2}{:>6}  {}",
                 super::palette::callsign(p),
                 p.ship.stats().abbr,
-                p.name,
+                name,
                 p.kills,
                 arm,
                 status
@@ -906,6 +952,22 @@ impl App {
         let help = "Choose a team (f r k o) and a ship (s d c b a x), then press Enter to launch.";
         scr.text((w - help.len() as i32).max(0) / 2, y, help, Color::White, true);
         y += 1;
+        if let Some(sv) = &f.me_info.service {
+            let line = format!("Service record: {}", sv);
+            scr.text((w - line.chars().count() as i32).max(0) / 2, y, &line, Color::Cyan, false);
+            y += 1;
+        }
+        if !f.leaders.is_empty() {
+            let top: Vec<String> = f
+                .leaders
+                .iter()
+                .enumerate()
+                .map(|(k, l)| format!("{}. {} {} {:.0}", k + 1, RANKS[l.rank as usize].1, l.name, l.points))
+                .collect();
+            let line = format!("Top careers: {}", top.join("   "));
+            scr.text((w - line.chars().count() as i32).max(0) / 2, y, &line, DIM, false);
+            y += 1;
+        }
         for m in &self.motd {
             if y >= h - 7 {
                 break;
@@ -1007,6 +1069,7 @@ pub(super) const HELP: &[(&str, &str)] = &[
     ("+ / -", "zoom tactical view (or mouse wheel)"),
     ("g", "switch graphics: vector / braille"),
     ("S", "sound effects on / off"),
+    ("/", "server command, e.g. /record /orders /treaty rom /upgrade torps (when enabled)"),
     ("Ctrl-L", "redraw screen"),
     ("q", "quit"),
     ("", ""),

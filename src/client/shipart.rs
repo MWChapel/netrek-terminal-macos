@@ -65,6 +65,9 @@ pub fn ship_parts(team: Team, ship: ShipType, faction: Option<Faction>) -> Vec<P
     if let Some(f) = faction {
         return alien(f, ship);
     }
+    if ship == ShipType::Freighter {
+        return freighter();
+    }
     match team {
         Team::Fed | Team::Ind => federation(ship),
         Team::Kli => klingon(ship),
@@ -241,6 +244,16 @@ fn orion(ship: ShipType) -> Vec<Part> {
                 v.extend(pair(|s| line((s * hull_w, -0.1), (s * pod_x, 0.05))));
             }
         }
+    }
+    v
+}
+
+/// Supply freighter: a bridge on a long spine lined with cargo pods.
+fn freighter() -> Vec<Part> {
+    let mut v = vec![circle((0.0, -0.8), 0.2), capsule((0.0, -0.65), (0.0, 0.95), 0.16)];
+    for k in 0..4 {
+        let y = -0.45 + k as f32 * 0.35;
+        v.extend(pair(|s| Poly { pts: vec![(s * 0.1, y), (s * 0.42, y), (s * 0.42, y + 0.27), (s * 0.1, y + 0.27)], fill: true }));
     }
     v
 }

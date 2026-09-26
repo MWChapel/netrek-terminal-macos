@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 pub const DEFAULT_PORT: u16 = 2592; // the traditional Netrek port
-pub const PROTOCOL_VERSION: u32 = 4;
+pub const PROTOCOL_VERSION: u32 = 5;
 
 pub const UPS: u64 = 10; // server updates per second, like the original
 pub const GWIDTH: f64 = 100_000.0;
@@ -295,6 +295,8 @@ pub enum ShipType {
     QChampion,
     FerengiMarauder,
     SwarmShip,
+    /// Supply convoy freighter (the --supply option); flown by the server.
+    Freighter,
 }
 
 impl ShipType {
@@ -386,7 +388,7 @@ pub struct ShipStats {
     pub tract_str: f64,
 }
 
-pub static SHIPS: [ShipStats; 24] = [
+pub static SHIPS: [ShipStats; 25] = [
     ShipStats {
         name: "Scout", abbr: "SC", max_speed: 12, max_shield: 75.0, max_damage: 75.0,
         max_fuel: 5000.0, max_armies: 2, torp_damage: 25.0, torp_speed: 16.0, torp_fuse: 16,
@@ -604,7 +606,52 @@ pub static SHIPS: [ShipStats; 24] = [
         turns: 600_000.0, acc: 400, dec: 400, wpn_cool: 50.0, egn_cool: 50.0,
         max_etemp: 100_000.0, max_wtemp: 100_000.0, mass: 300.0, tract_range: 1.0, tract_str: 1.0,
     },
+    ShipStats {
+        name: "Freighter", abbr: "FR", max_speed: 7, max_shield: 250.0, max_damage: 300.0,
+        max_fuel: 20000.0, max_armies: 0, torp_damage: 0.0, torp_speed: 10.0, torp_fuse: 30,
+        torp_cost: 0.0, phaser_damage: 0.0, phaser_cost: 0.0,
+        plasma_damage: 0.0, plasma_speed: 0.0, plasma_fuse: 0, plasma_cost: 0.0,
+        recharge: 25.0, repair: 150.0, warp_cost: 1.0, cloak_cost: 20.0, shield_cost: 1.0,
+        turns: 150_000.0, acc: 150, dec: 200, wpn_cool: 4.0, egn_cool: 20.0,
+        max_etemp: 3000.0, max_wtemp: 1000.0, mass: 5000.0, tract_range: 0.5, tract_str: 1000.0,
+    },
 ];
+
+/// Career ranks (the --ranks option), from Netrek's classic ladder.
+pub const RANKS: [(&str, &str, f64); 9] = [
+    ("Ensign", "Ens", 0.0),
+    ("Lieutenant", "Lt", 3.0),
+    ("Lieutenant Commander", "LCdr", 8.0),
+    ("Commander", "Cdr", 15.0),
+    ("Captain", "Capt", 25.0),
+    ("Fleet Captain", "FCpt", 40.0),
+    ("Commodore", "Cdre", 60.0),
+    ("Rear Admiral", "RAdm", 90.0),
+    ("Admiral", "Adm", 130.0),
+];
+
+/// Rank needed to fly a starbase when ranks are on (Commander).
+pub const STARBASE_RANK: u8 = 3;
+
+/// Team upgrades bought with supplies (the --supply option).
+pub const UPGRADES: [(&str, &str); 5] = [
+    ("shields", "shields absorb 10% more per level"),
+    ("repair", "25% faster repairs per level"),
+    ("torps", "10% more torpedo damage per level"),
+    ("phasers", "10% more phaser damage and range per level"),
+    ("engines", "20% faster fuel recharge per level"),
+];
+pub const UPGRADE_SHIELDS: usize = 0;
+pub const UPGRADE_REPAIR: usize = 1;
+pub const UPGRADE_TORPS: usize = 2;
+pub const UPGRADE_PHASERS: usize = 3;
+pub const UPGRADE_ENGINES: usize = 4;
+pub const MAX_UPGRADE: u8 = 3;
+
+/// Supplies needed to buy the next level of an upgrade.
+pub fn upgrade_cost(level: u8) -> u32 {
+    (level as u32 + 1) * 10
+}
 
 pub const PL_HOME: u8 = 1;
 pub const PL_REPAIR: u8 = 2;

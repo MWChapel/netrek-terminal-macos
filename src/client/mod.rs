@@ -4,6 +4,7 @@
 mod canvas;
 mod palette;
 mod render;
+mod render_terrain;
 mod render_vec;
 mod shipart;
 mod sixel;
@@ -796,6 +797,8 @@ impl App {
             }
             'i' => self.info_pointer(),
             'm' => self.mode = Mode::Compose { target: None, text: String::new() },
+            // Server commands (/record, /treaty ...) go out as a message starting with '/'.
+            '/' => self.mode = Mode::Compose { target: Some(MsgTarget::All), text: "/".into() },
             'g' => {
                 self.gfx = match self.gfx {
                     Gfx::Vector => Gfx::Braille,
@@ -866,9 +869,10 @@ impl App {
                 match p.faction {
                     Some(fac) => format!("{} {} — {} • {} • speed {}", palette::callsign(&p), p.name, fac.name(), s.name, p.speed),
                     None => format!(
-                        "{}{} {} — {} {} • speed {} • kills {:.2}{}",
+                        "{}{} {}{} — {} {} • speed {} • kills {:.2}{}",
                         p.team.letter(),
                         slot_char(p.id),
+                        p.rank.map_or(String::new(), |r| format!("{} ", RANKS[r as usize].0)),
                         p.name,
                         p.team.name(),
                         s.name,

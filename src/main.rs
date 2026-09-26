@@ -30,13 +30,15 @@ enum Cmd {
         #[arg(short, long, default_value = "fed,rom", value_parser = parse_empires)]
         empires: Empires,
         /// Alien incursions: bare --aliens for all of them, or a list like "khan,borg"
-        /// (khan, gorn, tholian, fesarius, mirror, doomsday, amoeba, borg, vger,
-        /// crystal, probe, 8472, jemhadar)
+        /// (khan, gorn, tholian, fesarius, mirror, doomsday, amoeba, borg, vger, crystal,
+        /// probe, 8472, jemhadar, tribbles, chang, hirogen, q, ferengi, swarm)
         #[arg(long, num_args = 0..=1, default_missing_value = "all", value_parser = parse_aliens)]
         aliens: Option<Aliens>,
         /// Average seconds between alien incursions
         #[arg(long, default_value_t = 150)]
         alien_interval: u64,
+        #[command(flatten)]
+        extras: Extras,
     },
     /// Connect to a server and play
     Play {
@@ -57,16 +59,63 @@ enum Cmd {
         #[arg(short, long, default_value = "fed,rom", value_parser = parse_empires)]
         empires: Empires,
         /// Alien incursions: bare --aliens for all of them, or a list like "khan,borg"
-        /// (khan, gorn, tholian, fesarius, mirror, doomsday, amoeba, borg, vger,
-        /// crystal, probe, 8472, jemhadar)
+        /// (khan, gorn, tholian, fesarius, mirror, doomsday, amoeba, borg, vger, crystal,
+        /// probe, 8472, jemhadar, tribbles, chang, hirogen, q, ferengi, swarm)
         #[arg(long, num_args = 0..=1, default_missing_value = "all", value_parser = parse_aliens)]
         aliens: Option<Aliens>,
         /// Average seconds between alien incursions
         #[arg(long, default_value_t = 150)]
         alien_interval: u64,
         #[command(flatten)]
+        extras: Extras,
+        #[command(flatten)]
         who: Who,
     },
+}
+
+/// Optional extras, each switched on separately (all off by default).
+#[derive(clap::Args, Clone)]
+struct Extras {
+    /// Career ranks, service records and a leaderboard, kept between games
+    /// (optionally in FILE; default ~/.netrek/service-records.tsv)
+    #[arg(long, num_args = 0..=1, default_missing_value = "", value_name = "FILE")]
+    ranks: Option<String>,
+    /// Personal orders from command every few minutes, with rewards
+    #[arg(long)]
+    orders: bool,
+    /// Treaties between empires (/treaty, /break, /treaties)
+    #[arg(long)]
+    diplomacy: bool,
+    /// Space terrain: nebulae, ion storm, asteroids, black hole, pulsar, wormhole,
+    /// derelicts, slipstreams, a star, a comet and a tachyon grid
+    #[arg(long)]
+    terrain: bool,
+    /// Supply convoys that carry supplies home to buy empire upgrades
+    #[arg(long)]
+    supply: bool,
+    /// Switch on all five extras at once
+    #[arg(long)]
+    extras: bool,
+}
+
+impl Extras {
+    fn features(&self) -> server::world::Features {
+        let all = self.extras;
+        server::world::Features {
+            ranks: all || self.ranks.is_some(),
+            orders: all || self.orders,
+            diplomacy: all || self.diplomacy,
+            terrain: all || self.terrain,
+            supply: all || self.supply,
+        }
+    }
+
+    fn records(&self) -> Option<std::path::PathBuf> {
+        match self.ranks.as_deref() {
+            Some(p) if !p.is_empty() => Some(p.into()),
+            _ => Some(server::ranks::default_path()),
+        }
+    }
 }
 
 #[derive(clap::Args)]
@@ -154,13 +203,15 @@ fn player_name(who: &Who) -> String {
 fn main() {
     let cli = Cli::parse();
     let result = match cli.cmd {
-        Cmd::Server { port, bind, bots, empires, aliens, alien_interval } => server::run(server::ServerConfig {
+        Cmd::Server { port, bind, bots, empires, aliens, alien_interval, extras } => server::run(server::ServerConfig {
             bind,
             port,
             bots,
             empires: empires.0,
             aliens: aliens.map(|a| a.0).unwrap_or_default(),
             alien_interval,
+            features: extras.features(),
+            records: extras.records(),
             quiet: false,
         }),
         Cmd::Play { host, port, who } => client::run(client::ClientConfig {
@@ -172,7 +223,7 @@ fn main() {
             gfx: parse_gfx(&who.gfx),
             mute: who.mute,
         }),
-        Cmd::Solo { bots, empires, aliens, alien_interval, who } => {
+        Cmd::Solo { bots, empires, aliens, alien_interval, extras, who } => {
             let cfg = server::ServerConfig {
                 bind: "127.0.0.1".into(),
                 port: 0,
@@ -180,6 +231,8 @@ fn main() {
                 empires: empires.0,
                 aliens: aliens.map(|a| a.0).unwrap_or_default(),
                 alien_interval,
+                features: extras.features(),
+                records: extras.records(),
                 quiet: true,
             };
             server::spawn_background(cfg).and_then(|port| {

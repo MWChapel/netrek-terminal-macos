@@ -71,6 +71,24 @@ pub struct Player {
     pub revealed_until: u32,
     /// Q's champion: only this empire's weapons can hurt it.
     pub only_hurt_by: Option<Team>,
+    /// Career rank (with --ranks; humans only).
+    pub rank: Option<u8>,
+    /// Current orders from command, as shown to the player (with --orders).
+    pub order: Option<String>,
+    /// One-line service record (with --ranks).
+    pub service: Option<String>,
+    /// Supply convoy freighter: supplies aboard.
+    pub cargo: u32,
+    /// Terrain: hidden from distant sensors (nebula or ion storm).
+    pub hidden: bool,
+    /// Terrain: inside an ion storm (phasers knocked out).
+    pub in_storm: bool,
+    /// Terrain: cloak exposed by a tachyon detection grid.
+    pub detected: bool,
+    /// Terrain: ticks spent salvaging a derelict.
+    pub salvage: i32,
+    /// Terrain: no wormhole transit until this tick.
+    pub wormhole_until: u32,
 }
 
 impl Player {
@@ -124,6 +142,15 @@ impl Player {
             marked: false,
             revealed_until: 0,
             only_hurt_by: None,
+            rank: None,
+            order: None,
+            service: None,
+            cargo: 0,
+            hidden: false,
+            in_storm: false,
+            detected: false,
+            salvage: 0,
+            wormhole_until: 0,
         }
     }
 
@@ -157,6 +184,10 @@ impl Player {
         let s = self.stats();
         let per_kill = if self.ship == ShipType::Assault { 3.0 } else { 2.0 };
         ((self.kills * per_kill) as u32).min(s.max_armies)
+    }
+
+    pub fn leave_orbit_pub(&mut self) {
+        self.leave_orbit();
     }
 
     fn leave_orbit(&mut self) {
@@ -194,6 +225,38 @@ pub struct Planet {
     pub silenced_until: u32,
     /// Infested with tribbles: no army growth.
     pub tribbles: bool,
+    /// Supplies waiting for a convoy (with --supply).
+    pub supply: u32,
+}
+
+/// Optional rules, switched on by server options.
+#[derive(Clone, Copy, Default, Debug)]
+pub struct Features {
+    pub ranks: bool,
+    pub orders: bool,
+    pub diplomacy: bool,
+    pub terrain: bool,
+    pub supply: bool,
+}
+
+/// Things that happened this tick, for the career and orders systems.
+#[derive(Clone, Debug)]
+pub enum GameEvent {
+    Kill { killer: Option<u8>, victim: u8, credit: f64 },
+    PlanetTaken { player: u8, planet: usize },
+    Bombed { player: u8, planet: usize, armies: i32 },
+    /// Armies beamed down onto one of the player's own planets.
+    Reinforced { player: u8, planet: usize },
+    Salvaged { player: u8 },
+    Honour { player: u8, text: String },
+    OrderDone { player: u8 },
+}
+
+/// An empire's supply stockpile and upgrade levels (with --supply).
+#[derive(Clone, Copy, Default, Debug)]
+pub struct TeamSupply {
+    pub stock: u32,
+    pub levels: [u8; 5],
 }
 
 /// Armies spilled by a destroyed Ferengi marauder, drifting in space until
@@ -261,6 +324,22 @@ pub struct World {
     pub webs: Vec<Web>,
     pub loot: Vec<Loot>,
     pub hit_kind: HitKind,
+    pub features: Features,
+    /// Drained each tick by the career and orders systems.
+    pub events: Vec<GameEvent>,
+    /// Slash commands (e.g. /record) for systems outside the world.
+    pub commands: Vec<(u8, String)>,
+    /// Allied empires (with --diplomacy), each pair sorted.
+    pub treaties: Vec<(Team, Team)>,
+    /// Treaty offers: (from, to, expiry tick).
+    pub proposals: Vec<(Team, Team, u32)>,
+    /// Treaties being broken: (breaker, other, tick it ends).
+    pub breaking: Vec<(Team, Team, u32)>,
+    /// Per-empire supplies and upgrades, indexed by `Team::idx`.
+    pub supply: [TeamSupply; 5],
+    pub terrain: Vec<super::terrain::Terrain>,
+    /// Top careers (with --ranks), kept up to date by the career system.
+    pub leaders: Vec<LeaderInfo>,
 }
 
 impl World {
@@ -278,9 +357,44 @@ impl World {
             webs: Vec::new(),
             loot: Vec::new(),
             hit_kind: HitKind::Other,
+            features: Features::default(),
+            events: Vec::new(),
+            commands: Vec::new(),
+            treaties: Vec::new(),
+            proposals: Vec::new(),
+            breaking: Vec::new(),
+            supply: [TeamSupply::default(); 5],
+            terrain: Vec::new(),
+            leaders: Vec::new(),
         };
         w.reset_galaxy();
         w
+    }
+
+    pub fn with_features(features: Features) -> World {
+        let mut w = World::new();
+        w.features = features;
+        w.reset_galaxy();
+        w
+    }
+
+    /// Whether two empires are allied by treaty.
+    pub fn allied(&self, a: Team, b: Team) -> bool {
+        a != b && self.treaties.iter().any(|&(x, y)| (x == a && y == b) || (x == b && y == a))
+    }
+
+    /// Whether ships of these teams fight: different teams and not allied.
+    pub fn hostile(&self, a: Team, b: Team) -> bool {
+        a != b && !self.allied(a, b)
+    }
+
+    /// An empire's level in a supply upgrade (0 when supply is off).
+    pub fn upgrade(&self, team: Team, u: usize) -> f64 {
+        if self.features.supply {
+            self.supply[team.idx()].levels[u] as f64
+        } else {
+            0.0
+        }
     }
 
     pub fn reset_galaxy(&mut self) {
@@ -298,6 +412,7 @@ impl World {
                 alien: None,
                 silenced_until: 0,
                 tribbles: false,
+                supply: 0,
             })
             .collect();
         for team in Team::PLAYABLE {
@@ -329,6 +444,14 @@ impl World {
         self.loot.clear();
         self.banner = None;
         self.reset_timer = 0;
+        self.treaties.clear();
+        self.proposals.clear();
+        self.breaking.clear();
+        self.supply = [TeamSupply::default(); 5];
+        self.terrain.clear();
+        if self.features.terrain {
+            super::terrain::generate(self);
+        }
     }
 
     // ------------------------------------------------------------------
@@ -341,7 +464,7 @@ impl World {
         });
     }
 
-    fn team_msg(&mut self, team: Team, text: impl Into<String>) {
+    pub fn team_msg(&mut self, team: Team, text: impl Into<String>) {
         self.outbox.push(Outgoing {
             dest: Dest::Team(team),
             msg: ChatMsg { kind: MsgKind::System, from: team.letter().to_string(), text: text.into() },
@@ -431,6 +554,11 @@ impl World {
         if ship == ShipType::Starbase && self.has_starbase(team, id) {
             return Err("Your team already has a starbase".into());
         }
+        if ship == ShipType::Starbase && self.features.ranks && !self.players[i].robot {
+            if self.players[i].rank.unwrap_or(0) < STARBASE_RANK {
+                return Err(format!("Starbases need the rank of {}", RANKS[STARBASE_RANK as usize].0));
+            }
+        }
         let mut rng = rand::thread_rng();
         // Spawn near home, or near any planet the team still owns.
         let home = team.home_planet();
@@ -509,7 +637,11 @@ impl World {
             return;
         }
         if let ClientMsg::Message { to, text } = &msg {
-            self.chat(id, *to, text);
+            if text.trim_start().starts_with('/') {
+                self.command(id, text.trim());
+            } else {
+                self.chat(id, *to, text);
+            }
             return;
         }
         if let ClientMsg::Join { team, ship } = msg {
@@ -649,7 +781,8 @@ impl World {
                 if out >= MAXTORP {
                     return self.warn(id, "Torps limited to 8 at a time");
                 }
-                (s.torp_cost, s.torp_damage, s.torp_speed, s.torp_fuse)
+                let boost = 1.0 + 0.1 * self.upgrade(p.team, UPGRADE_TORPS);
+                (s.torp_cost, s.torp_damage * boost, s.torp_speed, s.torp_fuse)
             }
             TorpKind::Plasma => {
                 if s.plasma_damage <= 0.0 {
@@ -701,10 +834,14 @@ impl World {
         if p.phaser_timer > 0 {
             return;
         }
+        if p.in_storm {
+            return self.warn(id, "Ion interference: phasers are offline in the storm");
+        }
         if p.fuel < s.phaser_cost {
             return self.warn(id, "Not enough fuel for phaser");
         }
-        let range = PHASEDIST * s.phaser_damage / 100.0;
+        let phaser_damage = s.phaser_damage * (1.0 + 0.1 * self.upgrade(p.team, UPGRADE_PHASERS));
+        let range = PHASEDIST * phaser_damage / 100.0;
         let (vx, vy) = dir_vec(dir);
         let (x, y, team) = (p.x, p.y, p.team);
         // Nearest enemy ship close to the beam line.
@@ -725,7 +862,7 @@ impl World {
         }
         let (x2, y2, hit) = match best {
             Some((j, dist)) => {
-                let dmg = s.phaser_damage * (1.0 - dist / range);
+                let dmg = phaser_damage * (1.0 - dist / range);
                 let (tx, ty) = (self.players[j].x, self.players[j].y);
                 let label = self.players[i].tag();
                 self.hit_kind = if self.players[i].faction == Some(Faction::JemHadar) { HitKind::Polaron } else { HitKind::Phaser };
@@ -832,6 +969,9 @@ impl World {
         if self.planets[k].owner == p.team {
             return self.warn(id, "Don't bomb your own planets!");
         }
+        if self.allied(self.planets[k].owner, p.team) {
+            return self.warn(id, "That planet belongs to your allies!");
+        }
         if self.planets[k].armies <= 4 {
             return self.warn(id, "Too few armies left to bomb");
         }
@@ -863,6 +1003,8 @@ impl World {
             }
         } else if p.armies == 0 {
             return self.warn(id, "You have no armies on board");
+        } else if self.allied(self.planets[k].owner, p.team) {
+            return self.warn(id, "That planet belongs to your allies!");
         }
         let p = &mut self.players[i];
         p.beam_up = up;
@@ -950,7 +1092,7 @@ impl World {
     /// factions at war with each other (the Borg and Species 8472).
     pub fn at_war(&self, a: usize, b: usize) -> bool {
         let (pa, pb) = (&self.players[a], &self.players[b]);
-        pa.team != pb.team || matches!((pa.faction, pb.faction), (Some(x), Some(y)) if x.at_war_with(y))
+        self.hostile(pa.team, pb.team) || matches!((pa.faction, pb.faction), (Some(x), Some(y)) if x.at_war_with(y))
     }
 
     pub fn inflict(&mut self, i: usize, amount: f64, killer: Option<u8>, how: String) {
@@ -995,9 +1137,10 @@ impl World {
             }
             _ => amount,
         };
+        let absorb = 1.0 - 0.1 * self.upgrade(self.players[i].team, UPGRADE_SHIELDS);
         let p = &mut self.players[i];
         if p.shields_up && kind != HitKind::Polaron {
-            p.shield -= amount;
+            p.shield -= amount * absorb;
             if p.shield < 0.0 {
                 p.damage -= p.shield;
                 p.shield = 0.0;
@@ -1038,9 +1181,21 @@ impl World {
             p.marked = false;
         }
         let with_armies = if victim_armies > 0 { format!(" (carrying {} armies)", victim_armies) } else { String::new() };
-        match killer.map(|k| k as usize).filter(|&k| k != i && self.players[k].in_use) {
+        if self.players[i].ship == ShipType::Freighter && self.players[i].cargo > 0 {
+            let (team, cargo) = (self.players[i].team, self.players[i].cargo);
+            self.players[i].cargo = 0;
+            self.god(format!("The {} convoy is destroyed with {} supplies aboard!", team.name(), cargo));
+        }
+        let killer_ok = killer.map(|k| k as usize).filter(|&k| k != i && self.players[k].in_use);
+        let credit = 1.0 + victim_kills * 0.1 + victim_armies as f64 * 0.1;
+        self.events.push(GameEvent::Kill { killer: killer_ok.map(|k| k as u8), victim: i as u8, credit });
+        // Destroying one of the great monsters is a career honour.
+        if let (Some(k), true) = (killer_ok, self.players[i].faction.is_some() && self.players[i].bounty >= 15.0) {
+            let text = format!("Destroyed {}", self.players[i].stats().name);
+            self.events.push(GameEvent::Honour { player: k as u8, text });
+        }
+        match killer_ok {
             Some(k) => {
-                let credit = 1.0 + victim_kills * 0.1 + victim_armies as f64 * 0.1;
                 let kp = &mut self.players[k];
                 kp.kills += credit;
                 kp.total_kills += credit;
@@ -1087,6 +1242,7 @@ impl World {
             p.kills += 1.0;
             p.total_kills += 1.0;
             let who = p.label();
+            self.events.push(GameEvent::Honour { player: k as u8, text: "Bit back at the Hirogen".into() });
             self.alert(format!("The prey bites back! {} destroys a Hirogen hunter (+1 kill).", who));
         }
     }
@@ -1165,10 +1321,20 @@ impl World {
                 _ => {}
             }
         }
+        if self.features.terrain {
+            super::terrain::tick(self);
+        }
+        if self.features.diplomacy {
+            self.update_treaties();
+        }
         self.update_tractors();
         self.update_torps();
         self.update_webs();
         self.update_loot();
+        // Nobody may be reading events (e.g. in tests): don't let them pile up.
+        if self.events.len() > 2000 {
+            self.events.drain(..1000);
+        }
         if self.tick % 5 == 0 {
             self.planet_fire();
         }
@@ -1304,8 +1470,9 @@ impl World {
         }
 
         // Fuel.
+        let engines = 1.0 + 0.2 * if self.features.supply { self.supply[p.team.idx()].levels[UPGRADE_ENGINES] as f64 } else { 0.0 };
         if !powerless {
-            p.fuel += 2.0 * s.recharge;
+            p.fuel += 2.0 * s.recharge * engines;
         }
         if let Some((_, _, flags)) = own_planet {
             if flags & PL_FUEL != 0 && !powerless {
@@ -1349,6 +1516,7 @@ impl World {
         let p = &mut self.players[i];
 
         // Repairs.
+        let fix = 1.0 + 0.25 * if self.features.supply { self.supply[p.team.idx()].levels[UPGRADE_REPAIR] as f64 } else { 0.0 };
         let at_repair = own_planet.map_or(false, |(_, _, f)| f & PL_REPAIR != 0);
         let mut smul = if p.repair_mode { 4.0 } else { 2.0 };
         let mut dmul = if p.repair_mode { 2.0 } else { 1.0 };
@@ -1357,10 +1525,10 @@ impl World {
             dmul += 1.0;
         }
         if p.shield < s.max_shield {
-            p.shield = (p.shield + s.repair * smul / 1000.0).min(s.max_shield);
+            p.shield = (p.shield + s.repair * fix * smul / 1000.0).min(s.max_shield);
         }
         if p.damage > 0.0 {
-            p.damage = (p.damage - s.repair * dmul / 1000.0).max(0.0);
+            p.damage = (p.damage - s.repair * fix * dmul / 1000.0).max(0.0);
         }
         if p.repair_mode && p.speed > 0 {
             p.desired_speed = 0;
@@ -1383,6 +1551,7 @@ impl World {
                     let n = n.min(self.planets[k].armies - 4);
                     self.planets[k].armies -= n;
                     self.planets[k].tribbles = false;
+                    self.events.push(GameEvent::Bombed { player: id, planet: k, armies: n });
                     p.kills += 0.02 * n as f64;
                     p.total_kills += 0.02 * n as f64;
                 }
@@ -1423,6 +1592,7 @@ impl World {
         let pl = &mut self.planets[k];
         if pl.owner == team {
             pl.armies += 1;
+            self.events.push(GameEvent::Reinforced { player: i as u8, planet: k });
             return;
         }
         if pl.armies > 0 {
@@ -1450,6 +1620,7 @@ impl World {
         pl.known[team.idx()] = true;
         self.god(format!("{} taken over by {}", name, label));
         self.team_msg(team, format!("We now hold {}", name));
+        self.events.push(GameEvent::PlanetTaken { player: i as u8, planet: k });
         self.check_genocide(old, team);
     }
 
@@ -1513,6 +1684,8 @@ impl World {
 
     fn update_torps(&mut self) {
         let mut hits: Vec<(usize, f64, u8, TorpKind)> = Vec::new();
+        let treaties = self.treaties.clone();
+        let foes = |a: Team, b: Team| a != b && !treaties.iter().any(|&(x, y)| (x == a && y == b) || (x == b && y == a));
         for t in self.torps.iter_mut() {
             if t.explode > 0 {
                 t.explode += 1;
@@ -1523,7 +1696,7 @@ impl World {
                 let target = self
                     .players
                     .iter()
-                    .filter(|p| p.alive() && p.team != t.team && !p.cloaked)
+                    .filter(|p| p.alive() && foes(p.team, t.team) && (!p.cloaked || p.detected) && !p.hidden)
                     .map(|p| (p, (p.x - t.x).powi(2) + (p.y - t.y).powi(2)))
                     .filter(|(_, d2)| *d2 < 15000.0f64.powi(2))
                     .min_by(|a, b| a.1.total_cmp(&b.1));
@@ -1541,7 +1714,7 @@ impl World {
             if !boom {
                 let owner_fac = self.players.get(t.owner as usize).and_then(|o| if o.in_use { o.faction } else { None });
                 let hostile = |p: &Player| {
-                    p.team != t.team || matches!((owner_fac, p.faction), (Some(x), Some(y)) if x.at_war_with(y))
+                    foes(p.team, t.team) || matches!((owner_fac, p.faction), (Some(x), Some(y)) if x.at_war_with(y))
                 };
                 boom = self.players.iter().any(|p| {
                     let r = p.ship.hit_radius();
@@ -1557,7 +1730,7 @@ impl World {
                 let damdist = if t.kind == TorpKind::Plasma { PLASDAMDIST } else { DAMDIST };
                 let owner_fac = self.players.get(t.owner as usize).and_then(|o| if o.in_use { o.faction } else { None });
                 for (j, p) in self.players.iter().enumerate() {
-                    let hostile = p.team != t.team || matches!((owner_fac, p.faction), (Some(x), Some(y)) if x.at_war_with(y));
+                    let hostile = foes(p.team, t.team) || matches!((owner_fac, p.faction), (Some(x), Some(y)) if x.at_war_with(y));
                     if !p.alive() || !hostile {
                         continue;
                     }
@@ -1610,6 +1783,218 @@ impl World {
         self.webs.retain(|w| w.ttl > 0);
     }
 
+    // ------------------------------------------------------------------
+    // slash commands and diplomacy
+
+    fn command(&mut self, id: u8, text: &str) {
+        let mut words = text.trim_start_matches('/').split_whitespace();
+        let verb = words.next().unwrap_or("").to_ascii_lowercase();
+        let arg = words.next().unwrap_or("").to_ascii_lowercase();
+        let team = self.players[id as usize].team;
+        let d = self.features.diplomacy;
+        match verb.as_str() {
+            "treaty" | "ally" if d => match parse_team_word(&arg) {
+                Some(t) => self.propose(team, t, Some(id)),
+                None => self.warn(id, "Usage: /treaty fed|rom|kli|ori"),
+            },
+            "break" if d => self.break_treaty(team, Some(id)),
+            "treaties" if d => {
+                let list = if self.treaties.is_empty() {
+                    "No treaties are in force.".to_string()
+                } else {
+                    let v: Vec<String> = self.treaties.iter().map(|(a, b)| format!("{} + {}", a.plural(), b.plural())).collect();
+                    format!("Treaties: {}", v.join(", "))
+                };
+                self.reply(id, list);
+            }
+            "upgrade" | "buy" if self.features.supply => self.buy_upgrade(team, &arg, Some(id)),
+            "supplies" if self.features.supply => {
+                let s = self.supply[team.idx()];
+                let levels: Vec<String> = UPGRADES.iter().zip(s.levels).map(|((n, _), l)| format!("{} {}", n, l)).collect();
+                self.reply(id, format!("{} supplies. Upgrades: {}. Buy with /upgrade <name>.", s.stock, levels.join(", ")));
+            }
+            "record" | "orders" | "order" => self.commands.push((id, verb)),
+            "help" | "" => {
+                let mut cmds = vec!["/record", "/orders"];
+                if d {
+                    cmds.extend(["/treaty <empire>", "/break", "/treaties"]);
+                }
+                if self.features.supply {
+                    cmds.extend(["/supplies", "/upgrade <name>"]);
+                }
+                self.reply(id, format!("Commands: {}", cmds.join("  ")));
+            }
+            _ => self.warn(id, "Unknown command. Try /help"),
+        }
+    }
+
+    /// A private system message to one player.
+    pub fn reply(&mut self, id: u8, text: impl Into<String>) {
+        self.outbox.push(Outgoing {
+            dest: Dest::Player(id),
+            msg: ChatMsg { kind: MsgKind::System, from: "COMMAND".into(), text: text.into() },
+        });
+    }
+
+    fn ally_of(&self, t: Team) -> Option<Team> {
+        self.treaties.iter().find_map(|&(a, b)| if a == t { Some(b) } else if b == t { Some(a) } else { None })
+    }
+
+    /// Whether an empire has human players in the game.
+    fn has_humans(&self, t: Team) -> bool {
+        self.players.iter().any(|p| p.in_use && !p.robot && p.team == t && p.state != PState::Outfit)
+    }
+
+    /// `from` offers `to` a treaty. A pending offer the other way is
+    /// accepted. Empires run by robots decide on the spot.
+    pub fn propose(&mut self, from: Team, to: Team, who: Option<u8>) {
+        let say = |w: &mut World, text: String| match who {
+            Some(id) => w.warn(id, text),
+            None => {}
+        };
+        if from == to || to == Team::Ind || from == Team::Ind {
+            return say(self, "Choose another empire".into());
+        }
+        if self.team_planet_count(to) == 0 {
+            return say(self, format!("The {} are no longer in the game", to.plural()));
+        }
+        if self.allied(from, to) {
+            return say(self, format!("You are already allied with the {}", to.plural()));
+        }
+        if self.ally_of(from).is_some() || self.ally_of(to).is_some() {
+            return say(self, "An empire may only have one ally at a time".into());
+        }
+        let others = Team::PLAYABLE.into_iter().filter(|&t| t != from && t != to && self.team_planet_count(t) > 0).count();
+        if others == 0 {
+            return say(self, "With no common enemy left, there's nothing to ally against".into());
+        }
+        let tick = self.tick;
+        if self.proposals.iter().any(|&(a, b, until)| a == to && b == from && until > tick) {
+            return self.form_treaty(from, to);
+        }
+        if !self.has_humans(to) {
+            // Robot empires join a treaty unless the proposer is running away with the game.
+            let leader = Team::PLAYABLE.into_iter().max_by_key(|&t| self.team_planet_count(t));
+            let mut rng = rand::thread_rng();
+            if leader != Some(from) && rng.gen_bool(0.7) {
+                return self.form_treaty(from, to);
+            }
+            let text = format!("The {} reject the {}' offer of a treaty.", to.plural(), from.plural());
+            return self.god(text);
+        }
+        self.proposals.retain(|&(a, b, _)| !(a == from && b == to));
+        self.proposals.push((from, to, tick + 60 * UPS as u32));
+        let text = format!(
+            "The {} propose a treaty. Any of you can accept within 60 seconds: /treaty {}",
+            from.plural(),
+            from.abbr().to_ascii_lowercase()
+        );
+        self.team_msg(to, text);
+        self.team_msg(from, format!("Treaty offered to the {}.", to.plural()));
+    }
+
+    fn form_treaty(&mut self, a: Team, b: Team) {
+        let pair = if a.idx() < b.idx() { (a, b) } else { (b, a) };
+        self.treaties.push(pair);
+        self.proposals.retain(|&(x, y, _)| !((x == a && y == b) || (x == b && y == a)));
+        self.god(format!("The {} and the {} have signed a treaty of alliance!", a.plural(), b.plural()));
+    }
+
+    /// Give notice that `breaker` is leaving its treaty (in 10 seconds).
+    pub fn break_treaty(&mut self, breaker: Team, who: Option<u8>) {
+        let Some(other) = self.ally_of(breaker) else {
+            if let Some(id) = who {
+                self.warn(id, "You have no treaty to break");
+            }
+            return;
+        };
+        if self.breaking.iter().any(|&(a, _, _)| a == breaker) {
+            return;
+        }
+        self.breaking.push((breaker, other, self.tick + 10 * UPS as u32));
+        self.god(format!("The {} are breaking their treaty with the {}! Hostilities resume in 10 seconds.", breaker.plural(), other.plural()));
+    }
+
+    fn update_treaties(&mut self) {
+        let tick = self.tick;
+        self.proposals.retain(|&(_, _, until)| until > tick);
+        let due: Vec<(Team, Team, u32)> = self.breaking.iter().copied().filter(|&(_, _, at)| at <= tick).collect();
+        self.breaking.retain(|&(_, _, at)| at > tick);
+        for (a, b, _) in due {
+            self.treaties.retain(|&(x, y)| !((x == a && y == b) || (x == b && y == a)));
+            self.god(format!("The treaty between the {} and the {} is over.", a.plural(), b.plural()));
+        }
+        if tick % (10 * UPS as u32) != 0 {
+            return;
+        }
+        // Now and then a robot-run empire looks for an ally against the leader.
+        if tick % (60 * UPS as u32) == 0 {
+            let mut rng = rand::thread_rng();
+            let live: Vec<Team> = Team::PLAYABLE.into_iter().filter(|&t| self.team_planet_count(t) > 0).collect();
+            let leader = live.iter().copied().max_by_key(|&t| self.team_planet_count(t));
+            let free: Vec<Team> = live.iter().copied().filter(|&t| Some(t) != leader && self.ally_of(t).is_none()).collect();
+            let askers: Vec<Team> = free.iter().copied().filter(|&t| !self.has_humans(t)).collect();
+            if live.len() >= 3 && rng.gen_bool(0.5) {
+                if let Some(&from) = askers.choose(&mut rng) {
+                    let partners: Vec<Team> = free.iter().copied().filter(|&t| t != from).collect();
+                    if let Some(&to) = partners.choose(&mut rng) {
+                        self.propose(from, to, None);
+                    }
+                }
+            }
+        }
+        for (a, b) in self.treaties.clone() {
+            // With no common enemy left, the alliance lapses (so someone can win).
+            let others = Team::PLAYABLE.into_iter().filter(|&t| t != a && t != b && self.team_planet_count(t) > 0).count();
+            if others == 0 {
+                self.treaties.retain(|&p| p != (a, b));
+                self.god(format!("With no common enemy left, the {}-{} alliance dissolves.", a.abbr(), b.abbr()));
+                continue;
+            }
+            // Robot empires turn on an ally that grows far stronger than they are.
+            for (me, them) in [(a, b), (b, a)] {
+                if !self.has_humans(me) && self.team_planet_count(them) >= self.team_planet_count(me) + 8 {
+                    self.break_treaty(me, None);
+                    break;
+                }
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // supplies
+
+    /// Spend supplies on the next level of an upgrade (by name).
+    pub fn buy_upgrade(&mut self, team: Team, name: &str, who: Option<u8>) {
+        let Some(u) = UPGRADES.iter().position(|(n, _)| n.starts_with(name) && !name.is_empty()) else {
+            if let Some(id) = who {
+                let names: Vec<&str> = UPGRADES.iter().map(|(n, _)| *n).collect();
+                self.warn(id, format!("Upgrades: {}", names.join(", ")));
+            }
+            return;
+        };
+        let s = &mut self.supply[team.idx()];
+        let level = s.levels[u];
+        if level >= MAX_UPGRADE {
+            if let Some(id) = who {
+                self.warn(id, format!("{} are already fully upgraded", UPGRADES[u].0));
+            }
+            return;
+        }
+        let cost = upgrade_cost(level);
+        if s.stock < cost {
+            if let Some(id) = who {
+                let have = s.stock;
+                self.warn(id, format!("{} level {} costs {} supplies; you have {}", UPGRADES[u].0, level + 1, cost, have));
+            }
+            return;
+        }
+        s.stock -= cost;
+        s.levels[u] += 1;
+        let text = format!("Upgrade: {} level {} ({}).", UPGRADES[u].0, level + 1, UPGRADES[u].1);
+        self.team_msg(team, text);
+    }
+
     /// Spilled armies go to the first empire ship to fly over them.
     fn update_loot(&mut self) {
         for n in 0..self.loot.len() {
@@ -1646,7 +2031,7 @@ impl World {
             }
             for i in 0..MAXPLAYER {
                 let p = &self.players[i];
-                if !p.alive() || p.team == owner {
+                if !p.alive() || !self.hostile(p.team, owner) {
                     continue;
                 }
                 if (p.x - px).powi(2) + (p.y - py).powi(2) > PFIREDIST * PFIREDIST {
@@ -1674,9 +2059,13 @@ impl World {
 
     fn update_scouting(&mut self) {
         for p in self.players.iter().filter(|p| p.alive()) {
+            let ally = self.treaties.iter().find_map(|&(a, b)| if a == p.team { Some(b) } else if b == p.team { Some(a) } else { None });
             for pl in self.planets.iter_mut() {
                 if (pl.x - p.x).abs() < 6000.0 && (pl.y - p.y).abs() < 6000.0 {
                     pl.known[p.team.idx()] = true;
+                    if let Some(a) = ally {
+                        pl.known[a.idx()] = true;
+                    }
                 }
             }
         }
@@ -1694,8 +2083,10 @@ impl World {
             .iter()
             .filter(|p| p.in_use)
             .map(|p| {
-                let friendly = p.team == my_team || p.id == me;
-                let fuzzy = p.cloaked && !friendly;
+                let friendly = p.team == my_team || p.id == me || self.allied(p.team, my_team);
+                // Terrain: nebulae and ion storms hide ships from all but close range.
+                let far = (p.x - mp.x).powi(2) + (p.y - mp.y).powi(2) > 3000.0 * 3000.0;
+                let fuzzy = ((p.cloaked && !p.detected) || (p.hidden && far)) && !friendly;
                 let (x, y) = if fuzzy {
                     (p.x + rng.gen_range(-4000.0..4000.0), p.y + rng.gen_range(-4000.0..4000.0))
                 } else {
@@ -1721,6 +2112,7 @@ impl World {
                 set(&mut flags, p.e_overheat > 0, pf::ENGINE_HOT);
                 set(&mut flags, p.marked, pf::HUNTED);
                 set(&mut flags, p.tribbles, pf::TRIBBLES);
+                set(&mut flags, p.hidden && p.id == me, pf::HIDDEN);
                 PlayerInfo {
                     id: p.id,
                     name: p.name.clone(),
@@ -1738,6 +2130,7 @@ impl World {
                     fuzzy,
                     explode_frame: if p.state == PState::Exploding { (11 - p.state_timer).max(1) as u8 } else { 0 },
                     faction: p.faction,
+                    rank: p.rank,
                 }
             })
             .collect();
@@ -1784,6 +2177,10 @@ impl World {
             orbiting: mp.orbiting.map(|k| k as u8),
             deaths: mp.deaths,
             total_kills: mp.total_kills as f32,
+            order: mp.order.clone(),
+            supply: (self.features.supply && my_team != Team::Ind)
+                .then(|| (self.supply[my_team.idx()].stock, self.supply[my_team.idx()].levels)),
+            service: mp.service.clone(),
         };
         Frame {
             tick: self.tick,
@@ -1795,12 +2192,22 @@ impl World {
             planets,
             webs: self.webs.iter().map(|w| WebInfo { x1: w.x1 as i32, y1: w.y1 as i32, x2: w.x2 as i32, y2: w.y2 as i32 }).collect(),
             loot: self.loot.iter().map(|l| LootInfo { x: l.x as i32, y: l.y as i32, armies: l.armies.min(255) as u8 }).collect(),
+            terrain: self.terrain.iter().filter(|t| t.visible()).map(|t| t.info()).collect(),
+            treaties: self.treaties.clone(),
+            leaders: self.leaders.clone(),
             open_teams: self.open_teams(),
             team_planets: [Team::Fed, Team::Rom, Team::Kli, Team::Ori].map(|t| self.team_planet_count(t) as u8),
             starbase_teams: Team::PLAYABLE.into_iter().filter(|&t| self.has_starbase(t, me)).collect(),
             banner: self.banner.clone(),
         }
     }
+}
+
+/// "fed", "federation", "f" ... to a team.
+fn parse_team_word(s: &str) -> Option<Team> {
+    Team::PLAYABLE
+        .into_iter()
+        .find(|t| !s.is_empty() && (t.abbr().eq_ignore_ascii_case(s) || t.plural().to_ascii_lowercase().starts_with(s) || t.name().to_ascii_lowercase().starts_with(s)))
 }
 
 #[cfg(test)]
@@ -1843,5 +2250,86 @@ mod tests {
         assert_eq!(w.planets[d].owner, Team::Fed);
         assert_eq!(w.planets[d].alien, None);
         assert_eq!(w.planets[d].flags, 0, "still bare rock");
+    }
+
+    fn pilot(w: &mut World, name: &str, team: Team, x: f64, y: f64) -> u8 {
+        let id = w.add_player(name, false).unwrap();
+        w.join(id, team, ShipType::Cruiser).unwrap();
+        (w.players[id as usize].x, w.players[id as usize].y) = (x, y);
+        id
+    }
+
+    /// Two human empires sign a treaty, can't hurt each other, and the
+    /// break takes ten seconds' notice.
+    #[test]
+    fn treaties_between_players() {
+        let mut w = World::new();
+        w.features.diplomacy = true;
+        let kirk = pilot(&mut w, "Kirk", Team::Fed, 50_000.0, 50_000.0);
+        let tal = pilot(&mut w, "Tal", Team::Rom, 52_000.0, 50_000.0);
+        w.handle(kirk, ClientMsg::Message { to: MsgTarget::All, text: "/treaty rom".into() });
+        assert!(w.treaties.is_empty(), "needs the Romulans to agree");
+        w.handle(tal, ClientMsg::Message { to: MsgTarget::All, text: "/treaty fed".into() });
+        assert!(w.allied(Team::Fed, Team::Rom));
+        // Phasers, torpedoes and planets leave allies alone.
+        let dir = dir_to(50_000.0, 50_000.0, 52_000.0, 50_000.0);
+        w.handle(kirk, ClientMsg::Phaser(dir as u8));
+        w.handle(kirk, ClientMsg::Torp(dir as u8));
+        for _ in 0..30 {
+            w.tick();
+        }
+        assert_eq!(w.players[tal as usize].damage, 0.0);
+        assert_eq!(w.players[tal as usize].shield, ShipType::Cruiser.stats().max_shield);
+        // Breaking it: still allied for ten seconds, then at war.
+        w.handle(tal, ClientMsg::Message { to: MsgTarget::All, text: "/break".into() });
+        assert!(w.allied(Team::Fed, Team::Rom));
+        for _ in 0..(10 * UPS as u32 + 1) {
+            w.tick();
+        }
+        assert!(!w.allied(Team::Fed, Team::Rom));
+    }
+
+    #[test]
+    fn one_ally_at_a_time_and_robots_decide() {
+        let mut w = World::new();
+        w.features.diplomacy = true;
+        let kirk = pilot(&mut w, "Kirk", Team::Fed, 50_000.0, 50_000.0);
+        // The Klingons have no players: they answer at once.
+        for _ in 0..20 {
+            if w.allied(Team::Fed, Team::Kli) {
+                break;
+            }
+            w.handle(kirk, ClientMsg::Message { to: MsgTarget::All, text: "/treaty kli".into() });
+        }
+        assert!(w.allied(Team::Fed, Team::Kli), "robots accept most offers");
+        w.handle(kirk, ClientMsg::Message { to: MsgTarget::All, text: "/treaty ori".into() });
+        assert!(!w.allied(Team::Fed, Team::Ori), "only one ally");
+    }
+
+    /// Supply upgrades change the numbers.
+    #[test]
+    fn upgrades_boost_torpedoes() {
+        let mut w = World::new();
+        w.features.supply = true;
+        let kirk = pilot(&mut w, "Kirk", Team::Fed, 50_000.0, 50_000.0);
+        w.supply[Team::Fed.idx()].stock = 10;
+        w.handle(kirk, ClientMsg::Message { to: MsgTarget::All, text: "/upgrade torps".into() });
+        assert_eq!(w.supply[Team::Fed.idx()].levels[UPGRADE_TORPS], 1);
+        assert_eq!(w.supply[Team::Fed.idx()].stock, 0);
+        w.handle(kirk, ClientMsg::Torp(0));
+        let base = ShipType::Cruiser.stats().torp_damage;
+        assert!((w.torps[0].damage - base * 1.1).abs() < 1e-9);
+    }
+
+    /// With ranks on, starbases need a Commander.
+    #[test]
+    fn starbase_needs_rank() {
+        let mut w = World::new();
+        w.features.ranks = true;
+        let id = w.add_player("Cadet", false).unwrap();
+        w.players[id as usize].rank = Some(1);
+        assert!(w.join(id, Team::Fed, ShipType::Starbase).is_err());
+        w.players[id as usize].rank = Some(STARBASE_RANK);
+        assert!(w.join(id, Team::Fed, ShipType::Starbase).is_ok());
     }
 }

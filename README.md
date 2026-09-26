@@ -19,6 +19,9 @@ that runs entirely inside a terminal window on macOS.
 - **Alien incursions** (optional): nineteen Star Trek threats, from Khan, the Borg and the
   planet killer to V'Ger, Species 8472, the Jem'Hadar, General Chang, Q and a plague of
   tribbles, drop into the game.
+- **Extras** (optional, each its own server option): career ranks and service records,
+  personal orders from command, treaties between empires, eleven kinds of space terrain,
+  and supply convoys that buy upgrades for your empire.
 - **Sound:** synthesized retro sound effects, with no audio libraries required.
 - **Mouse and keyboard:** aim and steer with the mouse, with the classic Netrek key bindings.
 
@@ -39,6 +42,12 @@ that runs entirely inside a terminal window on macOS.
   - [Taking and retaking planets](#taking-and-retaking-planets)
 - [Robots](#robots)
 - [Alien incursions](#alien-incursions)
+- [Extras](#extras)
+  - [Ranks and service records](#ranks-and-service-records)
+  - [Orders](#orders)
+  - [Diplomacy](#diplomacy)
+  - [Space terrain](#space-terrain)
+  - [Supply convoys and upgrades](#supply-convoys-and-upgrades)
 - [Sound](#sound)
 - [Hosting a server](#hosting-a-server)
 - [Troubleshooting](#troubleshooting)
@@ -127,6 +136,12 @@ netrek <COMMAND>
 | `-e, --empires <LIST>` | `fed,rom` | Empires the robots play for: `all`, or a comma list such as `fed,rom,kli` |
 | `--aliens [LIST]` | off | Alien incursions: bare `--aliens` for all nineteen, or a list such as `khan,borg,vger`. See [Alien incursions](#alien-incursions) |
 | `--alien-interval <SECS>` | `150` | Average seconds between incursions |
+| `--ranks [FILE]` | off | Career ranks, service records and a leaderboard, saved to `FILE` (default `~/.netrek/service-records.tsv`). See [Extras](#extras) |
+| `--orders` | off | Personal orders from command, with rewards |
+| `--diplomacy` | off | Treaties between empires |
+| `--terrain` | off | Space terrain: nebulae, a black hole, a wormhole, a comet and more |
+| `--supply` | off | Supply convoys and empire upgrades |
+| `--extras` | off | All five of the above |
 
 The server logs connections, joins, kills and planet captures to stdout.
 
@@ -140,6 +155,7 @@ Starts a server on a random localhost port in the background and connects to it.
 | `-e, --empires <LIST>` | `fed,rom` | Empires the robots play for: `all`, or a comma list |
 | `--aliens [LIST]` | off | Alien incursions (all, or a list such as `khan,borg`) |
 | `--alien-interval <SECS>` | `150` | Average seconds between incursions |
+| `--ranks [FILE]`, `--orders`, `--diplomacy`, `--terrain`, `--supply`, `--extras` | off | The same [extras](#extras) as `server` |
 | `-n, --name <NAME>` | `$USER` | Your callsign |
 | `-t, --team <TEAM>` | `fed` | Preferred team: `fed`, `rom`, `kli`, `ori` |
 | `-s, --ship <SHIP>` | `CA` | Preferred ship: `SC`, `DD`, `CA`, `BB`, `AS`, `SB` |
@@ -292,6 +308,7 @@ map. With no mouse, they fire along your current heading.
 |---|---|
 | `i` | Info about the planet or ship under the pointer |
 | `m` | Send a message: then `A` all, `T` your team, `F`/`R`/`K`/`O` a team, or a player slot (`0`–`9`, `a`–`v`). Type, then Enter |
+| `/` | Type a server command, such as `/record`, `/orders`, `/treaty rom` or `/upgrade torps` (see [Extras](#extras)) |
 | `L` | Player list |
 | `P` | Planet list |
 | `?` or `h` | Help |
@@ -646,6 +663,153 @@ damage, and a Borg cube's resistance builds as it's hit.
   only reach warp 6. Hit it hard and early, because every hit makes it tougher, and
   every ship it catches becomes another cube.
 
+## Extras
+
+Five optional additions that go beyond fighting. Each is its own server option and all
+are off by default. `--extras` switches on all five. The same options work with `solo`.
+
+```sh
+netrek server --empires all --bots 12 --extras
+netrek solo --terrain --supply --orders
+netrek server --ranks /srv/netrek/records.tsv --diplomacy
+```
+
+Server commands are typed as a message starting with `/`. Press `/` in game to start
+one. `/help` lists the commands the server accepts.
+
+| Command | With | What it does |
+|---|---|---|
+| `/record` | `--ranks` | Your service record and honours |
+| `/orders` | `--orders` | Repeat your current orders |
+| `/treaty <empire>` | `--diplomacy` | Offer a treaty (or accept one offered to you) |
+| `/break` | `--diplomacy` | Break your treaty (10 seconds' notice) |
+| `/treaties` | `--diplomacy` | List the treaties in force |
+| `/supplies` | `--supply` | Your empire's stockpile and upgrade levels |
+| `/upgrade <name>` | `--supply` | Buy the next level of an upgrade |
+
+### Ranks and service records
+
+With `--ranks`, the server keeps a **service record** for every callsign between games.
+It tracks kills, deaths, planets taken, armies bombed, orders completed, derelicts
+salvaged, time in space and **honours**. It's saved to `~/.netrek/service-records.tsv`,
+or the file you give, every 30 seconds and whenever someone leaves. The file is plain
+tab-separated text.
+
+- **Points:** a kill's credit, plus half a point per planet taken, a point per order
+  completed, and two per honour.
+- **Ranks:** follow Netrek's classic ladder. Promotions are announced to everyone.
+
+  | Rank | Points |
+  |---|---|
+  | Ensign | 0 |
+  | Lieutenant | 3 |
+  | Lieutenant Commander | 8 |
+  | Commander | 15 |
+  | Captain | 25 |
+  | Fleet Captain | 40 |
+  | Commodore | 60 |
+  | Rear Admiral | 90 |
+  | Admiral | 130 |
+
+- **Starbases** need the rank of **Commander**. Robots are exempt.
+- **Honours** are recorded once each: destroying one of the great alien ships (a Borg
+  cube, the planet killer, the Crystalline Entity, Chang's Bird-of-Prey and so on),
+  joining with V'Ger, answering the whale probe, biting back at the Hirogen, passing Q's
+  trial, and clearing tribbles off a planet.
+- **On screen:** your rank shows in the player list and `i` info. Your service record and
+  the top five careers are on the outfit screen. You're welcomed back by rank when you
+  join.
+
+### Orders
+
+With `--orders`, command gives each human player a short task every few minutes:
+Starfleet Command, the Romulan High Command, the Klingon High Council or the Orion
+Syndicate, depending on your empire. The order and its countdown show above the message
+log. Complete it in time for **+1 kill and a full resupply** (fuel, shields and hull).
+
+| Order | What to do | Time |
+|---|---|---|
+| Scout | Fly within 6,000 of three named planets you know least about | 2½ min |
+| Guard | Stay within 5,000 of a frontier planet for 45 seconds | 2 min |
+| Reinforce | Beam 3 armies down onto a frontier planet (needs kills) | 3 min |
+| Bomb | Bomb a named enemy planet down by 4 armies | 2½ min |
+| Capture | Take a weakly held enemy or neutral planet (needs kills) | 4 min |
+| Escort | Stay within 4,000 of your supply freighter for 40 seconds (with `--supply`) | 2 min |
+| Salvage | Salvage a named derelict (with `--terrain`) | 2½ min |
+| Survey | Visit a named nebula, star, pulsar or other feature (with `--terrain`) | 2½ min |
+
+Orders are chosen to fit: you won't be asked to reinforce or capture before you can carry
+armies. A new order comes 20 seconds after the last one ends. Robots don't get orders.
+
+### Diplomacy
+
+With `--diplomacy`, empires can sign **treaties of alliance**.
+
+- **Making one:** `/treaty rom` offers the Romulans a treaty. If they have players, any
+  of them can accept within 60 seconds by answering `/treaty fed`. Empires run by robots
+  decide on the spot, and usually accept unless you're the empire running away with the
+  game. Robot empires also look for allies of their own now and then, so expect offers.
+- **Allies:**
+  - can't hurt each other with phasers, torpedoes or plasma
+  - aren't fired on by each other's planets
+  - share everything they scout
+  - see each other's cloaked ships and army counts
+  - can't bomb or invade each other's planets
+
+  Allies also don't trip each other's red alert.
+- **Limits:** an empire can have only **one ally** at a time. When no common enemy is
+  left, the alliance dissolves so someone can still win.
+- **Breaking one:** `/break` gives 10 seconds' notice to everyone before hostilities
+  resume. Robot empires break a treaty when their ally grows 8 planets larger than they
+  are.
+
+### Space terrain
+
+With `--terrain`, every galaxy gets a fresh set of terrain, placed clear of the planets.
+There are eleven kinds (17 features in all), charted for everyone and drawn on both maps.
+Terrain affects the empires' ships. Aliens ignore it, except the tachyon grid.
+
+| Feature | Looks like | What it does |
+|---|---|---|
+| **Nebula** ×3 (Mutara Nebula, Briar Patch...) | Purple clouds | Ships inside are **hidden** from anyone more than 3,000 away. Shields won't hold and top speed is warp 6. Good for ambushes and escapes. |
+| **Ion storm** | A drifting blue cloud with lightning | Wanders the galaxy. Ships inside are hidden, **phasers are knocked out**, and lightning strikes now and then (12 damage). |
+| **Asteroid field** ×2 | Scattered rocks | Faster than warp 4, you take hull damage. Torpedoes that fly in are often **soaked up**, so it's cover. |
+| **Black hole** | A black disc in a spinning orange accretion disc | Pulls in ships and torpedoes within 7,000, harder the closer you get. The **event horizon** destroys anything that reaches it. Go to full impulse to break free. |
+| **Pulsar** | A white core with sweeping beams | Every 10 seconds a radiation **pulse** hits every ship within 6,500 (up to 55 damage, less farther out). You get a 2-second warning. |
+| **Wormhole** | Two swirling violet mouths | Fly into either mouth to come out of the other, across the galaxy. |
+| **Derelict** ×3 | A drifting broken hull | Hold still (warp 2 or less) within 900 for 5 seconds to **salvage** it: full fuel and repairs, stranded colonists (up to 2 armies), or its tactical logs (+1 kill). Another wreck turns up elsewhere a minute later. |
+| **Slipstream** ×2 | A lane of flowing chevrons | Flying along it (either way) adds **warp 3** and costs no fuel for your engines. |
+| **Star** (Amargosa) | A blazing yellow sun | Its corona **refuels** you fast but heats your engines and weapons. The core burns. |
+| **Comet** | A bright head with a long tail | Crosses the galaxy, then another comes. Flying through the **tail refuels** you; the head hurts. |
+| **Tachyon grid** | A faint cyan grid | **Cloaked ships inside are revealed** to everyone, Chang's Bird-of-Prey included. |
+
+Robots steer clear of the black hole, the star and the comet, and slow down among
+asteroids.
+
+### Supply convoys and upgrades
+
+With `--supply`, every fuel and farming world (except home worlds) produces a
+**supply** every 20 seconds, holding up to 12. Each empire has a robot **freighter** that
+collects them (10 at a time) and hauls them to the home world, where they go into the
+empire's **stockpile**. If a freighter is attacked it runs for the nearest friendly
+planet and shelters under its guns. A destroyed freighter loses its cargo and is
+replaced 30 seconds later. Raiding enemy convoys and escorting your own is a whole new
+front.
+
+Supplies buy **upgrades** for every ship in the empire, three levels each. Levels cost
+10, 20 and 30 supplies. Any player can buy with `/upgrade <name>`. Empires run by robots
+buy automatically, and so do empires with players once the stockpile passes 60.
+
+| Upgrade | Per level |
+|---|---|
+| `shields` | Shields absorb 10% more |
+| `repair` | 25% faster repairs |
+| `torps` | 10% more torpedo damage |
+| `phasers` | 10% more phaser damage and range |
+| `engines` | 20% faster fuel recharge |
+
+Your stockpile and upgrade levels (S, R, T, P, E) show above the message log.
+
 ## Sound
 
 Sound effects are synthesized when the client starts (square waves, sweeps and filtered
@@ -733,8 +897,8 @@ This is a from-scratch reimplementation, not a port of the original C code:
 
 - **Protocol:** it uses its own network protocol (length-prefixed bincode over TCP), so
   it can't connect to classic Netrek servers or talk to classic clients.
-- **No accounts:** no login, ranks, persistent statistics or player database. Kills and
-  deaths are tracked per session.
+- **No accounts:** there's no login. With `--ranks` the server keeps a service record
+  per callsign, but anyone can use any callsign.
 - **Simpler team rules:** any empire that still owns planets can be joined. There's no
   T-mode restriction for humans. Robots play Federation vs Romulan unless you pass
   `--empires`.
@@ -743,8 +907,9 @@ This is a from-scratch reimplementation, not a port of the original C code:
   - refitting is instant
   - starbases can't be docked with
   - there's no self-destruct countdown or ghostbusting
-- **Additions:** alien incursions (`--aliens`), per-empire Star Trek ship designs and
-  sound effects aren't part of classic Netrek.
+- **Additions:** alien incursions (`--aliens`), the extras (`--orders`, `--diplomacy`,
+  `--terrain`, `--supply`, and this version's take on ranks), per-empire Star Trek ship
+  designs and sound effects aren't part of classic Netrek.
 - **What matches the original:** the core numbers (ship stats, weapon damage and range,
   explosion radii, orbit distances, fuel and heat costs, turn rates, the planet table)
   come from the original server.
@@ -762,10 +927,15 @@ src/
     world.rs            the game simulation (one tick = one Netrek update)
     bot.rs              robot pilots
     aliens.rs           alien incursions: scheduling, AI and special powers
+    ranks.rs            careers: service records, ranks, honours, leaderboard (--ranks)
+    orders.rs           personal orders from command (--orders)
+    terrain.rs          space terrain: generation and effects (--terrain)
+    supply.rs           supply convoys and upgrades (--supply)
   client/
     mod.rs              connection, input handling, graphics-mode detection, sound triggers
     render.rs           layout, outfit screen, text dashboard, player list, messages, popups
     render_vec.rs       vector-mode maps, graphical control panel and popups
+    render_terrain.rs   space terrain, in vector and braille
     palette.rs          colours for empires, aliens and planets; terminal colour conversion
     shipart.rs          per-empire ship designs
     vg.rs               vector canvas on tiny-skia (paths, dashes, gradients, text)
@@ -809,6 +979,15 @@ The tests include:
   `ferengi_loot_is_dropped_and_recovered` and
   `swarm_latches_and_detonation_shakes_it_off`.
 - **`retaking_alien_planets`:** liberated and resettled planets lose their alien mark.
+- **Extras:** `galaxy_has_ten_kinds_of_terrain_clear_of_planets` and a test for each
+  terrain effect; `treaties_between_players`, `one_ally_at_a_time_and_robots_decide`,
+  `upgrades_boost_torpedoes`, `starbase_needs_rank`, `convoys_deliver_and_robots_buy`,
+  `scouting_orders_pay_off` and `careers_persist_and_promote`.
+- **`extras_game`:** a 20-minute four-empire robot war with every extra and every alien
+  switched on, two robots standing in for human players.
+- **`extras_over_the_wire`:** starts a server with every extra and checks, over a real
+  connection, that terrain, supplies and the service record arrive and slash commands
+  are answered.
 - **`incursions_do_not_repeat_while_active`:** long games with all the aliens, checking
   at most two are active at once and none repeats while it's still active.
 - **`robots_play_a_game`:** a headless 30-minute robot game. It checks the rules engine
