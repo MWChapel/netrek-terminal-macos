@@ -38,12 +38,18 @@ struct Event {
     web_radius: f64,
     web_angle: f64,
     lost_any: bool,
+    /// V'Ger merge progress (ship, ticks at the core); 8472 beam charge.
+    progress: HashMap<u8, i32>,
+    /// Whale probe: ticks spent at the current planet.
+    dwell: i32,
 }
 
 pub struct Director {
     cfg: AlienConfig,
     events: Vec<Event>,
     next_spawn: u32,
+    /// Jem'Hadar: the wormhole opens (warning) a few seconds before they arrive.
+    wormhole: Option<(u32, f64, f64)>,
 }
 
 fn dist(ax: f64, ay: f64, bx: f64, by: f64) -> f64 {
@@ -60,7 +66,7 @@ fn announce(world: &mut World, text: impl Into<String>) {
 fn duration(kind: Faction) -> u32 {
     let mins = match kind {
         Faction::Khan | Faction::Gorn | Faction::Mirror | Faction::Tholian => 6,
-        Faction::Borg => 5,
+        Faction::Borg | Faction::Vger | Faction::Species8472 => 5,
         _ => 4,
     };
     mins * 60 * UPS as u32
@@ -69,7 +75,7 @@ fn duration(kind: Faction) -> u32 {
 impl Director {
     pub fn new(cfg: AlienConfig) -> Director {
         let first = cfg.interval.clamp(1, 120) / 2;
-        Director { cfg, events: Vec::new(), next_spawn: first as u32 * UPS as u32 }
+        Director { cfg, events: Vec::new(), next_spawn: first as u32 * UPS as u32, wormhole: None }
     }
 
     pub fn tick(&mut self, world: &mut World) {
@@ -86,6 +92,12 @@ impl Director {
             return;
         }
         self.cleanup(world);
+        if let Some((at, x, y)) = self.wormhole {
+            if world.tick >= at {
+                self.wormhole = None;
+                self.spawn_kind(world, Faction::JemHadar, Some((x, y)));
+            }
+        }
         if world.tick >= self.next_spawn {
             if self.events.len() < MAX_ACTIVE {
                 self.spawn(world);
@@ -134,13 +146,32 @@ impl Director {
 
     fn spawn(&mut self, world: &mut World) {
         let mut rng = rand::thread_rng();
-        let active: Vec<Faction> = self.events.iter().map(|e| e.kind).collect();
+        let mut active: Vec<Faction> = self.events.iter().map(|e| e.kind).collect();
+        if self.wormhole.is_some() {
+            active.push(Faction::JemHadar);
+        }
         let choices: Vec<Faction> = self.cfg.kinds.iter().copied().filter(|k| !active.contains(k)).collect();
         let Some(&kind) = choices.choose(&mut rng) else { return };
+        if kind == Faction::JemHadar {
+            // The wormhole opens first, giving everyone a few seconds' warning.
+            let anchors: Vec<usize> = (0..world.planets.len()).filter(|&k| world.planets[k].flags & PL_HOME == 0).collect();
+            let k = *anchors.choose(&mut rng).unwrap_or(&1);
+            let (x, y) = (world.planets[k].x + rng.gen_range(-6000.0..6000.0), world.planets[k].y + rng.gen_range(-6000.0..6000.0));
+            let name = world.planets[k].name;
+            announce(world, format!("A wormhole is opening near {}! The Dominion is coming through.", name));
+            self.wormhole = Some((world.tick + 6 * UPS as u32, x, y));
+            return;
+        }
+        self.spawn_kind(world, kind, None);
+    }
+
+    fn spawn_kind(&mut self, world: &mut World, kind: Faction, at: Option<(f64, f64)>) {
+        let mut rng = rand::thread_rng();
         let free = world.players.iter().filter(|p| !p.in_use).count();
         let need = match kind {
-            Faction::Khan | Faction::Tholian => 3,
+            Faction::Khan | Faction::Tholian | Faction::Species8472 => 3,
             Faction::Gorn | Faction::Mirror => 4,
+            Faction::JemHadar => 5,
             _ => 1,
         };
         if free < need {
@@ -220,6 +251,35 @@ impl Director {
                 spawn(world, "Amoeba", ShipType::Amoeba, near(50_000.0, 50_000.0, 35_000.0), 25.0);
                 "A giant space amoeba is drifting through the sector, draining ships of their energy.".to_string()
             }
+            Faction::Vger => {
+                // V'Ger enters from the far side of the galaxy from Earth.
+                let (ex, ey) = (world.planets[0].x, world.planets[0].y);
+                spawn(world, "V'Ger", ShipType::VgerCloud, (GWIDTH - ex, GWIDTH - ey), 0.0);
+                "An immense energy cloud is heading for Earth, digitizing everything in its path. It calls itself V'Ger. Weapons are useless: someone must reach its core and join with it.".to_string()
+            }
+            Faction::Crystal => {
+                let (x, y) = near(ax, ay, 8000.0);
+                spawn(world, "Crystalline", ShipType::CrystalEntity, (x, y), 30.0);
+                "The Crystalline Entity has appeared, stripping planets of all life. Only resonance can shatter it: phaser it from three ships at once!".to_string()
+            }
+            Faction::Probe => {
+                spawn(world, "Probe", ShipType::WhaleProbe, edge(), 0.0);
+                "An alien probe is crossing the galaxy, draining the power of every ship it passes. It is calling for humpback whales: bring it two armies to answer!".to_string()
+            }
+            Faction::Species8472 => {
+                let (x, y) = edge();
+                for _ in 0..3 {
+                    spawn(world, "Bioship", ShipType::Bioship, near(x, y, 1500.0), 15.0);
+                }
+                "Species 8472 bioships have torn through from fluidic space! Conventional weapons are useless; only plasma torpedoes hurt them.".to_string()
+            }
+            Faction::JemHadar => {
+                let (x, y) = at.unwrap_or((ax, ay));
+                for _ in 0..5 {
+                    spawn(world, "Jem'Hadar", ShipType::JemHadarFighter, near(x, y, 1200.0), 5.0);
+                }
+                "Jem'Hadar attack ships pour out of the wormhole! Victory is life!".to_string()
+            }
             Faction::Borg => {
                 spawn(world, "Locutus", ShipType::BorgCube, edge(), 30.0);
                 "We are the Borg. Your biological and technological distinctiveness will be added to our own. Resistance is futile.".to_string()
@@ -240,6 +300,8 @@ impl Director {
             web_radius: 2500.0,
             web_angle: 0.0,
             lost_any: false,
+            progress: HashMap::new(),
+            dwell: 0,
         });
     }
 }
@@ -254,6 +316,11 @@ fn defeat_text(kind: Faction) -> String {
         Faction::Doomsday => "The planet killer has been destroyed!".into(),
         Faction::Amoeba => "The space amoeba has been destroyed.".into(),
         Faction::Borg => "The Borg have been defeated. For now.".into(),
+        Faction::Vger => "V'Ger has joined with its creator and transcended into a new life form.".into(),
+        Faction::Crystal => "The Crystalline Entity is gone.".into(),
+        Faction::Probe => "The probe's call has been answered. It departs, and power returns.".into(),
+        Faction::Species8472 => "The Species 8472 bioships have been destroyed. The rift to fluidic space closes.".into(),
+        Faction::JemHadar => "The Jem'Hadar strike force has been destroyed.".into(),
     }
 }
 
@@ -267,6 +334,11 @@ fn withdraw_text(kind: Faction) -> String {
         Faction::Doomsday => "The planet killer drifts out of the galaxy.".into(),
         Faction::Amoeba => "The space amoeba drifts away into the void.".into(),
         Faction::Borg => "The Borg cube departs. They will return.".into(),
+        Faction::Vger => "V'Ger turns away into deep space, still searching for its creator.".into(),
+        Faction::Crystal => "The Crystalline Entity drifts away in search of other worlds.".into(),
+        Faction::Probe => "The probe gives up its search and departs. Power returns.".into(),
+        Faction::Species8472 => "The Species 8472 bioships withdraw into fluidic space.".into(),
+        Faction::JemHadar => "The surviving Jem'Hadar withdraw through the wormhole.".into(),
     }
 }
 
@@ -279,7 +351,8 @@ fn nearest_enemy(world: &World, i: usize, range: f64, prefer: Option<Team>) -> O
     let mut best: Option<(usize, f64)> = None;
     let mut best_pref: Option<(usize, f64)> = None;
     for (j, q) in world.players.iter().enumerate() {
-        if !q.alive() || q.faction.is_some() || q.cloaked {
+        let warring = matches!((p.faction, q.faction), (Some(a), Some(b)) if a.at_war_with(b));
+        if !q.alive() || (q.faction.is_some() && !warring) || q.cloaked {
             continue;
         }
         let d = dist(p.x, p.y, q.x, q.y);
@@ -392,6 +465,11 @@ fn run_event(world: &mut World, e: &mut Event) {
             Faction::Doomsday => doomsday(world, e, i, tick),
             Faction::Amoeba => amoeba(world, e, i, tick),
             Faction::Borg => borg(world, e, i, tick),
+            Faction::Vger => vger(world, e, i, tick),
+            Faction::Crystal => crystal(world, e, i, tick),
+            Faction::Probe => probe(world, e, i, tick),
+            Faction::Species8472 => species8472(world, e, i, n, tick),
+            Faction::JemHadar => jemhadar(world, i, tick),
         }
     }
     if e.kind == Faction::Tholian {
@@ -698,7 +776,10 @@ fn borg(world: &mut World, e: &mut Event, i: usize, tick: u32) {
     // Assimilation: hold a ship in the tractor beam, close in, and take it.
     let held = world.players[i].tractor.map(|x| x.0 as usize);
     match held {
-        Some(v) if world.players[v].alive() && dist(world.players[v].x, world.players[v].y, world.players[i].x, world.players[i].y) < 2600.0 => {
+        Some(v) if world.players[v].alive()
+            && world.players[v].faction.is_none()
+            && dist(world.players[v].x, world.players[v].y, world.players[i].x, world.players[i].y) < 2600.0 =>
+        {
             let entry = e.holds.entry(id).or_insert((v as u8, 0));
             if entry.0 != v as u8 {
                 *entry = (v as u8, 0);
@@ -724,10 +805,311 @@ fn borg(world: &mut World, e: &mut Event, i: usize, tick: u32) {
     }
 }
 
+/// Empire ships (not aliens) within `r` of (x, y).
+fn empire_ships_near(world: &World, x: f64, y: f64, r: f64) -> Vec<usize> {
+    (0..MAXPLAYER)
+        .filter(|&j| world.players[j].alive() && world.players[j].faction.is_none())
+        .filter(|&j| dist(world.players[j].x, world.players[j].y, x, y) < r)
+        .collect()
+}
+
+const VGER_CLOUD: f64 = 6000.0;
+const VGER_CORE: f64 = 1200.0;
+
+/// V'Ger: drift toward Earth (then other home worlds), slowing ships in the
+/// cloud and digitizing them with plasma bolts. A ship that holds position
+/// at the core for 10 seconds joins with V'Ger and ends the threat.
+fn vger(world: &mut World, e: &mut Event, i: usize, tick: u32) {
+    let mut rng = rand::thread_rng();
+    let id = i as u8;
+    let (x, y) = (world.players[i].x, world.players[i].y);
+    // Heading: Earth first, then the nearest home world still standing.
+    let goal = match e.goals.get(&id) {
+        Some(&k) if world.planets[k].armies > 0 => k,
+        _ => {
+            let homes = [0usize, 10, 20, 30];
+            let k = if world.planets[0].armies > 0 {
+                0
+            } else {
+                *homes
+                    .iter()
+                    .filter(|&&k| world.planets[k].armies > 0)
+                    .min_by(|a, b| {
+                        let (pa, pb) = (&world.planets[**a], &world.planets[**b]);
+                        dist(x, y, pa.x, pa.y).total_cmp(&dist(x, y, pb.x, pb.y))
+                    })
+                    .unwrap_or(&0)
+            };
+            e.goals.insert(id, k);
+            k
+        }
+    };
+    let (gx, gy) = (world.planets[goal].x, world.planets[goal].y);
+    if tick % 4 == 0 {
+        steer_to(world, i, gx, gy, if dist(x, y, gx, gy) < 1500.0 { 0 } else { 2 });
+    }
+    if dist(x, y, gx, gy) < 2000.0 && world.planets[goal].armies > 0 {
+        let pl = &mut world.planets[goal];
+        let (name, old) = (pl.name, pl.owner);
+        pl.armies = 0;
+        pl.owner = Team::Ind;
+        announce(world, format!("V'Ger has purged {} of all carbon units!", name));
+        world.check_genocide(old, Team::Ind);
+        e.goals.remove(&id);
+    }
+    // Everything inside the cloud crawls.
+    for j in empire_ships_near(world, x, y, VGER_CLOUD) {
+        let q = &mut world.players[j];
+        q.desired_speed = q.desired_speed.min(3);
+    }
+    // Merging: hold position at the core.
+    let at_core = empire_ships_near(world, x, y, VGER_CORE);
+    e.progress.retain(|s, _| at_core.contains(&(*s as usize)));
+    for &j in &at_core {
+        let t = e.progress.entry(j as u8).or_insert(0);
+        *t += 1;
+        if *t == 30 {
+            let who = world.players[j].label();
+            announce(world, format!("{} is joining with V'Ger...", who));
+        }
+        if *t >= 100 {
+            let who = world.players[j].label();
+            world.players[j].total_kills += 5.0;
+            world.kill(j, None, "joined with V'Ger".into());
+            announce(world, format!("{} has joined with V'Ger, and a new life form is born. Earth is saved!", who));
+            world.remove_player(id);
+            return;
+        }
+    }
+    // Plasma bolts digitize ships in or near the cloud (but not at the core:
+    // V'Ger is curious about whoever reaches it).
+    if tick % 50 == 25 {
+        let targets: Vec<usize> = empire_ships_near(world, x, y, VGER_CLOUD + 3000.0)
+            .into_iter()
+            .filter(|j| !at_core.contains(j))
+            .collect();
+        if let Some(&t) = targets.choose(&mut rng) {
+            let (tx, ty) = (world.players[t].x, world.players[t].y);
+            world.phasers.push(PhaserShot {
+                info: PhaserInfo { owner: id, x1: x as i32, y1: y as i32, x2: tx as i32, y2: ty as i32, hit: true },
+                ticks: 8,
+            });
+            world.kill(t, None, "was digitized by V'Ger".into());
+        }
+    }
+}
+
+/// Crystalline Entity: strip the life from planets (farming worlds first)
+/// and lash out at nearby ships.
+fn crystal(world: &mut World, e: &mut Event, i: usize, tick: u32) {
+    let id = i as u8;
+    let alive = |pl: &super::world::Planet| Team::PLAYABLE.contains(&pl.owner) && pl.armies > 0;
+    let goal = match e.goals.get(&id) {
+        Some(&k) if world.planets[k].armies > 0 => k,
+        _ => match nearest_planet(world, i, |pl| alive(pl) && pl.flags & PL_AGRI != 0).or_else(|| nearest_planet(world, i, alive)) {
+            Some(k) => {
+                e.goals.insert(id, k);
+                k
+            }
+            None => return,
+        },
+    };
+    let (px, py) = (world.planets[goal].x, world.planets[goal].y);
+    let p = &world.players[i];
+    let d = dist(p.x, p.y, px, py);
+    if tick % 4 == 0 {
+        steer_to(world, i, px, py, if d < 2000.0 { 0 } else { 4 });
+    }
+    if d < 2200.0 && tick % 3 == 0 {
+        let pl = &mut world.planets[goal];
+        pl.armies -= 1;
+        if pl.armies <= 0 {
+            pl.armies = 0;
+            pl.flags &= !PL_AGRI;
+            let name = pl.name;
+            announce(world, format!("The Crystalline Entity has stripped all life from {}!", name));
+            e.goals.remove(&id);
+        }
+    }
+    if tick % 20 == 0 {
+        if let Some((t, d)) = nearest_enemy(world, i, 6000.0, None) {
+            if d < 6000.0 {
+                beam(world, i, t, 40.0, "was shredded by the Crystalline Entity");
+            }
+        }
+    }
+}
+
+const PROBE_DRAIN: f64 = 10_000.0;
+
+/// Whale probe: travel planet to planet, draining the power of every ship
+/// in range and silencing the planets it visits. Bringing it two armies
+/// ("whales") answers its call and sends it away.
+fn probe(world: &mut World, e: &mut Event, i: usize, tick: u32) {
+    let id = i as u8;
+    let (x, y) = (world.players[i].x, world.players[i].y);
+    let goal = match e.goals.get(&id) {
+        Some(&k) if e.dwell < 150 => k,
+        _ => {
+            let prev = e.goals.get(&id).copied();
+            let k = nearest_planet(world, i, |pl| pl.owner != Team::Ind).filter(|&k| Some(k) != prev);
+            let k = k.or_else(|| nearest_planet(world, i, |_| true)).unwrap_or(0);
+            // Head somewhere new: the nearest planet it hasn't just visited, a fair way off.
+            let far: Vec<usize> = (0..world.planets.len())
+                .filter(|&j| Some(j) != prev && dist(x, y, world.planets[j].x, world.planets[j].y) > 15_000.0)
+                .collect();
+            let k = far
+                .into_iter()
+                .min_by(|a, b| {
+                    let (pa, pb) = (&world.planets[*a], &world.planets[*b]);
+                    dist(x, y, pa.x, pa.y).total_cmp(&dist(x, y, pb.x, pb.y))
+                })
+                .unwrap_or(k);
+            e.goals.insert(id, k);
+            e.dwell = 0;
+            k
+        }
+    };
+    let (px, py) = (world.planets[goal].x, world.planets[goal].y);
+    let d = dist(x, y, px, py);
+    if tick % 4 == 0 {
+        steer_to(world, i, px, py, if d < 2000.0 { 0 } else { 3 });
+    }
+    if d < 3000.0 {
+        e.dwell += 1;
+        world.planets[goal].silenced_until = tick + 20;
+    }
+    let drained = empire_ships_near(world, x, y, PROBE_DRAIN);
+    for &j in &drained {
+        world.players[j].powerless_until = tick + 3;
+    }
+    // Answering the call: any ship carrying two armies close by.
+    if let Some(&j) = empire_ships_near(world, x, y, 4000.0).iter().find(|&&j| world.players[j].armies >= 2) {
+        let q = &mut world.players[j];
+        q.armies -= 2;
+        q.kills += 3.0;
+        q.total_kills += 3.0;
+        let who = q.label();
+        announce(world, format!("{} answers the probe with the song of the humpback whales!", who));
+        world.remove_player(id);
+    }
+}
+
+/// Species 8472: hunt ships (and the Borg) with devastating beams. When all
+/// the bioships gather at one planet they focus their beams and destroy it.
+fn species8472(world: &mut World, e: &mut Event, i: usize, n: usize, tick: u32) {
+    let id = i as u8;
+    // The group shares one target planet, chosen by the lead ship.
+    let lead_id = e.ships.iter().copied().find(|&s| world.players[s as usize].alive()).unwrap_or(id);
+    let goal = match e.goals.get(&lead_id) {
+        Some(&k) if world.planets[k].armies > 0 => k,
+        _ => {
+            let p = &world.players[lead_id as usize];
+            let (x, y) = (p.x, p.y);
+            let k = (0..world.planets.len())
+                .filter(|&k| {
+                    let pl = &world.planets[k];
+                    Team::PLAYABLE.contains(&pl.owner) && pl.armies > 0 && pl.flags & PL_HOME == 0
+                })
+                .min_by(|a, b| {
+                    let (pa, pb) = (&world.planets[*a], &world.planets[*b]);
+                    dist(x, y, pa.x, pa.y).total_cmp(&dist(x, y, pb.x, pb.y))
+                });
+            let Some(k) = k else { return };
+            e.goals.insert(lead_id, k);
+            let charge = e.progress.entry(lead_id).or_insert(0);
+            *charge = (*charge).min(0);
+            k
+        }
+    };
+    if tick % 2 == 0 {
+        if let Some((t, d)) = nearest_enemy(world, i, 9000.0, None) {
+            let p = &world.players[i];
+            let q = &world.players[t];
+            let dir = dir_to(p.x, p.y, q.x, q.y);
+            if d < 8000.0 {
+                cmd(world, i, ClientMsg::Phaser(dir as u8));
+            }
+        }
+    }
+    // Fly to the planet and hold station around it.
+    let (px, py) = (world.planets[goal].x, world.planets[goal].y);
+    let a = n as f64 * TAU / 3.0 + tick as f64 * 0.01;
+    let (tx, ty) = (px + a.cos() * 2500.0, py + a.sin() * 2500.0);
+    let p = &world.players[i];
+    let d = dist(p.x, p.y, tx, ty);
+    if tick % 3 == 0 {
+        steer_to(world, i, tx, ty, ((d / 500.0) as i32).clamp(1, 11));
+    }
+    // The lead ship tracks whether the whole group is in position.
+    if id == lead_id && tick % 2 == 0 {
+        let alive: Vec<usize> = e.ships.iter().map(|&s| s as usize).filter(|&s| world.players[s].alive()).collect();
+        let gathered = alive.len() >= 2 && alive.iter().all(|&s| dist(world.players[s].x, world.players[s].y, px, py) < 4000.0);
+        let charge = e.progress.entry(lead_id).or_insert(0);
+        *charge = if *charge < 0 {
+            *charge + 2
+        } else if gathered {
+            *charge + 2
+        } else {
+            0
+        };
+        if *charge == 20 {
+            announce(world, format!("Species 8472 bioships are focusing their beams on {}!", world.planets[goal].name));
+        }
+        if *charge >= 60 {
+            for &s in &alive {
+                let (sx, sy) = (world.players[s].x, world.players[s].y);
+                world.phasers.push(PhaserShot {
+                    info: PhaserInfo { owner: s as u8, x1: sx as i32, y1: sy as i32, x2: px as i32, y2: py as i32, hit: true },
+                    ticks: 10,
+                });
+            }
+            let pl = &mut world.planets[goal];
+            let (name, old) = (pl.name, pl.owner);
+            pl.armies = 0;
+            pl.owner = Team::Ind;
+            pl.flags = 0;
+            pl.alien = Some(Faction::Species8472);
+            announce(world, format!("Species 8472 has destroyed {}!", name));
+            world.check_genocide(old, Team::Ind);
+            e.goals.remove(&lead_id);
+            // Recharge before the next planet (about 40 seconds).
+            e.progress.insert(lead_id, -400);
+        }
+    }
+}
+
+/// Jem'Hadar: fast strikes with shield-piercing polaron beams; a badly
+/// damaged fighter rams the nearest enemy.
+fn jemhadar(world: &mut World, i: usize, tick: u32) {
+    let id = i as u8;
+    let p = &world.players[i];
+    let hurt = p.damage / p.stats().max_damage;
+    if hurt >= 0.7 {
+        if let Some((t, d)) = nearest_enemy(world, i, 30_000.0, None) {
+            let (tx, ty) = (world.players[t].x, world.players[t].y);
+            steer_to(world, i, tx, ty, 11);
+            if d < 700.0 {
+                let (me, them) = (world.players[i].label(), world.players[t].label());
+                announce(world, format!("A Jem'Hadar fighter rams {}!", them));
+                world.inflict(t, 150.0, Some(id), format!("was rammed by {}", me));
+                world.kill(i, None, "rammed its target".into());
+            }
+        }
+        return;
+    }
+    if tick % 2 == 0 {
+        if let Some((t, _)) = nearest_enemy(world, i, 40_000.0, None) {
+            fight(world, i, t);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::server::bot;
+    use crate::server::world::HitKind;
 
     /// Run each incursion on its own against a four-empire robot war, and
     /// check it arrives, does its thing, and ends cleanly.
@@ -760,9 +1142,10 @@ mod tests {
             let alien_msgs: Vec<&String> = log
                 .iter()
                 .filter(|m| {
-                    m.contains("Khan") || m.contains("Gorn") || m.contains("Tholian") || m.contains("Fesarius")
-                        || m.contains("Balok") || m.contains("Terran") || m.contains("planet killer")
-                        || m.contains("amoeba") || m.contains("Borg")
+                    ["Khan", "Gorn", "Tholian", "Fesarius", "Balok", "Terran", "planet killer", "amoeba", "Borg", "V'Ger",
+                        "Crystalline", "probe", "8472", "Jem'Hadar", "wormhole"]
+                        .iter()
+                        .any(|k| m.contains(k))
                 })
                 .collect();
             println!("--- {:?}: peak {} alien ships, {} webs left", kind, peak_aliens, world.webs.len());
@@ -828,4 +1211,132 @@ mod tests {
             }
         }
     }
+
+    /// Set up a world with one Federation cruiser (slot returned) near (x, y).
+    fn with_cruiser(x: f64, y: f64) -> (World, u8) {
+        let mut w = World::new();
+        let id = w.add_player("Kirk", false).unwrap();
+        w.join(id, Team::Fed, ShipType::Cruiser).unwrap();
+        let p = &mut w.players[id as usize];
+        p.x = x;
+        p.y = y;
+        (w, id)
+    }
+
+    fn alerts(w: &mut World) -> Vec<String> {
+        w.outbox.drain(..).map(|o| o.msg.text).collect()
+    }
+
+    #[test]
+    fn vger_merge_ends_the_threat() {
+        let (mut w, kirk) = with_cruiser(50_000.0, 50_000.0);
+        let mut d = Director::new(AlienConfig { kinds: vec![Faction::Vger], interval: 9999 });
+        d.spawn_kind(&mut w, Faction::Vger, None);
+        let v = d.events[0].ships[0] as usize;
+        let mut log = Vec::new();
+        for _ in 0..140 {
+            // Kirk holds position at V'Ger's core.
+            let (vx, vy) = (w.players[v].x, w.players[v].y);
+            if w.players[kirk as usize].alive() {
+                w.players[kirk as usize].x = vx + 300.0;
+                w.players[kirk as usize].y = vy;
+            }
+            d.tick(&mut w);
+            w.tick();
+            log.extend(alerts(&mut w));
+        }
+        assert!(log.iter().any(|m| m.contains("has joined with V'Ger")), "{:?}", log);
+        assert!(d.events.is_empty(), "V'Ger should be gone");
+    }
+
+    #[test]
+    fn crystal_shatters_on_resonance() {
+        let mut w = World::new();
+        let mut ids = Vec::new();
+        for (k, name) in ["Kirk", "Picard", "Sisko"].iter().enumerate() {
+            let id = w.add_player(name, false).unwrap();
+            w.join(id, Team::Fed, ShipType::Cruiser).unwrap();
+            let p = &mut w.players[id as usize];
+            p.x = 40_000.0;
+            p.y = 40_000.0 + k as f64 * 400.0;
+            ids.push(id);
+        }
+        let c = w.spawn_alien("Crystalline Entity", Faction::Crystal, ShipType::CrystalEntity, 44_000.0, 40_400.0, 30.0).unwrap();
+        // One ship's phasers alone barely scratch it.
+        w.handle(ids[0], ClientMsg::Phaser(dir_to(40_000.0, 40_000.0, 44_000.0, 40_400.0) as u8));
+        assert!(w.players[c as usize].alive());
+        // Three ships together shatter it.
+        for &id in &ids[1..] {
+            let p = &w.players[id as usize];
+            let dir = dir_to(p.x, p.y, 44_000.0, 40_400.0);
+            w.handle(id, ClientMsg::Phaser(dir as u8));
+        }
+        assert!(!w.players[c as usize].alive(), "resonance should shatter the entity");
+    }
+
+    #[test]
+    fn whale_probe_drains_and_is_answered() {
+        let (mut w, kirk) = with_cruiser(50_000.0, 50_000.0);
+        let mut d = Director::new(AlienConfig { kinds: vec![Faction::Probe], interval: 9999 });
+        d.spawn_kind(&mut w, Faction::Probe, None);
+        let pr = d.events[0].ships[0] as usize;
+        w.players[pr].x = 55_000.0;
+        w.players[pr].y = 50_000.0;
+        w.handle(kirk, ClientMsg::Speed(9));
+        for _ in 0..40 {
+            d.tick(&mut w);
+            w.tick();
+        }
+        let k = &w.players[kirk as usize];
+        assert!(k.speed <= 1 && !k.shields_up, "ship should be powerless near the probe");
+        // Bring it "whales".
+        w.players[kirk as usize].armies = 2;
+        w.players[kirk as usize].x = w.players[pr].x + 2000.0;
+        w.players[kirk as usize].y = w.players[pr].y;
+        let mut log = Vec::new();
+        for _ in 0..5 {
+            d.tick(&mut w);
+            w.tick();
+            log.extend(alerts(&mut w));
+        }
+        assert!(log.iter().any(|m| m.contains("humpback")), "{:?}", log);
+        assert!(d.events.is_empty());
+    }
+
+    #[test]
+    fn bioships_only_fear_plasma() {
+        let mut w = World::new();
+        let b = w.spawn_alien("Bioship", Faction::Species8472, ShipType::Bioship, 50_000.0, 50_000.0, 15.0).unwrap() as usize;
+        w.hit_kind = HitKind::Photon;
+        w.inflict(b, 100.0, None, "torp".into());
+        assert!((w.players[b].damage - 10.0).abs() < 1e-6, "photons do 10%");
+        w.hit_kind = HitKind::Plasma;
+        w.inflict(b, 100.0, None, "plasma".into());
+        assert!((w.players[b].damage - 110.0).abs() < 1e-6, "plasma does full damage");
+    }
+
+    #[test]
+    fn polaron_beams_ignore_shields() {
+        let (mut w, kirk) = with_cruiser(50_000.0, 50_000.0);
+        let j = w.spawn_alien("Jem'Hadar", Faction::JemHadar, ShipType::JemHadarFighter, 52_000.0, 50_000.0, 5.0).unwrap();
+        assert!(w.players[kirk as usize].shields_up);
+        let before = w.players[kirk as usize].shield;
+        let dir = dir_to(52_000.0, 50_000.0, 50_000.0, 50_000.0);
+        w.handle(j, ClientMsg::Phaser(dir as u8));
+        let k = &w.players[kirk as usize];
+        assert_eq!(k.shield, before, "shields untouched");
+        assert!(k.damage > 0.0, "hull takes the hit");
+    }
+
+    #[test]
+    fn borg_and_8472_fight_each_other() {
+        let mut w = World::new();
+        let b = w.spawn_alien("Borg", Faction::Borg, ShipType::BorgCube, 50_000.0, 50_000.0, 20.0).unwrap() as usize;
+        let s = w.spawn_alien("Bioship", Faction::Species8472, ShipType::Bioship, 53_000.0, 50_000.0, 15.0).unwrap() as usize;
+        let g = w.spawn_alien("Gorn", Faction::Gorn, ShipType::GornRaider, 50_000.0, 53_000.0, 5.0).unwrap() as usize;
+        assert!(w.at_war(b, s) && w.at_war(s, b));
+        assert!(!w.at_war(b, g), "other aliens don't fight each other");
+        assert!(nearest_enemy(&w, s, 20_000.0, None).map(|t| t.0) == Some(b));
+    }
 }
+

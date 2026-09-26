@@ -819,6 +819,7 @@ impl App {
                         def.name,
                         match pl.alien {
                             Some(Faction::Doomsday) => "devoured by the planet killer",
+                            Some(Faction::Species8472) => "destroyed by Species 8472",
                             Some(Faction::Khan) => "Khan's stronghold",
                             Some(fac) => fac.name(),
                             None => pl.owner.name(),

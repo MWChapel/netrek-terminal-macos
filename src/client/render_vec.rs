@@ -193,6 +193,15 @@ impl App {
                     px.glow(gx, gy, sr * (0.25 + 0.35 * k), rgb(0xff9a40), 0.35 + 0.5 * k);
                 }
             }
+            if p.ship == ShipType::VgerCloud {
+                // A luminous cloud around a bright core.
+                px.glow(x, y, sr, rgb(0x3060c0), 0.35);
+                px.glow(x, y, sr * 0.5, rgb(0x70a8ff), 0.35);
+                for (k, r) in [0.95f32, 0.75, 0.55].iter().enumerate() {
+                    px.ring_dashed(x, y, sr * r, 1.0, rgb(0x80b8ff), 0.35, 3.0 + k as f32 * 2.0);
+                }
+                px.glow(x, y, u(1200.0), rgb(0xeaf4ff), 0.9);
+            }
             let fill = scale(team, if is_me { 0.6 } else { 0.42 });
             let edge = if is_me { WHITE } else { mix(team, WHITE, 0.25) };
             for part in ship_parts(p.team, p.ship, p.faction) {
@@ -224,7 +233,8 @@ impl App {
                     }
                 }
             }
-            if p.flags & pf::SHIELD != 0 && !cloaked {
+            let invulnerable = matches!(p.ship, ShipType::VgerCloud | ShipType::WhaleProbe);
+            if p.flags & pf::SHIELD != 0 && !cloaked && !invulnerable {
                 let scol = if is_me {
                     let frac = (f.me_info.shield as f32 / p.ship.stats().max_shield as f32).clamp(0.0, 1.0);
                     if frac > 0.6 {
@@ -240,7 +250,12 @@ impl App {
                 px.ring(x, y, sr * 1.45, 1.0, scol, 0.9);
             }
             let tag = p.faction.map_or(slot_char(p.id).to_string(), |f| f.tag().to_string());
-            px.text(tr, x + sr * 1.5 + 1.0, y - sr * 0.6, &tag, fs, if cloaked { GREY } else { col });
+            if ship_size_units(p.ship) > 0.0 {
+                // Monsters: name centred above them.
+                px.text_centered(tr, x, y - sr * if p.ship == ShipType::VgerCloud { 0.25 } else { 1.05 } - 3.0, &tag, fs, col);
+            } else {
+                px.text(tr, x + sr * 1.5 + 1.0, y - sr * 0.6, &tag, fs, if cloaked { GREY } else { col });
+            }
         }
 
         // Mouse pointer.
@@ -298,6 +313,13 @@ impl App {
             px.text_centered(tr, x, y + gr + fs * 1.05, &name, fs, col);
         }
 
+        // V'Ger's cloud is big enough to see from anywhere.
+        for p in f.players.iter().filter(|p| p.state == PState::Alive && p.ship == ShipType::VgerCloud) {
+            let (x, y) = to(p.x as f64, p.y as f64);
+            let r = (ship_size_units(p.ship) * sx) as f32;
+            px.glow(x, y, r, rgb(0x3060c0), 0.45);
+            px.ring_dashed(x, y, r, 1.0, rgb(0x80b8ff), 0.6, 3.0);
+        }
         let mut order: Vec<&PlayerInfo> = f.players.iter().filter(|p| p.state == PState::Alive).collect();
         order.sort_by_key(|p| p.id == self.slot);
         for p in order {

@@ -29,8 +29,9 @@ enum Cmd {
         /// Empires the robots play for: "all", or a list like "fed,rom,kli"
         #[arg(short, long, default_value = "fed,rom", value_parser = parse_empires)]
         empires: Empires,
-        /// Alien incursions: bare --aliens for all of them, or a list like
-        /// "khan,borg" (khan, gorn, tholian, fesarius, mirror, doomsday, amoeba, borg)
+        /// Alien incursions: bare --aliens for all of them, or a list like "khan,borg"
+        /// (khan, gorn, tholian, fesarius, mirror, doomsday, amoeba, borg, vger,
+        /// crystal, probe, 8472, jemhadar)
         #[arg(long, num_args = 0..=1, default_missing_value = "all", value_parser = parse_aliens)]
         aliens: Option<Aliens>,
         /// Average seconds between alien incursions
@@ -55,8 +56,9 @@ enum Cmd {
         /// Empires the robots play for: "all", or a list like "fed,rom,kli"
         #[arg(short, long, default_value = "fed,rom", value_parser = parse_empires)]
         empires: Empires,
-        /// Alien incursions: bare --aliens for all of them, or a list like
-        /// "khan,borg" (khan, gorn, tholian, fesarius, mirror, doomsday, amoeba, borg)
+        /// Alien incursions: bare --aliens for all of them, or a list like "khan,borg"
+        /// (khan, gorn, tholian, fesarius, mirror, doomsday, amoeba, borg, vger,
+        /// crystal, probe, 8472, jemhadar)
         #[arg(long, num_args = 0..=1, default_missing_value = "all", value_parser = parse_aliens)]
         aliens: Option<Aliens>,
         /// Average seconds between alien incursions

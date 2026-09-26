@@ -313,6 +313,46 @@ fn alien(f: Faction, ship: ShipType) -> Vec<Part> {
             }
             v.push(Poly { pts: vec![(-0.25, -0.25), (0.25, -0.25), (0.25, 0.25), (-0.25, 0.25)], fill: false });
         }
+        // V'Ger is drawn specially (a luminous cloud); this is its core.
+        Faction::Vger => {
+            v.push(circle((0.0, 0.0), 0.2));
+            v.push(Circle { c: (0.0, 0.0), r: 0.5, fill: false });
+        }
+        Faction::Crystal => {
+            // A snowflake of crystal spines.
+            v.push(Poly {
+                pts: (0..24)
+                    .map(|k| {
+                        let a = k as f32 / 24.0 * TAU;
+                        let r = if k % 2 == 0 { if k % 4 == 0 { 1.0 } else { 0.7 } } else { 0.28 };
+                        (a.cos() * r, a.sin() * r)
+                    })
+                    .collect(),
+                fill: true,
+            });
+            for k in 0..6 {
+                let a = k as f32 / 6.0 * TAU;
+                v.push(line((0.0, 0.0), (a.cos() * 0.95, a.sin() * 0.95)));
+            }
+        }
+        Faction::Probe => {
+            // A long cylinder with a small sphere on one end.
+            v.push(Poly { pts: vec![(-0.28, -0.75), (0.28, -0.75), (0.28, 1.0), (-0.28, 1.0)], fill: true });
+            v.push(line((-0.28, -0.35), (0.28, -0.35)));
+            v.push(line((-0.28, 0.35), (0.28, 0.35)));
+            v.push(Circle { c: (0.0, -0.88), r: 0.14, fill: true });
+        }
+        Faction::Species8472 => {
+            // Organic tripod: a central spine and two swept claws.
+            v.push(sym(&[(0.0, -1.0), (0.18, -0.45), (0.85, 0.05), (0.95, 0.55), (0.55, 0.25), (0.3, 0.95), (0.0, 0.55)]));
+            v.push(line((0.0, -0.6), (0.0, 0.4)));
+        }
+        Faction::JemHadar => {
+            // Beetle-shaped attack ship with forward prongs.
+            v.push(sym(&[(0.0, -0.7), (0.3, -0.65), (0.4, -0.1), (0.75, 0.35), (0.55, 0.9), (0.0, 0.7)]));
+            v.extend(pair(|s| line((s * 0.3, -0.65), (s * 0.18, -1.0))));
+            v.push(Circle { c: (0.0, -0.2), r: 0.14, fill: false });
+        }
     }
     v
 }
@@ -324,6 +364,7 @@ pub fn engine_points(team: Team, ship: ShipType, faction: Option<Faction>) -> Ve
         Some(Faction::Mirror) => return engine_points(Team::Fed, ship, None),
         Some(Faction::Gorn) => return vec![(0.6, 0.9), (-0.6, 0.9)],
         Some(Faction::Tholian) => return vec![(0.0, 0.55)],
+        Some(Faction::JemHadar) => return vec![(0.45, 0.85), (-0.45, 0.85)],
         Some(_) => return vec![],
         None => {}
     }
@@ -352,7 +393,7 @@ mod tests {
     #[test]
     fn gallery() {
         let (cell, r) = (120.0f32, 44.0f32);
-        let mut c = Canvas::new(8 * cell as i32, 5 * cell as i32, [0.0, 0.0, 0.0]);
+        let mut c = Canvas::new(8 * cell as i32, 6 * cell as i32, [0.0, 0.0, 0.0]);
         let mut rows: Vec<Vec<(Team, ShipType, Option<Faction>)>> = Team::PLAYABLE
             .iter()
             .map(|&t| ShipType::ALL.iter().map(|&s| (t, s, None)).collect())
@@ -366,6 +407,13 @@ mod tests {
             (Team::Ind, ShipType::PlanetKiller, Some(Faction::Doomsday)),
             (Team::Ind, ShipType::Amoeba, Some(Faction::Amoeba)),
             (Team::Ind, ShipType::BorgCube, Some(Faction::Borg)),
+        ]);
+        rows.push(vec![
+            (Team::Ind, ShipType::VgerCloud, Some(Faction::Vger)),
+            (Team::Ind, ShipType::CrystalEntity, Some(Faction::Crystal)),
+            (Team::Ind, ShipType::WhaleProbe, Some(Faction::Probe)),
+            (Team::Ind, ShipType::Bioship, Some(Faction::Species8472)),
+            (Team::Ind, ShipType::JemHadarFighter, Some(Faction::JemHadar)),
         ]);
         for (row, ships) in rows.iter().enumerate() {
             for (col, &(team, ship, faction)) in ships.iter().enumerate() {

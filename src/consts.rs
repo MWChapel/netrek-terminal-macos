@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 pub const DEFAULT_PORT: u16 = 2592; // the traditional Netrek port
-pub const PROTOCOL_VERSION: u32 = 2;
+pub const PROTOCOL_VERSION: u32 = 3;
 
 pub const UPS: u64 = 10; // server updates per second, like the original
 pub const GWIDTH: f64 = 100_000.0;
@@ -122,10 +122,15 @@ pub enum Faction {
     Doomsday,
     Amoeba,
     Borg,
+    Vger,
+    Crystal,
+    Probe,
+    Species8472,
+    JemHadar,
 }
 
 impl Faction {
-    pub const ALL: [Faction; 8] = [
+    pub const ALL: [Faction; 13] = [
         Faction::Khan,
         Faction::Gorn,
         Faction::Tholian,
@@ -134,6 +139,11 @@ impl Faction {
         Faction::Doomsday,
         Faction::Amoeba,
         Faction::Borg,
+        Faction::Vger,
+        Faction::Crystal,
+        Faction::Probe,
+        Faction::Species8472,
+        Faction::JemHadar,
     ];
 
     /// Name used on the command line.
@@ -147,6 +157,11 @@ impl Faction {
             Faction::Doomsday => "doomsday",
             Faction::Amoeba => "amoeba",
             Faction::Borg => "borg",
+            Faction::Vger => "vger",
+            Faction::Crystal => "crystal",
+            Faction::Probe => "probe",
+            Faction::Species8472 => "8472",
+            Faction::JemHadar => "jemhadar",
         }
     }
 
@@ -160,6 +175,11 @@ impl Faction {
             Faction::Doomsday => "the planet killer",
             Faction::Amoeba => "the space amoeba",
             Faction::Borg => "the Borg",
+            Faction::Vger => "V'Ger",
+            Faction::Crystal => "the Crystalline Entity",
+            Faction::Probe => "the whale probe",
+            Faction::Species8472 => "Species 8472",
+            Faction::JemHadar => "the Jem'Hadar",
         }
     }
 
@@ -174,6 +194,11 @@ impl Faction {
             Faction::Doomsday => "Planet Killer",
             Faction::Amoeba => "Amoeba",
             Faction::Borg => "Borg",
+            Faction::Vger => "V'Ger",
+            Faction::Crystal => "Crystalline Entity",
+            Faction::Probe => "Probe",
+            Faction::Species8472 => "8472",
+            Faction::JemHadar => "Jem'Hadar",
         }
     }
 
@@ -188,7 +213,18 @@ impl Faction {
             Faction::Doomsday => "PK",
             Faction::Amoeba => "AM",
             Faction::Borg => "BG",
+            Faction::Vger => "VG",
+            Faction::Crystal => "CE",
+            Faction::Probe => "WP",
+            Faction::Species8472 => "85",
+            Faction::JemHadar => "JH",
         }
+    }
+
+    /// Species 8472 and the Borg are at war with each other as well as
+    /// with everyone else.
+    pub fn at_war_with(self, other: Faction) -> bool {
+        matches!((self, other), (Faction::Borg, Faction::Species8472) | (Faction::Species8472, Faction::Borg))
     }
 
     pub fn from_key(s: &str) -> Option<Faction> {
@@ -212,6 +248,11 @@ pub enum ShipType {
     PlanetKiller,
     Amoeba,
     BorgCube,
+    VgerCloud,
+    CrystalEntity,
+    WhaleProbe,
+    Bioship,
+    JemHadarFighter,
 }
 
 impl ShipType {
@@ -254,6 +295,10 @@ impl ShipType {
             ShipType::PlanetKiller => 1500.0,
             ShipType::Amoeba => 1400.0,
             ShipType::BorgCube => 1000.0,
+            // Only the core: torpedoes fired inside the cloud fly on.
+            ShipType::VgerCloud => 1200.0,
+            ShipType::CrystalEntity => 1500.0,
+            ShipType::WhaleProbe => 1200.0,
             _ => EXPDIST,
         }
     }
@@ -298,7 +343,7 @@ pub struct ShipStats {
     pub tract_str: f64,
 }
 
-pub static SHIPS: [ShipStats; 13] = [
+pub static SHIPS: [ShipStats; 18] = [
     ShipStats {
         name: "Scout", abbr: "SC", max_speed: 12, max_shield: 75.0, max_damage: 75.0,
         max_fuel: 5000.0, max_armies: 2, torp_damage: 25.0, torp_speed: 16.0, torp_fuse: 16,
@@ -416,6 +461,51 @@ pub static SHIPS: [ShipStats; 13] = [
         recharge: 500.0, repair: 700.0, warp_cost: 0.0, cloak_cost: 0.0, shield_cost: 0.0,
         turns: 40_000.0, acc: 100, dec: 200, wpn_cool: 40.0, egn_cool: 50.0,
         max_etemp: 100_000.0, max_wtemp: 100_000.0, mass: 60_000.0, tract_range: 1.3, tract_str: 12000.0,
+    },
+    ShipStats {
+        name: "V'Ger", abbr: "VG", max_speed: 2, max_shield: 100_000.0, max_damage: 100_000.0,
+        max_fuel: 1_000_000.0, max_armies: 0, torp_damage: 0.0, torp_speed: 10.0, torp_fuse: 30,
+        torp_cost: 0.0, phaser_damage: 0.0, phaser_cost: 0.0,
+        plasma_damage: 0.0, plasma_speed: 0.0, plasma_fuse: 0, plasma_cost: 0.0,
+        recharge: 500.0, repair: 10_000.0, warp_cost: 0.0, cloak_cost: 0.0, shield_cost: 0.0,
+        turns: 20_000.0, acc: 60, dec: 150, wpn_cool: 50.0, egn_cool: 50.0,
+        max_etemp: 100_000.0, max_wtemp: 100_000.0, mass: 1_000_000.0, tract_range: 1.0, tract_str: 1.0,
+    },
+    ShipStats {
+        name: "Crystalline Entity", abbr: "CE", max_speed: 4, max_shield: 0.0, max_damage: 600.0,
+        max_fuel: 1_000_000.0, max_armies: 0, torp_damage: 0.0, torp_speed: 10.0, torp_fuse: 30,
+        torp_cost: 0.0, phaser_damage: 0.0, phaser_cost: 0.0,
+        plasma_damage: 0.0, plasma_speed: 0.0, plasma_fuse: 0, plasma_cost: 0.0,
+        recharge: 500.0, repair: 2000.0, warp_cost: 0.0, cloak_cost: 0.0, shield_cost: 0.0,
+        turns: 60_000.0, acc: 80, dec: 150, wpn_cool: 50.0, egn_cool: 50.0,
+        max_etemp: 100_000.0, max_wtemp: 100_000.0, mass: 40_000.0, tract_range: 1.0, tract_str: 1.0,
+    },
+    ShipStats {
+        name: "Whale probe", abbr: "WP", max_speed: 3, max_shield: 100_000.0, max_damage: 100_000.0,
+        max_fuel: 1_000_000.0, max_armies: 0, torp_damage: 0.0, torp_speed: 10.0, torp_fuse: 30,
+        torp_cost: 0.0, phaser_damage: 0.0, phaser_cost: 0.0,
+        plasma_damage: 0.0, plasma_speed: 0.0, plasma_fuse: 0, plasma_cost: 0.0,
+        recharge: 500.0, repair: 10_000.0, warp_cost: 0.0, cloak_cost: 0.0, shield_cost: 0.0,
+        turns: 40_000.0, acc: 60, dec: 150, wpn_cool: 50.0, egn_cool: 50.0,
+        max_etemp: 100_000.0, max_wtemp: 100_000.0, mass: 200_000.0, tract_range: 1.0, tract_str: 1.0,
+    },
+    ShipStats {
+        name: "Bioship", abbr: "85", max_speed: 11, max_shield: 0.0, max_damage: 300.0,
+        max_fuel: 1_000_000.0, max_armies: 0, torp_damage: 0.0, torp_speed: 10.0, torp_fuse: 30,
+        torp_cost: 0.0, phaser_damage: 150.0, phaser_cost: 0.0,
+        plasma_damage: 0.0, plasma_speed: 0.0, plasma_fuse: 0, plasma_cost: 0.0,
+        recharge: 500.0, repair: 150.0, warp_cost: 0.0, cloak_cost: 0.0, shield_cost: 0.0,
+        turns: 300_000.0, acc: 250, dec: 300, wpn_cool: 40.0, egn_cool: 50.0,
+        max_etemp: 100_000.0, max_wtemp: 100_000.0, mass: 3000.0, tract_range: 1.0, tract_str: 3000.0,
+    },
+    ShipStats {
+        name: "Jem'Hadar fighter", abbr: "JH", max_speed: 11, max_shield: 80.0, max_damage: 90.0,
+        max_fuel: 12000.0, max_armies: 0, torp_damage: 30.0, torp_speed: 15.0, torp_fuse: 25,
+        torp_cost: 4.0 * 30.0, phaser_damage: 90.0, phaser_cost: 4.0 * 90.0,
+        plasma_damage: 0.0, plasma_speed: 0.0, plasma_fuse: 0, plasma_cost: 0.0,
+        recharge: 20.0, repair: 60.0, warp_cost: 2.0, cloak_cost: 20.0, shield_cost: 2.0,
+        turns: 420_000.0, acc: 250, dec: 300, wpn_cool: 4.0, egn_cool: 12.0,
+        max_etemp: 2000.0, max_wtemp: 1400.0, mass: 1400.0, tract_range: 0.7, tract_str: 2000.0,
     },
 ];
 

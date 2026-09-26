@@ -59,6 +59,10 @@ pub struct Player {
     pub bounty: f64,
     /// Borg adaptation: fraction of incoming damage still taken.
     pub adapt: f64,
+    /// Crystalline Entity: recent phaser hits (tick, shooter).
+    pub resonance: Vec<(u32, u8)>,
+    /// Whale probe: engines, shields and recharge are dead until this tick.
+    pub powerless_until: u32,
 }
 
 impl Player {
@@ -106,6 +110,8 @@ impl Player {
             faction: None,
             bounty: 0.0,
             adapt: 1.0,
+            resonance: Vec::new(),
+            powerless_until: 0,
         }
     }
 
@@ -172,6 +178,8 @@ pub struct Planet {
     pub known: [bool; 5],
     /// Held by an alien power, or devoured by the planet killer.
     pub alien: Option<Faction>,
+    /// Whale probe: no army growth until this tick.
+    pub silenced_until: u32,
 }
 
 /// One strand of a Tholian web: damages any non-Tholian ship touching it.
@@ -182,6 +190,17 @@ pub struct Web {
     pub y2: f64,
     pub ttl: i32,
     pub owner: u8,
+}
+
+/// What the next call to `inflict` is being hit by (some aliens care).
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum HitKind {
+    Other,
+    Photon,
+    Plasma,
+    Phaser,
+    /// Jem'Hadar phased polaron beams go straight through shields.
+    Polaron,
 }
 
 pub const WEB_REACH: f64 = 300.0;
@@ -215,6 +234,7 @@ pub struct World {
     /// Warnings for a single player (the "Helmsman:" line in the original client).
     pub warnings: Vec<(u8, String)>,
     pub webs: Vec<Web>,
+    pub hit_kind: HitKind,
 }
 
 impl World {
@@ -230,6 +250,7 @@ impl World {
             reset_timer: 0,
             warnings: Vec::new(),
             webs: Vec::new(),
+            hit_kind: HitKind::Other,
         };
         w.reset_galaxy();
         w
@@ -248,6 +269,7 @@ impl World {
                 flags: 0,
                 known: [false; 5],
                 alien: None,
+                silenced_until: 0,
             })
             .collect();
         for team in Team::PLAYABLE {
@@ -647,7 +669,7 @@ impl World {
         // Nearest enemy ship close to the beam line.
         let mut best: Option<(usize, f64)> = None;
         for (j, q) in self.players.iter().enumerate() {
-            if j == i || !q.alive() || q.team == team {
+            if j == i || !q.alive() || !self.at_war(i, j) {
                 continue;
             }
             let (dx, dy) = (q.x - x, q.y - y);
@@ -665,6 +687,10 @@ impl World {
                 let dmg = s.phaser_damage * (1.0 - dist / range);
                 let (tx, ty) = (self.players[j].x, self.players[j].y);
                 let label = self.players[i].tag();
+                self.hit_kind = if self.players[i].faction == Some(Faction::JemHadar) { HitKind::Polaron } else { HitKind::Phaser };
+                if self.players[j].ship == ShipType::CrystalEntity {
+                    self.resonate(j, id);
+                }
                 self.inflict(j, dmg, Some(id), format!("phaser from {}", label));
                 (tx, ty, true)
             }
@@ -690,6 +716,26 @@ impl World {
             info: PhaserInfo { owner: id, x1: x as i32, y1: y as i32, x2: x2 as i32, y2: y2 as i32, hit },
             ticks: 6,
         });
+    }
+
+    /// A phaser hit on the Crystalline Entity. Phasers from three or more
+    /// different ships within 2.5 seconds reach resonance and shatter it.
+    fn resonate(&mut self, j: usize, shooter: u8) {
+        let tick = self.tick;
+        let p = &mut self.players[j];
+        p.resonance.retain(|&(t, _)| tick.saturating_sub(t) <= 25);
+        p.resonance.push((tick, shooter));
+        let mut shooters: Vec<u8> = p.resonance.iter().map(|r| r.1).collect();
+        shooters.sort_unstable();
+        shooters.dedup();
+        if shooters.len() >= 3 {
+            p.resonance.clear();
+            self.outbox.push(Outgoing {
+                dest: Dest::All,
+                msg: ChatMsg { kind: MsgKind::System, from: "ALERT".into(), text: "Resonance! The Crystalline Entity shatters!".into() },
+            });
+            self.kill(j, Some(shooter), "shattered".into());
+        }
     }
 
     fn nearest_planet(&self, x: f64, y: f64) -> (usize, f64) {
@@ -849,12 +895,27 @@ impl World {
     // ------------------------------------------------------------------
     // damage & death
 
+    /// Whether ships `a` and `b` are enemies: different teams, or alien
+    /// factions at war with each other (the Borg and Species 8472).
+    pub fn at_war(&self, a: usize, b: usize) -> bool {
+        let (pa, pb) = (&self.players[a], &self.players[b]);
+        pa.team != pb.team || matches!((pa.faction, pb.faction), (Some(x), Some(y)) if x.at_war_with(y))
+    }
+
     pub fn inflict(&mut self, i: usize, amount: f64, killer: Option<u8>, how: String) {
+        let kind = std::mem::replace(&mut self.hit_kind, HitKind::Other);
         let p = &mut self.players[i];
         if !p.alive() || amount <= 0.0 {
             return;
         }
         let amount = match p.ship {
+            // Invulnerable: they have to be dealt with some other way.
+            ShipType::VgerCloud | ShipType::WhaleProbe => return,
+            // Only resonance (several phasers at once) can shatter it.
+            ShipType::CrystalEntity => amount * 0.05,
+            // Impervious to conventional weapons; plasma is our "nanoprobe" warhead.
+            ShipType::Bioship if kind == HitKind::Plasma => amount,
+            ShipType::Bioship => amount * 0.1,
             // Neutronium hull: ordinary weapons barely scratch it.
             ShipType::PlanetKiller => amount * 0.4,
             // The Borg adapt to whatever hits them.
@@ -872,7 +933,7 @@ impl World {
             _ => amount,
         };
         let p = &mut self.players[i];
-        if p.shields_up {
+        if p.shields_up && kind != HitKind::Polaron {
             p.shield -= amount;
             if p.shield < 0.0 {
                 p.damage -= p.shield;
@@ -941,8 +1002,13 @@ impl World {
             _ => 100.0,
         };
         let tag = self.players[i].tag();
+        let faction = self.players[i].faction;
         for j in 0..MAXPLAYER {
             if j == i || !self.players[j].alive() {
+                continue;
+            }
+            // Aliens don't blow up their own kind.
+            if faction.is_some() && self.players[j].faction == faction {
                 continue;
             }
             let rim = self.players[j].ship.hit_radius() - EXPDIST;
@@ -1129,10 +1195,20 @@ impl World {
         let own_planet = planet_under.filter(|&(_, owner, _)| owner == self.players[i].team);
         let p = &mut self.players[i];
 
+        // The whale probe's call drains all power.
+        let powerless = self.tick < p.powerless_until;
+        if powerless {
+            p.desired_speed = p.desired_speed.min(1);
+            p.shields_up = false;
+            p.cloaked = false;
+        }
+
         // Fuel.
-        p.fuel += 2.0 * s.recharge;
+        if !powerless {
+            p.fuel += 2.0 * s.recharge;
+        }
         if let Some((_, _, flags)) = own_planet {
-            if flags & PL_FUEL != 0 {
+            if flags & PL_FUEL != 0 && !powerless {
                 p.fuel += 6.0 * s.recharge;
             }
         }
@@ -1255,14 +1331,20 @@ impl World {
             if pl.armies == 0 {
                 let (name, old) = (pl.name, pl.owner);
                 pl.owner = Team::Ind;
+                // Khan's stronghold and Terran Empire conquests are freed.
+                if pl.alien != Some(Faction::Doomsday) {
+                    pl.alien = None;
+                }
                 self.god(format!("{} ({}) destroyed by {}", name, old.letter(), label));
                 self.check_genocide(old, team);
             }
             return;
         }
-        // Undefended: it's ours.
+        // Undefended: it's ours. Even a devoured world can be resettled
+        // (as bare rock, with no repair, fuel or farming).
         let (name, old) = (pl.name, pl.owner);
         pl.owner = team;
+        pl.alien = None;
         pl.armies = 1;
         pl.known[team.idx()] = true;
         self.god(format!("{} taken over by {}", name, label));
@@ -1356,10 +1438,14 @@ impl World {
             t.fuse -= 1;
             let mut boom = t.fuse <= 0 || t.x < 0.0 || t.y < 0.0 || t.x > GWIDTH || t.y > GWIDTH;
             if !boom {
+                let owner_fac = self.players.get(t.owner as usize).and_then(|o| if o.in_use { o.faction } else { None });
+                let hostile = |p: &Player| {
+                    p.team != t.team || matches!((owner_fac, p.faction), (Some(x), Some(y)) if x.at_war_with(y))
+                };
                 boom = self.players.iter().any(|p| {
                     let r = p.ship.hit_radius();
                     p.alive()
-                        && p.team != t.team
+                        && hostile(p)
                         && (p.x - t.x).abs() < r
                         && (p.y - t.y).abs() < r
                         && (p.x - t.x).powi(2) + (p.y - t.y).powi(2) < r * r
@@ -1368,8 +1454,10 @@ impl World {
             if boom {
                 t.explode = 1;
                 let damdist = if t.kind == TorpKind::Plasma { PLASDAMDIST } else { DAMDIST };
+                let owner_fac = self.players.get(t.owner as usize).and_then(|o| if o.in_use { o.faction } else { None });
                 for (j, p) in self.players.iter().enumerate() {
-                    if !p.alive() || p.team == t.team {
+                    let hostile = p.team != t.team || matches!((owner_fac, p.faction), (Some(x), Some(y)) if x.at_war_with(y));
+                    if !p.alive() || !hostile {
                         continue;
                     }
                     // Measure from the hull, so big monsters take full hits.
@@ -1387,6 +1475,7 @@ impl World {
         for (j, dmg, owner, kind) in hits {
             let what = if kind == TorpKind::Plasma { "plasma" } else { "torp" };
             let tag = self.players[owner as usize].tag();
+            self.hit_kind = if kind == TorpKind::Plasma { HitKind::Plasma } else { HitKind::Photon };
             self.inflict(j, dmg, Some(owner), format!("killed by {} from {}", what, tag));
         }
     }
@@ -1445,8 +1534,9 @@ impl World {
 
     fn planet_growth(&mut self) {
         let mut rng = rand::thread_rng();
+        let tick = self.tick;
         for pl in self.planets.iter_mut() {
-            if pl.owner == Team::Ind || pl.armies >= 60 {
+            if pl.owner == Team::Ind || pl.armies >= 60 || tick < pl.silenced_until {
                 continue;
             }
             let chance = if pl.flags & PL_AGRI != 0 { 1.0 / 12.0 } else { 1.0 / 30.0 };
@@ -1580,5 +1670,48 @@ impl World {
             starbase_teams: Team::PLAYABLE.into_iter().filter(|&t| self.has_starbase(t, me)).collect(),
             banner: self.banner.clone(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Beam armies onto a planet from a ship in orbit, one army at a time.
+    fn beam_down(w: &mut World, id: u8, k: usize, n: u32) {
+        let team = w.players[id as usize].team;
+        for _ in 0..n {
+            w.beam_army_down(id as usize, k, team);
+        }
+    }
+
+    /// Retaking alien-held and devoured planets clears the alien mark.
+    #[test]
+    fn retaking_alien_planets() {
+        let mut w = World::new();
+        let id = w.add_player("Kirk", false).unwrap();
+        w.join(id, Team::Fed, ShipType::Cruiser).unwrap();
+
+        // Khan's stronghold with 3 armies left after bombing.
+        let k = 5;
+        w.planets[k].owner = Team::Ind;
+        w.planets[k].alien = Some(Faction::Khan);
+        w.planets[k].armies = 3;
+        beam_down(&mut w, id, k, 3);
+        assert_eq!(w.planets[k].owner, Team::Ind, "defenders gone: planet is neutral");
+        assert_eq!(w.planets[k].alien, None, "Khan's hold is broken");
+        beam_down(&mut w, id, k, 1);
+        assert_eq!((w.planets[k].owner, w.planets[k].armies), (Team::Fed, 1));
+
+        // A world devoured by the planet killer can be resettled.
+        let d = 6;
+        w.planets[d].owner = Team::Ind;
+        w.planets[d].alien = Some(Faction::Doomsday);
+        w.planets[d].armies = 0;
+        w.planets[d].flags = 0;
+        beam_down(&mut w, id, d, 1);
+        assert_eq!(w.planets[d].owner, Team::Fed);
+        assert_eq!(w.planets[d].alien, None);
+        assert_eq!(w.planets[d].flags, 0, "still bare rock");
     }
 }

@@ -220,10 +220,12 @@ impl Bot {
                 if d < phrange * 0.6 && cool && p.fuel > s.phaser_cost * 3.0 && rng.gen_bool(0.25) {
                     cmds.push(ClientMsg::Phaser(dir_to(x, y, tx, ty) as u8));
                 }
-                if s.plasma_damage > 0.0 && p.kills >= 2.0 && d < 9000.0 && rng.gen_bool(0.05) {
+                // Plasma is the only thing that hurts Species 8472 bioships.
+                let vs_bioship = world.players[tid as usize].ship == ShipType::Bioship;
+                let plasma_odds = if vs_bioship { 0.35 } else { 0.05 };
+                if s.plasma_damage > 0.0 && p.kills >= 2.0 && d < 9000.0 && rng.gen_bool(plasma_odds) {
                     cmds.push(ClientMsg::Plasma(aim as u8));
                 }
-                let _ = tid;
             }
             Goal::Retreat => {
                 let target = self

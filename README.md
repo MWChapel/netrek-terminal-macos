@@ -16,8 +16,9 @@ that runs entirely inside a terminal window on macOS.
 - **Trek-style ships:** each empire has its own ship designs (Federation saucers and
   nacelles, Klingon D7s and Birds-of-Prey, Romulan warbirds, Orion raiders).
 - **Robots:** AI pilots fight, bomb, carry armies and capture planets, so you can play solo.
-- **Alien incursions** (optional): Khan, the Gorn, Tholian webs, the Fesarius, the
-  mirror universe, the planet killer, the space amoeba and the Borg drop into the game.
+- **Alien incursions** (optional): thirteen Star Trek threats, from Khan, the Borg and the
+  planet killer to V'Ger, the Crystalline Entity, the whale probe, Species 8472 and the
+  Jem'Hadar, drop into the game.
 - **Sound:** synthesized retro sound effects, with no audio libraries required.
 - **Mouse and keyboard:** aim and steer with the mouse, with the classic Netrek key bindings.
 
@@ -35,6 +36,7 @@ that runs entirely inside a terminal window on macOS.
 - [How to play](#how-to-play)
 - [Ships](#ships)
 - [Planets](#planets)
+  - [Taking and retaking planets](#taking-and-retaking-planets)
 - [Robots](#robots)
 - [Alien incursions](#alien-incursions)
 - [Sound](#sound)
@@ -123,7 +125,7 @@ netrek <COMMAND>
 | `-b, --bind <ADDR>` | `0.0.0.0` | Address to bind; use `127.0.0.1` for local-only |
 | `--bots <N>` | `6` | Robot players kept in the game |
 | `-e, --empires <LIST>` | `fed,rom` | Empires the robots play for: `all`, or a comma list such as `fed,rom,kli` |
-| `--aliens [LIST]` | off | Alien incursions: bare `--aliens` for all eight, or a list such as `khan,borg`. See [Alien incursions](#alien-incursions) |
+| `--aliens [LIST]` | off | Alien incursions: bare `--aliens` for all thirteen, or a list such as `khan,borg,vger`. See [Alien incursions](#alien-incursions) |
 | `--alien-interval <SECS>` | `150` | Average seconds between incursions |
 
 The server logs connections, joins, kills and planet captures to stdout.
@@ -334,7 +336,8 @@ quadrant:
 4. **Pick up** armies from one of your own planets (`z` while orbiting).
 5. **Invade:** orbit the enemy planet and beam your armies down (`x`). Each army you
    beam down kills one defender. When the defenders hit zero the planet becomes neutral,
-   and your next army takes it.
+   and your next army takes it. After bombing a planet to 4, you need **5 armies** to
+   capture it. See [Taking and retaking planets](#taking-and-retaking-planets).
 6. When an empire loses all its planets it has been **genocided**, and its ships are
    destroyed. When only one empire still holds planets, **the galaxy is conquered**. A
    banner announces the winner and the galaxy resets after 15 seconds.
@@ -403,6 +406,48 @@ through Romulus, Klingus and Orion.
 - **Neutral planets:** a planet destroyed down to zero armies becomes neutral (grey)
   until someone beams armies onto it.
 
+### Taking and retaking planets
+
+Every planet is captured the same way, whether it belongs to a rival empire, is neutral,
+or is held by aliens:
+
+1. **Earn kills.** You can only carry armies once you have kills: 2 per kill (3 in an
+   Assault ship), up to your ship's capacity. A cruiser with 2 kills carries 4 armies.
+   Kills reset when you die.
+2. **Pick up armies.** Orbit one of your own planets (`o`, or `l` on it to autopilot there)
+   and press `z`. Armies come aboard about one every 0.8 seconds, and you must leave at
+   least one behind.
+3. **Bomb the target** (`b` while orbiting) until it's down to **4 armies**; bombing
+   can't go lower. The planet fires at you while you're close, and harder the more armies it
+   has, so keep your shields up.
+4. **Invade.** Orbit it and press `x`. About every 0.8 seconds one army beams down and
+   kills one defender. At zero defenders the planet turns **neutral**, and your **next**
+   army captures it with 1 army.
+
+**Tips:**
+
+- **Share the load:** one ship rarely carries enough. The defender count carries over
+  between ships, so a teammate can beam down first to wear the defenders down and you
+  finish the job.
+- **Neutral planets** with no armies fall to a single army.
+- **Hold what you take:** a new capture starts with just 1 army and grows slowly. Beam
+  more armies onto it (`x` while orbiting your own planet) before the enemy comes back.
+- **Losing your last planet** means your empire has been genocided (see
+  [How to play](#how-to-play)).
+
+**Planets taken by aliens** (with `--aliens`):
+
+| Planet state | How to get it back |
+|---|---|
+| **Khan's stronghold** | Starts with 40 armies and fires on anyone nearby. Bomb it down to 4, then invade as usual. |
+| **Terran Empire conquest** | Starts with 10 armies. Bomb and invade as usual. |
+| **Wiped out by Gorn, stripped by the Crystalline Entity, or purged by V'Ger** | Left with no armies. Gorn and V'Ger leave it neutral; the Crystalline Entity leaves the owner in place but kills the armies and its farming. Beam down one army to take it. |
+| **Devoured by the planet killer, or destroyed by Species 8472** | Dead grey rock with no armies. One army resettles it, but as **bare rock**: its repair, fuel and farming are gone until the galaxy resets. |
+
+Once the defenders are wiped out, a liberated planet loses its alien colour and turns
+neutral grey. Your first army makes it yours. Everything returns to normal when the
+galaxy resets.
+
 ## Robots
 
 Robots keep the game lively when there aren't enough people. They:
@@ -438,7 +483,7 @@ variation), and at most **two** are active at once. Each arrival, defeat and wit
 is announced to everyone as a magenta **ALERT** message with a klaxon.
 
 ```sh
-netrek server --empires all --bots 12 --aliens            # all eight
+netrek server --empires all --bots 12 --aliens            # all thirteen
 netrek solo --aliens khan,borg,doomsday --alien-interval 90
 ```
 
@@ -452,21 +497,29 @@ netrek solo --aliens khan,borg,doomsday --alien-interval 90
 | `doomsday` | **The planet killer** drifts from world to world and **devours** them, leaving dead rock with no armies or resources. Its antiproton beam hits nearby ships, and anything in front of its maw is eaten. Its neutronium hull shrugs off most damage, but, as Commodore Decker showed, **a ship exploding in its maw does 8× damage**. |
 | `amoeba` | **The space amoeba** drifts toward ships, drains the fuel of everything within reach, damages it and pulls it in. |
 | `borg` | **The Borg cube** hunts the nearest ship, cuts it with beams and torpedoes, and grabs it with a tractor beam. Hold a ship for 4 seconds and it is **assimilated**: destroyed, and replaced by a new cube (up to three). Cubes **adapt**: every hit makes them more resistant, down to taking 30% damage. |
+| `vger` | **V'Ger** (*The Motion Picture*): an immense energy cloud heading for **Earth** (then the other home worlds), purging any it reaches. Ships inside the cloud crawl at warp 3, and every few seconds a plasma bolt **digitizes** a ship outright. Weapons are useless. The only way to stop it is to **join with it**: hold position at its core for 10 seconds. That ship is lost, V'Ger transcends, and the pilot gets 5 career kills. |
+| `crystal` | **The Crystalline Entity** (TNG): strips all life from planets, farming worlds first, killing their armies and their agriculture for good. It shreds ships that come close. Almost nothing hurts it, but phasers from **three different ships within 2.5 seconds** reach **resonance** and shatter it. |
+| `probe` | **The whale probe** (*Star Trek IV*): invulnerable. It travels planet to planet, **draining the power** of every ship within 10,000 units (engines drop to warp 1, shields fail, fuel stops recharging) and stopping army growth where it stops. Bring it **two armies** (the whales) to answer its call: it departs, and the courier earns 3 kills. |
+| `8472` | **Species 8472** (Voyager): three bioships from fluidic space with devastating beams. Photon torpedoes and phasers do only 10% damage; **plasma torpedoes** (our nanoprobe warheads) do full damage. When the bioships gather at a planet they focus their beams and **destroy it** (never a home world), then recharge for about 40 seconds. They're also **at war with the Borg**. |
+| `jemhadar` | **The Jem'Hadar** (DS9): a wormhole opens with a warning, and six seconds later five fast attack ships pour out. Their phased polaron beams **ignore shields**, and a fighter below 30% hull **rams** the nearest enemy for heavy damage. |
 
 **How aliens behave:**
 
 - **Enemies of everyone:** aliens fly as independents, so they're hostile to all four
-  empires (and robots will fight them). They don't fight each other.
+  empires (and robots will fight them). They don't fight each other, except that
+  Species 8472 and the Borg are at war and will go after each other on sight. Aliens'
+  exploding ships don't hurt their own kind.
 - **Callsigns and colours:** they have their own colours and designs, and are labelled by
   name on the tactical view (`Khan`, `Borg`, `ISS`, …). On the galaxy map and player list
-  they show as `KH`, `GN`, `TH`, `FS`, `MU`, `PK`, `AM` or `BG` plus a slot.
+  they show as a two-letter tag (`KH`, `BG`, `VG`, `JH`, …) plus a slot.
 - **Rewards:** destroying an alien is worth more than a normal kill. Fleet ships give 1.5
   kills, Khan's ships 2, and the monsters 3 to 5.
 - **Planets:** planets taken by Khan or the Terran Empire are shown in the alien's colour.
-  Devoured planets turn grey. All of them can be retaken with armies, and everything is
+  Planets devoured by the planet killer or destroyed by Species 8472 turn grey. All of
+  them can be retaken with armies, and everything is
   restored when the galaxy resets.
-- **Ending:** an incursion ends when all its ships are destroyed, or it withdraws after
-  4–6 minutes. If an empire loses its last planet to aliens, it has been wiped out by
+- **Ending:** an incursion ends when all its ships are destroyed (or V'Ger is joined, or
+  the probe answered), or it withdraws after 4–6 minutes. If an empire loses its last planet to aliens, it has been wiped out by
   alien invaders.
 
 **Who's who on screen:**
@@ -481,6 +534,11 @@ netrek solo --aliens khan,borg,doomsday --alien-interval 90
 | Planet killer | steel grey | `PK` | A long cone with an open maw at the front |
 | Space amoeba | sea green | `AM` | A wobbling cell with a nucleus |
 | Borg | neon green | `BG` | The cube, criss-crossed with conduits |
+| V'Ger | blue | `VG` | A vast glowing cloud around a bright core (also shown on the galaxy map) |
+| Crystalline Entity | ice white | `CE` | A snowflake of crystal spines |
+| Whale probe | bronze | `WP` | A long cylinder with a small sphere at one end |
+| Species 8472 | pink | `85` | Organic bioship with a spine and swept claws |
+| Jem'Hadar | violet | `JH` | Beetle-shaped attack ship with forward prongs |
 
 **Alien vessels:**
 
@@ -494,6 +552,11 @@ netrek solo --aliens khan,borg,doomsday --alien-interval 90
 | Planet killer | 2 | 1,000 | 2,500 | antiproton beam 80, maw | 5 |
 | Space amoeba | 3 | – | 1,400 | energy drain, tractor | 3.5 |
 | Borg cube | 6 | 2,000 | 3,000 | cutting beam 120, torpedo 60, tractor, assimilation | 4 (new cubes 3) |
+| V'Ger | 2 | invulnerable | | plasma bolts (instant kill), slowing cloud | 5 career kills for joining |
+| Crystalline Entity | 4 | – | 600 | crystal beam 40; shattered by resonance | 4 |
+| Whale probe | 3 | invulnerable | | power drain over 10,000 units | 3 for answering it |
+| Species 8472 bioship | 11 | – | 300 | beam 150, planet destruction; 10% damage except plasma | 2.5 |
+| Jem'Hadar fighter | 11 | 80 | 90 | polaron beam 90 (ignores shields), torpedo 30, ramming | 1.5 |
 
 The monsters regenerate quickly. The planet killer only takes 40% of normal weapon
 damage, and a Borg cube's resistance builds as it's hit.
@@ -520,6 +583,22 @@ damage, and a Borg cube's resistance builds as it's hit.
   Otherwise, torpedo it from the side and stay out of its antiproton beam.
 - **Space amoeba:** it drains your fuel from 3,200 units away and pulls you in, so don't
   get close. Pound it with torpedoes from range. It's slow, and it has no shields.
+- **V'Ger:** don't fight it: nothing works. Fly into the cloud (you'll crawl at warp 3)
+  and park at the bright core. Ships at the core are never targeted by its bolts, so
+  stay there for 10 seconds and you'll join with it. Everyone else should keep out of the
+  cloud, since its bolts pick a random ship inside or near it every few seconds.
+- **Crystalline Entity:** torpedoes are wasted. Get three ships (any empires: rivals
+  can cooperate) within phaser range and fire together; three hits inside 2.5 seconds
+  shatter it. Protect your agricultural worlds, which it goes for first.
+- **Whale probe:** you can't hurt it. Pick up two armies (you need a kill first) and fly
+  them within 4,000 units of it. Get there before its drain reaches you, because inside
+  10,000 units you're stuck at warp 1 with no shields, a sitting duck for anyone else.
+- **Species 8472:** only plasma works (`f`, in a DD, CA or BB with 2 kills). When the
+  bioships gather around one of your planets, break them up before they finish charging.
+  If the Borg are also in the galaxy, let the two fight.
+- **Jem'Hadar:** watch for the wormhole warning. Shields don't help against their beams, so
+  keep your distance and use torpedoes. Finish wounded fighters from range, or dodge
+  them: a badly damaged one will try to ram you.
 - **Borg:** a cube assimilates a ship it holds in its tractor beam within about 2,600
   units for four seconds. Its tractor is far stronger than any pressor, so don't try to
   push free. Instead stay out of range, and if you're caught, run at full speed: cubes
@@ -601,7 +680,7 @@ Enlarge the window or shrink the font.
 Aliens only appear when the *server* was started with `--aliens` (for `solo`, pass it to
 `netrek solo`). The first incursion arrives after half the interval (at most a minute),
 then about every `--alien-interval` seconds. An incursion needs free player slots (up to
-4), so a full 32-player galaxy delays them.
+5), so a full 32-player galaxy delays them.
 
 **Can't connect.**
 Check the host and port, and that the server's firewall allows the port. Client and
@@ -681,9 +760,13 @@ The tests include:
 
 - **`four_empire_game`:** 16 robots across all four empires. Checks every empire gets
   its share of ships and that the fighting spreads across the galaxy.
-- **`every_incursion_plays_out`:** runs each of the eight alien incursions against a
+- **`every_incursion_plays_out`:** runs each of the thirteen alien incursions against a
   four-empire robot war and checks it arrives, acts and ends cleanly.
-- **`incursions_do_not_repeat_while_active`:** long games with all eight aliens, checking
+- **Alien mechanics:** `vger_merge_ends_the_threat`, `crystal_shatters_on_resonance`,
+  `whale_probe_drains_and_is_answered`, `bioships_only_fear_plasma`,
+  `polaron_beams_ignore_shields` and `borg_and_8472_fight_each_other`.
+- **`retaking_alien_planets`:** liberated and resettled planets lose their alien mark.
+- **`incursions_do_not_repeat_while_active`:** long games with all the aliens, checking
   at most two are active at once and none repeats while it's still active.
 - **`robots_play_a_game`:** a headless 30-minute robot game. It checks the rules engine
   holds up (kills happen, no panics) and prints a summary of kills, planet captures and

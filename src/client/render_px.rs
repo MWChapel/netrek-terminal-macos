@@ -36,6 +36,11 @@ pub fn faction_rgb(f: Faction) -> Rgb {
         Faction::Doomsday => rgb(0xa8b0bc),
         Faction::Amoeba => rgb(0x50e8b0),
         Faction::Borg => rgb(0x39ff14),
+        Faction::Vger => rgb(0x6aa8ff),
+        Faction::Crystal => rgb(0xd8f6ff),
+        Faction::Probe => rgb(0xb8a888),
+        Faction::Species8472 => rgb(0xff7fa0),
+        Faction::JemHadar => rgb(0xa070ff),
     }
 }
 
@@ -47,7 +52,7 @@ pub fn player_rgb(p: &PlayerInfo) -> Rgb {
 /// A planet's colour; devoured planets are dead grey rock.
 pub fn planet_rgb(info: &PlanetInfo) -> Rgb {
     match info.alien {
-        Some(Faction::Doomsday) => rgb(0x55595f),
+        Some(Faction::Doomsday | Faction::Species8472) => rgb(0x55595f),
         Some(f) => faction_rgb(f),
         None => team_rgb(info.owner),
     }
@@ -68,7 +73,9 @@ pub fn callsign(p: &PlayerInfo) -> String {
 
 /// How big to draw a ship, in galaxy units (monsters are huge).
 pub fn ship_size_units(s: ShipType) -> f64 {
-    if s.hit_radius() > EXPDIST {
+    if s == ShipType::VgerCloud {
+        6000.0
+    } else if s.hit_radius() > EXPDIST {
         s.hit_radius() * 1.05
     } else {
         0.0
@@ -338,6 +345,12 @@ impl App {
                     px.glow(gx, gy, 1.2 + 1.8 * k, rgb(0xff9a40), 0.35 + 0.6 * k);
                 }
             }
+            if p.ship == ShipType::VgerCloud {
+                px.glow(x, y, sr, rgb(0x3060c0), 0.4);
+                px.glow(x, y, sr * 0.5, rgb(0x70a8ff), 0.4);
+                px.ring(x, y, sr * 0.9, 0.4, rgb(0x80b8ff), 0.35);
+                px.glow(x, y, (1200.0 / upd) as f32, rgb(0xeaf4ff), 0.9);
+            }
             let body = if is_me { mix(team, WHITE, 0.45) } else { team };
             let edge = if is_me { WHITE } else { mix(team, WHITE, 0.3) };
             for part in ship_parts(p.team, p.ship, p.faction) {
@@ -367,7 +380,8 @@ impl App {
                     }
                 }
             }
-            if p.flags & pf::SHIELD != 0 && !cloaked {
+            let invulnerable = matches!(p.ship, ShipType::VgerCloud | ShipType::WhaleProbe);
+            if p.flags & pf::SHIELD != 0 && !cloaked && !invulnerable {
                 let scol = if is_me {
                     let frac = (f.me_info.shield as f32 / p.ship.stats().max_shield as f32).clamp(0.0, 1.0);
                     if frac > 0.6 {
@@ -384,7 +398,12 @@ impl App {
             }
             let tag = p.faction.map_or(slot_char(p.id).to_string(), |f| f.tag().to_string());
             let lc = if cloaked { to_color(UNKNOWN, tc) } else if is_me { Color::White } else { self.label_color(team) };
-            let (lx, ly) = (((x + sr * 1.3 + 2.0) / 2.0) as i32, ((y - sr) as f64 / lpy) as i32);
+            let (lx, ly) = if ship_size_units(p.ship) > 0.0 {
+                let lift = if p.ship == ShipType::VgerCloud { sr * 0.25 } else { sr * 1.1 };
+                ((x / 2.0) as i32 - tag.chars().count() as i32 / 2, ((y - lift) as f64 / lpy) as i32 - 1)
+            } else {
+                (((x + sr * 1.3 + 2.0) / 2.0) as i32, ((y - sr) as f64 / lpy) as i32)
+            };
             labels.place(lx, ly, &tag, lc, is_me);
         }
 
@@ -449,6 +468,10 @@ impl App {
             let abbr: String = def.name.chars().take(3).collect();
             let lc = if info.known { self.label_color(col) } else { to_color(UNKNOWN, tc) };
             planet_labels.push(((x / 2.0) as i32 - 1, ((y + gr) as f64 / lpy) as i32 + 1, abbr, lc, info.known && info.armies > 4));
+        }
+        for p in f.players.iter().filter(|p| p.state == PState::Alive && p.ship == ShipType::VgerCloud) {
+            let (x, y) = to(p.x as f64, p.y as f64);
+            px.glow(x, y, (ship_size_units(p.ship) * sx) as f32, rgb(0x3060c0), 0.5);
         }
         for p in f.players.iter().filter(|p| p.state == PState::Alive) {
             let (x, y) = to(p.x as f64, p.y as f64);
