@@ -6,7 +6,7 @@ use super::canvas::Braille;
 use super::palette::{mix, rgb, scale, Rgb};
 use super::sixel::TextRenderer;
 use super::vg::Canvas;
-use crate::proto::{Frame, TerrainInfo, TerrainKind};
+use crate::proto::{Frame, TerrainInfo, TerrainKind, ZoneInfo, ZoneKind};
 use crossterm::style::Color;
 use std::f32::consts::TAU;
 
@@ -523,6 +523,91 @@ pub fn draw_tempest_braille(b: &mut Braille, f: &Frame, to_dot: &dyn Fn(f64, f64
     }
 }
 
+const SLICK: Rgb = rgb(0x9a80b8);
+const ARENA: Rgb = rgb(0xf4f0ff);
+const BEACON: Rgb = rgb(0x9060ff);
+const DISPLACE: Rgb = rgb(0x80e0ff);
+
+/// The edge of Armus's slick: a wobbling blob, `n` points round.
+fn slick_edge(z: &ZoneInfo, tick: f32, n: usize) -> Vec<(f64, f64)> {
+    (0..n)
+        .map(|k| {
+            let a = k as f32 / n as f32 * TAU;
+            let r = 0.9 + 0.07 * (5.0 * a + tick * 0.05).sin() + 0.05 * (9.0 * a - tick * 0.03).sin();
+            (z.x as f64 + (a.cos() * r) as f64 * z.r as f64, z.y as f64 + (a.sin() * r) as f64 * z.r as f64)
+        })
+        .collect()
+}
+
+/// Patches of space marked out by alien incursions: Armus's slick, the
+/// Metrons' arena, Species 10-C's beacons, the Caretaker's wave.
+pub fn draw_zones_vec(px: &mut Canvas, f: &Frame, to: &dyn Fn(f64, f64) -> (f32, f32), u: &dyn Fn(f64) -> f32, detail: bool) {
+    let tick = f.tick as f32;
+    for z in &f.zones {
+        let (x, y) = to(z.x as f64, z.y as f64);
+        let r = u(z.r as f64).max(2.0);
+        match z.kind {
+            ZoneKind::Slick => {
+                let pts: Vec<(f32, f32)> = slick_edge(z, tick, 48).into_iter().map(|(a, b)| to(a, b)).collect();
+                px.fill_poly(&pts, rgb(0x120e18), 0.85);
+                if detail {
+                    // An oily rainbow sheen.
+                    px.polyline(&pts, true, 4.0, mix(SLICK, rgb(0x40e0c0), 0.5 + 0.5 * (tick * 0.07).sin()), 0.25, 0.0);
+                }
+                px.polyline(&pts, true, 1.5, SLICK, 0.9, 0.0);
+            }
+            ZoneKind::Arena => {
+                let pulse = 0.6 + 0.4 * (tick * 0.2).sin();
+                if detail {
+                    px.ring(x, y, r, 6.0, ARENA, 0.12 * pulse);
+                    px.ring_dashed(x, y, r * 1.04, 1.0, ARENA, 0.5, 8.0);
+                }
+                px.ring(x, y, r, 2.0, ARENA, 0.6 + 0.3 * pulse);
+            }
+            ZoneKind::Beacon => {
+                px.ring_dashed(x, y, r, 1.2, BEACON, 0.6, 5.0);
+                px.disc(x, y, (r * 0.12).max(1.5), BEACON, 0.8);
+            }
+            ZoneKind::BeaconLit => {
+                px.glow(x, y, r * 1.2, BEACON, 0.35);
+                px.ring(x, y, r, 2.0, mix(BEACON, WHITE, 0.4), 1.0);
+                px.disc(x, y, (r * 0.15).max(2.0), WHITE, 1.0);
+            }
+            ZoneKind::Displacement => {
+                px.ring(x, y, r, 3.0, DISPLACE, 0.6);
+                px.ring(x, y, r * 0.8, 1.5, DISPLACE, 0.4);
+            }
+        }
+    }
+}
+
+/// The alien zones in braille.
+pub fn draw_zones_braille(b: &mut Braille, f: &Frame, to_dot: &dyn Fn(f64, f64) -> (f64, f64), per_dot: f64) {
+    for z in &f.zones {
+        let (x, y) = to_dot(z.x as f64, z.y as f64);
+        let r = z.r as f64 / per_dot;
+        match z.kind {
+            ZoneKind::Slick => {
+                let pts: Vec<(f64, f64)> = slick_edge(z, f.tick as f32, 32).into_iter().map(|(a, c)| to_dot(a, c)).collect();
+                for k in 0..pts.len() {
+                    let (p, q) = (pts[k], pts[(k + 1) % pts.len()]);
+                    b.line(p.0, p.1, q.0, q.1, Color::DarkMagenta, 1);
+                }
+            }
+            ZoneKind::Arena => b.circle(x, y, r, Color::White, 1),
+            ZoneKind::Beacon => {
+                b.arc(x, y, r, Color::DarkMagenta, 1, 3);
+                b.dotf(x, y, Color::Magenta, 2);
+            }
+            ZoneKind::BeaconLit => {
+                b.circle(x, y, r, Color::Magenta, 2);
+                b.disc(x, y, (r * 0.2).max(1.0), Color::White, 2);
+            }
+            ZoneKind::Displacement => b.arc(x, y, r, Color::Cyan, 1, 2),
+        }
+    }
+}
+
 /// Terrain in braille graphics. `per_dot` is galaxy units per braille dot.
 pub fn draw_braille(
     b: &mut Braille,
@@ -770,6 +855,7 @@ mod tests {
             treaties: vec![],
             leaders: vec![],
             tempest: None,
+            zones: Vec::new(),
             open_teams: vec![],
             team_planets: [0; 4],
             starbase_teams: vec![],

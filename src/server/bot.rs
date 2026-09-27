@@ -114,8 +114,9 @@ impl Bot {
             .filter(|q| q.alive() && world.hostile(q.team, team) && (!q.cloaked || q.detected))
             // Ships hidden in a nebula or ion storm only show up close by.
             .filter(|q| !q.hidden || dist(x, y, q.x, q.y) < super::terrain::SENSOR_RANGE)
-            // Don't waste fire on Q, or on a champion only another empire can hurt.
-            .filter(|q| q.ship != ShipType::QEntity && q.only_hurt_by.map_or(true, |t| t == team))
+            // Don't waste fire on Q (or anything else weapons can't hurt), or on a champion only another empire can hurt.
+            // (They still close in on V'Ger and the whale probe, which is how those end.)
+            .filter(|q| (!q.ship.pointless_target() || matches!(q.ship, ShipType::VgerCloud | ShipType::WhaleProbe)) && q.only_hurt_by.map_or(true, |t| t == team))
             .map(|q| (q, dist(x, y, q.x, q.y)))
             .min_by(|a, b| a.1.total_cmp(&b.1))
             .map(|(q, d)| (q.id, q.x, q.y, q.dir, q.speed, d));

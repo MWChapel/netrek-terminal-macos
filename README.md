@@ -17,9 +17,9 @@ that runs entirely inside a terminal window on macOS.
 - **Trek-style ships:** each empire has its own ship designs (Federation saucers and
   nacelles, Klingon D7s and Birds-of-Prey, Romulan warbirds, Orion raiders).
 - **Robots:** AI pilots fight, bomb, carry armies and capture planets, so you can play solo.
-- **Alien incursions** (optional): twenty threats, from Khan, the Borg and the
-  planet killer to V'Ger, Species 8472, the Jem'Hadar, General Chang, Q and a plague of
-  tribbles, drop into the game.
+- **Alien incursions** (optional): thirty threats, from Khan, the Borg and the
+  planet killer to V'Ger, Species 8472, the Jem'Hadar, General Chang, Q, Nomad, the
+  Metrons' arena and a plague of tribbles, drop into the game.
 - **Extras** (optional, each its own server option): career ranks and service records,
   personal orders from command, treaties between empires, 21 kinds of space terrain (10
   in any one galaxy),
@@ -138,7 +138,7 @@ netrek <COMMAND>
 | `-b, --bind <ADDR>` | `0.0.0.0` | Address to bind; use `127.0.0.1` for local-only |
 | `--bots <N>` | `6` | Robot players kept in the game |
 | `-e, --empires <LIST>` | `fed,rom` | Empires the robots play for: `all`, or a comma list such as `fed,rom,kli` |
-| `--aliens [LIST]` | off | Alien incursions: bare `--aliens` for all twenty, or a list such as `khan,borg,vger`. See [Alien incursions](#alien-incursions) |
+| `--aliens [LIST]` | off | Alien incursions: bare `--aliens` for all thirty, or a list such as `khan,borg,vger`. See [Alien incursions](#alien-incursions) |
 | `--alien-interval <SECS>` | `150` | Average seconds between incursions |
 | `--ranks [FILE]` | off | Career ranks, service records and a leaderboard, saved to `FILE` (default `~/.netrek/service-records.tsv`). See [Extras](#extras) |
 | `--orders` | off | Personal orders from command, with rewards |
@@ -547,7 +547,7 @@ with aliens on the server keeps 8 of them free for incursions, running fewer rob
 is announced to everyone as a magenta **ALERT** message with a klaxon.
 
 ```sh
-netrek server --empires all --bots 12 --aliens            # all twenty
+netrek server --empires all --bots 12 --aliens            # all thirty
 netrek solo --aliens khan,borg,doomsday --alien-interval 90
 ```
 
@@ -573,6 +573,16 @@ netrek solo --aliens khan,borg,doomsday --alien-interval 90
 | `ferengi` | **Ferengi marauders** (*The Last Outpost*): three marauders loot armies from undefended colonies, tractor passing ships to siphon their fuel, and once full (6 armies) run for the edge of the galaxy. If one escapes, its armies are gone. Destroy one and its stolen armies **spill into space** (shown as a gold `+N`), where the first ship of any empire to fly over them takes them. Marauders **surrender** to any battleship or starbase that gets within 2,500 units (+1 kill). |
 | `swarm` | **The Swarm** (Voyager): eight tiny, fast ships that **latch onto hulls**, draining fuel and slowly eating the ship. Detonating (`d`) shakes off every swarm ship within range, and the swarm always leaves enough fuel in the tank to do it. Each swarm ship is worth only a fifth of a kill. |
 | `tempest` | **The Tempest** (after Atari's 1981 vector arcade game): a neon-blue web, 13,000 across, forms in open space. As in the arcade, it comes in several shapes (a round 16-lane tube, a **square** of 16 lanes, or a **triangle** of 15), starts in a random one, and **reshapes at every new level**. Any empire ship that touches it is **trapped on its rim**: it can only slide around the edge, and there's no escape until the Tempest dies or dissolves. Creatures climb the lanes out of the core in waves, each wave bigger and faster, and ride the web as in the arcade game: small deep in the tube, growing to fill their lane as they reach the rim. **Flippers** (red bowties) climb while flipping end over end into neighbouring lanes, then flip along the rim toward you and **grab** you, dragging you into the core after 5 seconds unless someone shoots them. **Tankers** (purple diamonds) climb dead straight and split into two flippers. **Pulsars** (cyan zigzags) climb slowly, flipping now and then, and electrify their whole lane. **Fuseballs** ride the spokes between lanes, drifting in and out and darting across lanes. They can only be hit while crossing a lane (on a spoke they show as a ghost), and they burn anything they touch at the rim. Trapped ships get one **Superzapper** each (`d`), which destroys everything on the web. The **core** is untouchable while anything is on the web; clear a wave and it's exposed for 20 seconds. Ships trapped on the rim hit it full on; ships outside the web do half damage. It slowly regenerates while shielded, has 1,600 hull, and is worth 6 kills. |
+| `nomad` | **Nomad** (*The Changeling*, TOS): a probe out to "sterilise" everything imperfect. It hunts the **most damaged** ships in reach and, with nobody to fix, drains the armies of weak colonies (6 or fewer) until they fall. Weapons can't touch it. Kirk's trick works, though: fly within **3,500 units** and send a message telling it that it is **imperfect** (or has made an **error**, a **mistake**, or has a **flaw**), and it destroys itself. You get the credit (3 kills). |
+| `armus` | **Armus** (*Skin of Evil*, TNG): an oily black slick, 5,000 across, that oozes after the nearest ship. Ships inside it are **held** (warp 2 at most), dragged toward the middle and slowly eaten. It feeds on violence: **every shot fired into it makes it bigger**, and every ship it eats makes it bigger still. It never takes damage. Starve it: after 45 seconds without being hit it shrinks back, then **withers away** over 30 seconds. Robots and overwatch hold their fire. |
+| `nanites` | **Nanites** (*Evolution*, TNG): an outbreak with no ships. Two ships are infected. Their systems **glitch** every few seconds (the helm swings off course, shields drop, a torpedo misfires), and the nanites **spread** to ships that fly within 1,500 units (up to ten ships). Cure: **orbit a friendly repair world** for 3 seconds, or **detonate** (`d`), which burns them out of your ship and any ship within 3,400 units. The outbreak is over when no ship carries them. |
+| `changeling` | **Changelings** (DS9): three ships that **look like one of your own cruisers**, whichever empire you're in: same colour, no alien tag, a plausible name, even their torpedoes. They pick off ships flying alone and slip into orbit over colonies to wipe out the garrison. **Any hit** (yours, a rival's, planetary fire) makes one lose its shape for 30 seconds. |
+| `metrons` | **The Metrons** (*Arena*, TOS): the **best pilot in the galaxy** and the best pilot of an empire at war with theirs are snatched away, fully repaired, into a **sealed arena** 10,000 across in open space. Nobody can get in, nobody can get out, torpedoes can't cross the wall, and nothing but the other champion can hurt them. The winner is restored again and gets **3 extra kills**. If neither wins in 2 minutes the Metrons release them, unimpressed. |
+| `pakled` | **Pakleds** (*Samaritan Snare*, TNG): three slow, tough clunkers. "We look for things. Things to make us go." One tractors the nearest ship, holds it for 4 seconds and **takes something clever**: an **advanced tech** (with `--ranks` and `--rank-tech`), or else a level of the empire's **supply upgrades** (with `--supply`), or else most of its fuel. Then it runs for the edge of the galaxy. **Destroy the thief** to get it back; if it escapes, it's gone. |
+| `10c` | **Species 10-C** (Discovery): a **dark matter anomaly** drifts across the galaxy at warp 2. Any planet it passes over is **wiped clean** (no armies, no owner), and ships within 7,000 units are hurled aside and, close in, torn at. Weapons are useless. Three **hyperfield beacons** circle it 10,000 units out. When ships (any empires: rivals can cooperate) hold **all three at once** for 5 seconds, that's **first contact**: the anomaly withdraws and every ship at a beacon earns 2 kills. |
+| `caretaker` | **The Caretaker** (Voyager): a vast array appears in open space. Every 20 seconds its **displacement wave** pulls two ships from anywhere in the galaxy to it, and its beam burns anything that comes close. It's **heavily shielded**: at first it takes only 15% of the damage done to it, but every wave it sends out weakens it by another 15%, so it gets easier to kill the longer it stays. Worth 4 kills. |
+| `horta` | **The Horta** (*The Devil in the Dark*, TOS): something tunnels through the rock of a colony and kills an army every 2.5 seconds, then moves on to the next when it's empty. Destroy it (it's a slow, unshielded rock creature, 150 hull, 2 kills), or **make peace**: orbit its planet for **10 seconds without firing**. "NO KILL I." The colony gains 10 armies and becomes a **repair world**, and the peacemaker earns 2 kills. |
+| `spheres` | **The Sphere Builders** (Enterprise): four **Delphic Expanse spheres** appear in open space. Each one scorches ships within 3,500 units every 5 seconds and **warps the space around it into anomalies** (a spatial eddy, a chroniton field, a tetryon field or a spatial rift; see [Space terrain](#space-terrain)), up to three each, even when `--terrain` is off. The anomalies vanish when their sphere is destroyed. |
 
 **How aliens behave:**
 
@@ -592,8 +602,9 @@ netrek solo --aliens khan,borg,doomsday --alien-interval 90
   them can be retaken with armies, and everything is
   restored when the galaxy resets.
 - **Ending:** an incursion ends when all its ships are destroyed (or V'Ger is joined, the
-  probe answered, Q's trial judged, or the last tribble cleared), or it withdraws after
-  4–6 minutes. If an empire loses its last planet to aliens, it has been wiped out by
+  probe answered, Q's trial judged, Nomad talked into destroying itself, Armus starved,
+  the Metrons' duel decided, first contact made with Species 10-C, peace made with the
+  Horta, or the last tribble or nanite cleared), or it withdraws after 4–6 minutes. If an empire loses its last planet to aliens, it has been wiped out by
   alien invaders.
 
 **Who's who on screen:**
@@ -619,9 +630,20 @@ netrek solo --aliens khan,borg,doomsday --alien-interval 90
 | Ferengi | copper | `FE` | A horseshoe with its prongs forward; spilled armies are a gold `+N` |
 | Swarm | lime | `SW` | A tiny dart |
 | Tempest | neon blue web | `TP` | Arcade vector art: red bowtie flippers, purple diamond tankers, cyan zigzag pulsars, white spiky fuseballs, a yellow starburst core |
+| Nomad | silver | `NM` | A squat cylinder with a sensor head and two side panels |
+| Armus | oily violet | `AR` | A pool of tar with a face in it, inside a wobbling black slick with an oily sheen |
+| Nanites | aqua | – | No ships: infected ships show **NANITES** (vector mode: **NANO**) on their status line |
+| Changelings | amber | `CL` | Your own empire's cruisers, until hit; then a drop of molten gold |
+| Metrons | white | `ME` | A radiant figure of light beside a glowing white arena ring |
+| Pakleds | khaki | `PA` | A lumpy hull with mismatched pods bolted on |
+| Species 10-C | purple | `TC` | A dark spiral swirl, with three purple beacon rings circling it (lit up when held) |
+| Caretaker | light blue | `CT` | A vast flat panel array around a central emitter; its waves ripple out in rings |
+| Horta | rust | `HO` | A lumpy, speckled rock creature, sitting inside its planet |
+| Sphere Builders | teal | `SB` | A great banded sphere |
 
 The status line shows **HUNTED** (vector mode: **PREY**) when the Hirogen are after you,
-and **TRIBBLES** (**TRIB**) when you're carrying them.
+**TRIBBLES** (**TRIB**) when you're carrying them, and **NANITES** (**NANO**) when you're
+infected.
 
 **Alien vessels:**
 
@@ -648,6 +670,15 @@ and **TRIBBLES** (**TRIB**) when you're carrying them.
 | Swarm ship | 12 | – | 20 | latches on, drains fuel | 0.2 |
 | Tempest core | – | – | 1,600 | untouchable unless its web is clear; full damage from the rim, half from outside; regenerates | 6 |
 | Flipper / tanker / pulsar / fuseball | climb the web | – | 30 / 60 / 40 / 45 | grab and drag / split / electrify a lane / burn on contact | 0.2 (tanker 0.5) |
+| Nomad | 6 | invulnerable | | torpedo 30, phaser 70; destroyed by a logic bomb | 3 for talking it down |
+| Armus | 1 | shots make it grow | | engulfs, holds and eats ships | – |
+| Changeling ship | 9 | 90 | 100 | torpedo 35, phaser 85, disguise | 1.8 |
+| Metron | – | invulnerable | | the arena | 3 for the winner |
+| Pakled clunker | 5 | 140 | 160 | torpedo 20, phaser 40, tractor, theft | 1.5 |
+| Dark matter anomaly (10-C) | 2 | invulnerable | | wipes planets, shear 7,000 | 2 per ship at a beacon |
+| Caretaker's array | – | 300 | 600 | beam 30, displacement waves; takes 15% damage, +15% per wave | 4 |
+| Horta | 3 | – | 150 | kills armies from inside a planet | 2 (or 2 for making peace) |
+| Delphic sphere | – | – | 350 | pulse 15, plants anomalies | 1.8 |
 
 The monsters regenerate quickly. The planet killer only takes 40% of normal weapon
 damage, and a Borg cube's resistance builds as it's hit.
@@ -716,6 +747,35 @@ damage, and a Borg cube's resistance builds as it's hit.
   (`d`) for when the web is crowded. When the core is exposed, pour fire into it: you get 20
   seconds, and it heals a little between waves. Ships on the rim hit it full on and ships
   outside the web at half, so a mix of both works best.
+- **Nomad:** don't fight it. If you're damaged, get away from it or get repaired, since
+  it goes for the most damaged ship around. Then have a healthy ship fly within 3,500
+  units and send "you are imperfect" (any message with *imperfect*, *error*,
+  *mistake* or *flaw* will do).
+- **Armus:** hold your fire. Every shot makes it bigger. Stay out of its path (it only
+  oozes along at warp 1), and if it catches you, crawl out at warp 2 and wait. Ask
+  everyone else to stop shooting: it withers 45 seconds after the last hit.
+- **Nanites:** press `d` as soon as you're infected, and if a teammate is infected, fly
+  alongside and detonate for both of you. Otherwise head for a repair world you own.
+  Keep your distance from infected ships (they show on the status line of their pilot
+  only, so ask).
+- **Changelings:** a "friendly" cruiser that doesn't answer messages, or one orbiting
+  your colony while its armies vanish, is suspect. A single phaser shot proves it one way
+  or the other. Stick together: they go for ships flying alone.
+- **Metrons:** if you're picked, it's a straight duel with a full tank and a fresh ship,
+  so fight well: the prize is 3 kills. Everyone else can only watch.
+- **Pakleds:** they're slow (warp 5), so keep moving and they rarely catch you. If one
+  steals something, chase it down before it reaches the edge of the galaxy.
+- **Species 10-C:** move your colonies' armies out of its path (you can't stop it), and
+  organise: it takes three ships at the three beacons at once. Rival empires get the same
+  reward, so this is a good time for a truce.
+- **Caretaker:** if you're pulled in, fight your way clear of its beam (about 6,000 units)
+  or join the attack. Early on, it barely takes damage; after four or five waves it's
+  soft enough to kill.
+- **Horta:** the quick fix is to kill it, but making peace is worth more: park a ship in
+  orbit of its planet, don't fire (not even at other things) for 10 seconds, and the
+  colony gains 10 armies and repair yards for good.
+- **Sphere Builders:** fly around the anomalies they make, not through them, and knock
+  the spheres out one at a time: each one you destroy takes its anomalies with it.
 - **Borg:** a cube assimilates a ship it holds in its tractor beam within about 2,600
   units for four seconds. Its tractor is far stronger than any pressor, so don't try to
   push free. Instead stay out of range, and if you're caught, run at full speed: cubes
@@ -1112,7 +1172,7 @@ The tests include:
 
 - **`four_empire_game`:** 16 robots across all four empires. Checks every empire gets
   its share of ships and that the fighting spreads across the galaxy.
-- **`every_incursion_plays_out`:** runs each of the twenty alien incursions against a
+- **`every_incursion_plays_out`:** runs each of the thirty alien incursions against a
   four-empire robot war and checks it arrives, acts and ends cleanly.
 - **Alien mechanics:** `vger_merge_ends_the_threat`, `crystal_shatters_on_resonance`,
   `whale_probe_drains_and_is_answered`, `bioships_only_fear_plasma`,
@@ -1122,7 +1182,12 @@ The tests include:
   `ferengi_loot_is_dropped_and_recovered`,
   `swarm_latches_and_detonation_shakes_it_off`, `tempest_traps_ships_on_its_rim`,
   `tempest_core_is_only_exposed_when_the_web_is_clear`,
-  `flippers_drag_ships_into_the_core` and `tempest_shapes`.
+  `flippers_drag_ships_into_the_core`, `tempest_shapes`, `nomad_is_talked_to_death`,
+  `armus_grows_when_shot_and_withers_when_ignored`, `nanites_spread_and_are_cured`,
+  `changelings_look_like_your_own_until_hit`, `metrons_arena_duel`,
+  `pakleds_steal_tech_and_give_it_back_when_destroyed`, `ten_c_first_contact`,
+  `caretaker_pulls_ships_in_and_weakens`, `horta_peace` and
+  `spheres_plant_anomalies_that_vanish_with_them`.
 - **`retaking_alien_planets`:** liberated and resettled planets lose their alien mark.
 - **Extras:** `galaxy_has_ten_kinds_of_terrain_clear_of_planets` (ten of the 21 kinds in
   every galaxy, all of them turning up over many) and a test for each terrain effect; `treaties_between_players`, `one_ally_at_a_time_and_robots_decide`,

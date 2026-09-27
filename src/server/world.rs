@@ -121,6 +121,10 @@ pub struct Player {
     pub trapped: bool,
     /// Has used the Superzapper against this Tempest.
     pub zapped: bool,
+    /// Armus: how far the slick has swollen from being shot at.
+    pub swell: f64,
+    /// Infected with nanites.
+    pub nanites: bool,
 }
 
 impl Player {
@@ -199,6 +203,8 @@ impl Player {
             relic_ready: 0,
             trapped: false,
             zapped: false,
+            swell: 0.0,
+            nanites: false,
         }
     }
 
@@ -337,6 +343,12 @@ impl TempestWeb {
 }
 
 /// Things that climb the Tempest's web.
+/// The biggest the Armus slick can swell to (added to its base size).
+pub const ARMUS_MAX_SWELL: f64 = 6000.0;
+
+/// Names Changelings go by while posing as empire ships.
+const CHANGELING_GUISES: [&str; 8] = ["Laas", "Ensign", "Tomas", "Rella", "Brunt", "Vash", "Kell", "Marta"];
+
 pub fn is_tempest_minion(s: ShipType) -> bool {
     matches!(s, ShipType::Flipper | ShipType::Tanker | ShipType::Pulsar | ShipType::Fuseball)
 }
@@ -463,6 +475,10 @@ pub struct World {
     pub leaders: Vec<LeaderInfo>,
     /// The Tempest's web, while that incursion is on.
     pub tempest: Option<TempestWeb>,
+    /// Patches of space marked out by alien incursions (redrawn every tick).
+    pub zones: Vec<ZoneInfo>,
+    /// Chat sent this tick (Nomad listens for it), cleared by `tick`.
+    pub chatter: Vec<(u8, String)>,
 }
 
 impl World {
@@ -490,6 +506,8 @@ impl World {
             terrain: Vec::new(),
             leaders: Vec::new(),
             tempest: None,
+            zones: Vec::new(),
+            chatter: Vec::new(),
         };
         w.reset_galaxy();
         w
@@ -877,6 +895,7 @@ impl World {
             MsgTarget::Team(t) => t.abbr().to_string(),
             MsgTarget::Player(p) => self.players.get(p as usize).map(|pl| pl.tag()).unwrap_or_default(),
         };
+        self.chatter.push((id, text.clone()));
         let msg = ChatMsg { kind, from: format!("{}->{}", from, to_label), text };
         // The sender sees their own individual messages too.
         if let Dest::Player(p) = dest {
@@ -1637,7 +1656,7 @@ impl World {
                 q.alive()
                     && (!q.cloaked || q.detected)
                     && (!q.hidden || d2 < super::terrain::SENSOR_RANGE.powi(2))
-                    && !matches!(q.ship, ShipType::QEntity | ShipType::VgerCloud | ShipType::WhaleProbe)
+                    && !q.ship.pointless_target()
                     && q.only_hurt_by.map_or(true, |t| t == team)
                     && d2 < reach * reach
             })
@@ -1841,6 +1860,15 @@ impl World {
         for j in swarm {
             self.kill(j, Some(id), "was shaken off".into());
         }
+        // ...and the shock wave fries nanites, ours and those of ships close by.
+        let cured: Vec<usize> = (0..MAXPLAYER)
+            .filter(|&j| self.players[j].alive() && self.players[j].nanites)
+            .filter(|&j| j == i || ((self.players[j].x - x).powi(2) + (self.players[j].y - y).powi(2)).sqrt() < DETDIST * 2.0)
+            .collect();
+        for j in cured {
+            self.players[j].nanites = false;
+            self.warn(j as u8, "The detonation's shock wave burns out the nanites!");
+        }
         for t in self.torps.iter_mut() {
             if t.team != team && t.explode == 0 && t.kind == TorpKind::Photon {
                 if ((t.x - x).powi(2) + (t.y - y).powi(2)).sqrt() < DETDIST {
@@ -1995,10 +2023,29 @@ impl World {
                 self.alert("Chang's Bird-of-Prey is hit! Its plasma exhaust gives it away. Fire at will!");
             }
         }
+        // Any hit makes a Changeling lose its shape for a while.
+        let p = &mut self.players[i];
+        if p.ship == ShipType::ChangelingShip {
+            let hidden = tick >= p.revealed_until;
+            p.revealed_until = tick + 30 * UPS as u32;
+            if hidden {
+                let who = killer.map(|k| self.players[k as usize].label()).unwrap_or_else(|| "planetary defences".into());
+                self.alert(format!("A ship hit by {} melts out of shape: it was a Changeling!", who));
+            }
+        }
+        // Armus feeds on violence: every shot makes the slick bigger.
+        let p = &mut self.players[i];
+        if p.ship == ShipType::ArmusSlick {
+            p.swell = (p.swell + amount * 6.0).min(ARMUS_MAX_SWELL);
+            return;
+        }
         let p = &mut self.players[i];
         let amount = match p.ship {
             // Invulnerable: they have to be dealt with some other way.
             ShipType::VgerCloud | ShipType::WhaleProbe | ShipType::QEntity => return,
+            ShipType::NomadProbe | ShipType::MetronPresence | ShipType::DarkMatterAnomaly => return,
+            // The Caretaker's shields weaken each time it sends out a wave.
+            ShipType::CaretakerArray => amount * p.adapt,
             // The Tempest core is only exposed when its web has been cleared;
             // ships trapped on its rim hit it full on, others at half strength.
             ShipType::TempestCore if !self.tempest.as_ref().map_or(false, |t| t.exposed) => return,
@@ -2085,6 +2132,7 @@ impl World {
             p.tribbles = false;
             p.marked = false;
             p.trapped = false;
+            p.nanites = false;
         }
         let with_armies = if victim_armies > 0 { format!(" (carrying {} armies)", victim_armies) } else { String::new() };
         if self.players[i].ship == ShipType::Freighter && self.players[i].cargo > 0 {
@@ -2192,6 +2240,7 @@ impl World {
 
     pub fn tick(&mut self) {
         self.tick += 1;
+        self.chatter.clear();
         if self.reset_timer > 0 {
             self.reset_timer -= 1;
             if self.reset_timer == 0 {
@@ -2250,7 +2299,8 @@ impl World {
                 self.starbase_passives(i);
             }
         }
-        if self.features.terrain {
+        // Terrain from the --terrain option, or planted by the Sphere Builders.
+        if self.features.terrain || !self.terrain.is_empty() {
             super::terrain::tick(self);
         }
         if self.features.diplomacy {
@@ -3153,14 +3203,18 @@ impl World {
                 set(&mut flags, self.tick < p.phased_until, pf::PHASED);
                 set(&mut flags, p.trapped, pf::TRAPPED);
                 set(&mut flags, p.trapped && !p.zapped && friendly, pf::ZAPPER);
+                set(&mut flags, p.nanites, pf::NANITES);
                 // An Excalbian shapeshifter looks like one of your own cruisers from afar.
                 let disguised = p.ship == ShipType::ExcalbianShip
                     && !friendly
                     && p.alive()
                     && (p.x - mp.x).powi(2) + (p.y - mp.y).powi(2) > 3000.0f64.powi(2);
+                // A Changeling looks like one of your own ships until a hit exposes it.
+                let changeling = p.ship == ShipType::ChangelingShip && p.alive() && self.tick >= p.revealed_until && my_team != Team::Ind;
+                let disguised = disguised || changeling;
                 PlayerInfo {
                     id: p.id,
-                    name: p.name.clone(),
+                    name: if changeling { CHANGELING_GUISES[p.id as usize % CHANGELING_GUISES.len()].to_string() } else { p.name.clone() },
                     team: if disguised { my_team } else { p.team },
                     ship: if disguised { ShipType::Cruiser } else { p.ship },
                     state: p.state,
@@ -3179,7 +3233,7 @@ impl World {
                     tractor_target: if fuzzy { None } else { p.tractor.map(|t| t.0) },
                     fuzzy,
                     explode_frame: if p.state == PState::Exploding { (11 - p.state_timer).max(1) as u8 } else { 0 },
-                    faction: p.faction,
+                    faction: if changeling { None } else { p.faction },
                     rank: p.rank,
                 }
             })
@@ -3264,6 +3318,7 @@ impl World {
                 exposed: t.exposed,
                 level: t.level,
             }),
+            zones: self.zones.clone(),
             open_teams: self.open_teams(),
             team_planets: [Team::Fed, Team::Rom, Team::Kli, Team::Ori].map(|t| self.team_planet_count(t) as u8),
             starbase_teams: Team::PLAYABLE.into_iter().filter(|&t| self.has_starbase(t, me)).collect(),

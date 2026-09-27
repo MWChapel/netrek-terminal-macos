@@ -230,6 +230,7 @@ impl App {
         // Space terrain (with the server's --terrain option), and the Tempest.
         super::render_terrain::draw_vec(&mut px, f, &to, &u, true, tr, fs);
         super::render_terrain::draw_tempest_vec(&mut px, f, &to, &u, true);
+        super::render_terrain::draw_zones_vec(&mut px, f, &to, &u, true);
 
         // Edge of the galaxy.
         let corners = [(0.0, 0.0), (GWIDTH, 0.0), (GWIDTH, GWIDTH), (0.0, GWIDTH)];
@@ -538,6 +539,7 @@ impl App {
         let ug = |units: f64| (units * sx) as f32;
         super::render_terrain::draw_vec(&mut px, f, &to, &ug, false, tr, fs);
         super::render_terrain::draw_tempest_vec(&mut px, f, &to, &ug, false);
+        super::render_terrain::draw_zones_vec(&mut px, f, &to, &ug, false);
 
         for w in &f.webs {
             let (a, b) = (to(w.x1 as f64, w.y1 as f64), to(w.x2 as f64, w.y2 as f64));
@@ -627,7 +629,12 @@ impl App {
             ("PRES", me.flags & pf::PRESSOR != 0, rgb(0xd070ff)),
             ("LOCK", mi.lock.is_some(), WHITE),
             ("PREY", me.flags & pf::HUNTED != 0, red),
-            ("TRIB", me.flags & pf::TRIBBLES != 0, faction_rgb(Faction::Tribbles)),
+            // Tribbles and nanites share a lamp (they rarely come together).
+            if me.flags & pf::NANITES != 0 {
+                ("NANO", true, faction_rgb(Faction::Nanites))
+            } else {
+                ("TRIB", me.flags & pf::TRIBBLES != 0, faction_rgb(Faction::Tribbles))
+            },
         ];
         let lfs = fs * 0.78;
         let mut x = pad;

@@ -31,7 +31,16 @@ fn ship_shape(s: ShipType) -> &'static [(f64, f64)] {
         ],
         ShipType::Battleship => &[(0.0, -1.0), (0.75, -0.35), (0.75, 0.95), (-0.75, 0.95), (-0.75, -0.35)],
         ShipType::Assault => &[(0.0, -0.85), (0.95, 0.15), (0.55, 0.95), (-0.55, 0.95), (-0.95, 0.15)],
-        ShipType::Starbase | ShipType::Fesarius | ShipType::Amoeba | ShipType::VgerCloud | ShipType::CrystalEntity => &[
+        ShipType::Starbase
+        | ShipType::Fesarius
+        | ShipType::Amoeba
+        | ShipType::VgerCloud
+        | ShipType::CrystalEntity
+        | ShipType::ArmusSlick
+        | ShipType::MetronPresence
+        | ShipType::DarkMatterAnomaly
+        | ShipType::CaretakerArray
+        | ShipType::DelphicSphere => &[
             (0.0, -1.0), (0.7, -0.7), (1.0, 0.0), (0.7, 0.7), (0.0, 1.0), (-0.7, 0.7), (-1.0, 0.0), (-0.7, -0.7),
         ],
         ShipType::BorgCube => &[(-0.75, -0.75), (0.75, -0.75), (0.75, 0.75), (-0.75, 0.75)],
@@ -56,6 +65,10 @@ fn ship_shape(s: ShipType) -> &'static [(f64, f64)] {
         ],
 
         ShipType::PlanetKiller => &[(-0.5, -1.0), (0.5, -1.0), (0.26, 1.0), (-0.26, 1.0)],
+        ShipType::NomadProbe => &[(-0.35, -1.0), (0.35, -1.0), (0.5, 0.3), (0.35, 1.0), (-0.35, 1.0), (-0.5, 0.3)],
+        ShipType::PakledClunker => &[(0.0, -0.9), (0.8, -0.5), (0.8, 0.9), (-0.8, 0.9), (-0.8, -0.5)],
+        ShipType::Horta => &[(0.0, -0.8), (0.6, -0.4), (0.8, 0.3), (0.3, 0.8), (-0.4, 0.7), (-0.8, 0.1), (-0.5, -0.5)],
+        ShipType::ChangelingShip => &[(0.0, -1.0), (0.35, -0.4), (0.6, 0.3), (0.4, 0.85), (0.0, 0.95), (-0.4, 0.85), (-0.6, 0.3), (-0.35, -0.4)],
         ShipType::TholianVessel
         | ShipType::Bioship
         | ShipType::JemHadarFighter
@@ -487,6 +500,7 @@ impl App {
         // Space terrain (with the server's --terrain option).
         super::render_terrain::draw_braille(&mut b, f, &to_dot, upd, true, &mut labels);
         super::render_terrain::draw_tempest_braille(&mut b, f, &to_dot, upd);
+        super::render_terrain::draw_zones_braille(&mut b, f, &to_dot, upd);
 
         // Edge of the galaxy.
         for (ax, ay, bx, by) in [
@@ -704,6 +718,7 @@ impl App {
         let mut labels: Vec<(i32, i32, String, Color, bool)> = Vec::new();
         super::render_terrain::draw_braille(&mut b, f, &to_dot, 1.0 / sx, false, &mut labels);
         super::render_terrain::draw_tempest_braille(&mut b, f, &to_dot, 1.0 / sx);
+        super::render_terrain::draw_zones_braille(&mut b, f, &to_dot, 1.0 / sx);
         for (k, def) in PLANETS.iter().enumerate() {
             let info = &f.planets[k];
             let col = if info.known { self.planet_color(info) } else { DIM };
@@ -802,6 +817,7 @@ impl App {
             (pf::OVERWATCH, "OVERWATCH"),
             (pf::HUNTED, "HUNTED"),
             (pf::TRIBBLES, "TRIBBLES"),
+            (pf::NANITES, "NANITES"),
         ] {
             if me.flags & flag != 0 {
                 line += "  ";

@@ -27,6 +27,8 @@ pub struct Terrain {
     pub respawn: i32,
     /// Minefield: where its (hidden) mines are.
     pub mines: Vec<(f64, f64)>,
+    /// The Delphic sphere that made it (it goes when the sphere does).
+    pub owner: Option<u8>,
 }
 
 pub const NEBULA_SPEED: i32 = 6;
@@ -52,7 +54,12 @@ pub const SENSOR_RANGE: f64 = 3000.0;
 
 impl Terrain {
     fn new(kind: TerrainKind, name: &str, (x, y): (f64, f64), r: f64) -> Terrain {
-        Terrain { kind, name: name.into(), x, y, r, x2: x, y2: y, vx: 0.0, vy: 0.0, timer: 0, respawn: 0, mines: Vec::new() }
+        Terrain { kind, name: name.into(), x, y, r, x2: x, y2: y, vx: 0.0, vy: 0.0, timer: 0, respawn: 0, mines: Vec::new(), owner: None }
+    }
+
+    /// An anomaly planted by a Delphic sphere (alien incursion).
+    pub fn planted(kind: TerrainKind, name: &str, at: (f64, f64), r: f64, owner: u8) -> Terrain {
+        Terrain { owner: Some(owner), ..Terrain::new(kind, name, at, r) }
     }
 
     pub fn visible(&self) -> bool {

@@ -598,6 +598,107 @@ fn alien(f: Faction, ship: ShipType) -> Vec<Part> {
                 v.push(Circle { c: (0.0, 0.0), r: 0.28, fill: false });
             }
         },
+        Faction::Nomad => {
+            // A squat cylinder with a sensor head and two side panels.
+            v.push(Poly { pts: vec![(-0.3, -0.55), (0.3, -0.55), (0.3, 0.9), (-0.3, 0.9)], fill: true });
+            v.push(sym(&[(0.0, -1.0), (0.45, -0.8), (0.45, -0.55), (0.0, -0.55)]));
+            v.extend(pair(|s| Poly { pts: vec![(s * 0.3, -0.2), (s * 0.8, -0.35), (s * 0.8, 0.35), (s * 0.3, 0.3)], fill: false }));
+            v.push(line((-0.3, 0.2), (0.3, 0.2)));
+            v.push(line((-0.3, 0.55), (0.3, 0.55)));
+        }
+        Faction::Armus => {
+            // A pool of black tar with a face in it.
+            v.push(Poly {
+                pts: (0..32)
+                    .map(|k| {
+                        let a = k as f32 / 32.0 * TAU;
+                        let r = 0.8 + 0.12 * (4.0 * a).sin() + 0.08 * (7.0 * a + 2.0).sin();
+                        (a.cos() * r, a.sin() * r)
+                    })
+                    .collect(),
+                fill: true,
+            });
+            v.push(Circle { c: (-0.25, -0.15), r: 0.09, fill: false });
+            v.push(Circle { c: (0.22, -0.2), r: 0.09, fill: false });
+            v.push(line((-0.3, 0.28), (0.3, 0.22)));
+        }
+        Faction::Changeling => {
+            // A drop of molten gold, still settling into shape.
+            v.push(sym(&[(0.0, -1.0), (0.35, -0.4), (0.6, 0.3), (0.4, 0.85), (0.0, 0.95)]));
+            v.push(Circle { c: (0.0, 0.3), r: 0.28, fill: false });
+            v.push(Circle { c: (0.05, 0.25), r: 0.1, fill: false });
+        }
+        Faction::Metrons => {
+            // A radiant figure of light.
+            v.push(Poly {
+                pts: (0..24).map(|k| { let a = k as f32 / 24.0 * TAU; let r = if k % 2 == 0 { 1.0 } else { 0.55 }; (a.cos() * r, a.sin() * r) }).collect(),
+                fill: false,
+            });
+            v.push(circle((0.0, 0.0), 0.35));
+            v.push(Circle { c: (0.0, 0.0), r: 0.18, fill: false });
+        }
+        Faction::Pakleds => {
+            // A lumpy freighter hull with mismatched pods bolted on.
+            v.push(Poly { pts: vec![(-0.5, -0.85), (0.5, -0.85), (0.65, 0.9), (-0.65, 0.9)], fill: true });
+            v.push(capsule((0.72, -0.25), (0.72, 0.55), 0.26));
+            v.push(capsule((-0.78, 0.0), (-0.78, 0.5), 0.2));
+            v.push(line((-0.55, -0.3), (0.55, -0.3)));
+            v.push(line((-0.6, 0.35), (0.6, 0.35)));
+            v.push(Circle { c: (0.0, -0.6), r: 0.12, fill: false });
+        }
+        Faction::TenC => {
+            // A dark swirl of spiral arms round a black core.
+            v.push(circle((0.0, 0.0), 0.3));
+            for arm in 0..3 {
+                let base = arm as f32 / 3.0 * TAU;
+                let pts: Vec<(f32, f32)> = (0..10).map(|k| { let t = k as f32 / 9.0; let a = base + t * 3.2; let r = 0.3 + t * 0.7; (a.cos() * r, a.sin() * r) }).collect();
+                for w in pts.windows(2) {
+                    v.push(line(w[0], w[1]));
+                }
+            }
+            v.push(Circle { c: (0.0, 0.0), r: 0.6, fill: false });
+        }
+        Faction::Caretaker => {
+            // A vast flat array of panels around a central emitter.
+            v.push(Poly { pts: vec![(-0.95, -0.45), (0.95, -0.45), (0.95, 0.45), (-0.95, 0.45)], fill: true });
+            for k in 1..6 {
+                let x = -0.95 + k as f32 * 0.317;
+                v.push(line((x, -0.45), (x, 0.45)));
+            }
+            v.push(line((-0.95, 0.0), (0.95, 0.0)));
+            v.push(circle((0.0, 0.0), 0.3));
+            v.push(Circle { c: (0.0, 0.0), r: 0.14, fill: false });
+            v.extend(pair(|s| line((s * 0.3, -0.45), (s * 0.55, -0.85))));
+        }
+        Faction::Horta => {
+            // A lumpy rock creature, speckled with mineral.
+            v.push(Poly {
+                pts: (0..20)
+                    .map(|k| {
+                        let a = k as f32 / 20.0 * TAU;
+                        let r = 0.8 + 0.12 * (5.0 * a + 0.7).sin();
+                        (a.cos() * r, a.sin() * r * 0.85)
+                    })
+                    .collect(),
+                fill: true,
+            });
+            for &(x, y, r) in &[(-0.3, -0.2, 0.12), (0.25, -0.3, 0.09), (0.1, 0.25, 0.14), (-0.35, 0.35, 0.07), (0.45, 0.15, 0.06)] {
+                v.push(Circle { c: (x, y), r, fill: false });
+            }
+        }
+        Faction::SphereBuilders => {
+            // A Delphic Expanse sphere, banded with latitude lines.
+            v.push(circle((0.0, 0.0), 1.0));
+            for &y in &[-0.66f32, -0.33, 0.0, 0.33, 0.66] {
+                let w = (1.0 - y * y).sqrt();
+                v.push(line((-w, y), (w, y)));
+            }
+            v.push(Circle { c: (0.0, 0.0), r: 0.25, fill: false });
+        }
+        // Nanites never fly a ship of their own.
+        Faction::Nanites => {
+            v.push(Circle { c: (0.0, 0.0), r: 0.3, fill: true });
+        }
     }
     v
 }
@@ -713,6 +814,17 @@ mod tests {
             (Team::Ind, ShipType::QChampion, Some(Faction::Q)),
             (Team::Ind, ShipType::FerengiMarauder, Some(Faction::Ferengi)),
             (Team::Ind, ShipType::SwarmShip, Some(Faction::Swarm)),
+            (Team::Ind, ShipType::NomadProbe, Some(Faction::Nomad)),
+            (Team::Ind, ShipType::ArmusSlick, Some(Faction::Armus)),
+            (Team::Ind, ShipType::ChangelingShip, Some(Faction::Changeling)),
+            (Team::Ind, ShipType::MetronPresence, Some(Faction::Metrons)),
+            (Team::Ind, ShipType::PakledClunker, Some(Faction::Pakleds)),
+        ]);
+        rows.push(vec![
+            (Team::Ind, ShipType::DarkMatterAnomaly, Some(Faction::TenC)),
+            (Team::Ind, ShipType::CaretakerArray, Some(Faction::Caretaker)),
+            (Team::Ind, ShipType::Horta, Some(Faction::Horta)),
+            (Team::Ind, ShipType::DelphicSphere, Some(Faction::SphereBuilders)),
         ]);
         for (row, ships) in rows.iter().enumerate() {
             for (col, &(team, ship, faction)) in ships.iter().enumerate() {

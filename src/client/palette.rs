@@ -85,6 +85,16 @@ pub fn faction_rgb(f: Faction) -> Rgb {
         Faction::Ferengi => rgb(0xc8843c),
         Faction::Swarm => rgb(0xe0ff70),
         Faction::Tempest => rgb(0xff3030),
+        Faction::Nomad => rgb(0xd0d8e0),
+        Faction::Armus => rgb(0x9a80b8),
+        Faction::Nanites => rgb(0x60ffd0),
+        Faction::Changeling => rgb(0xe8a040),
+        Faction::Metrons => rgb(0xf4f0ff),
+        Faction::Pakleds => rgb(0xa89868),
+        Faction::TenC => rgb(0x9060ff),
+        Faction::Caretaker => rgb(0x80e0ff),
+        Faction::Horta => rgb(0xd86a30),
+        Faction::SphereBuilders => rgb(0x5ad8c0),
     }
 }
 

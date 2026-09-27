@@ -6,9 +6,10 @@
 //! Their special powers (webs, planet eating, assimilation...) live here.
 
 use super::bot::lead;
+use super::terrain::Terrain;
 use super::world::{is_tempest_minion, Dest, GameEvent, Lock, Loot, Outgoing, PhaserShot, TempestWeb, Web, World};
 use crate::consts::*;
-use crate::proto::{ChatMsg, ClientMsg, MsgKind, PState, PhaserInfo, TempestShape};
+use crate::proto::{ChatMsg, ClientMsg, MsgKind, PState, PhaserInfo, TempestShape, TerrainKind, ZoneInfo, ZoneKind};
 use rand::seq::SliceRandom;
 use rand::Rng;
 use std::collections::HashMap;
@@ -57,6 +58,10 @@ struct Event {
     level: u8,
     queue: Vec<ShipType>,
     next_at: u32,
+    /// Metrons: the two champions in the arena.
+    duel: Option<(u8, u8)>,
+    /// Pakleds: what each clunker has taken.
+    stolen: HashMap<u8, Stolen>,
 }
 
 /// Something climbing the Tempest's web.
@@ -115,6 +120,7 @@ fn duration(kind: Faction) -> u32 {
     let mins = match kind {
         Faction::Khan | Faction::Gorn | Faction::Mirror | Faction::Tholian => 6,
         Faction::Borg | Faction::Vger | Faction::Species8472 | Faction::Tribbles | Faction::Hirogen => 5,
+        Faction::TenC | Faction::SphereBuilders => 5,
         _ => 4,
     };
     mins * 60 * UPS as u32
@@ -130,6 +136,7 @@ impl Director {
         if self.cfg.kinds.is_empty() {
             return;
         }
+        world.zones.clear();
         // A galaxy reset sends everyone home, aliens included.
         if world.reset_timer > 0 {
             for e in self.events.drain(..) {
@@ -180,7 +187,7 @@ impl Director {
             }
         }
         for k in ended.into_iter().rev() {
-            let e = self.events.remove(k);
+            let mut e = self.events.remove(k);
             if beaten(world, &e) {
                 announce(world, defeat_text(e.kind));
             } else {
@@ -213,6 +220,14 @@ impl Director {
                         world.remove_player(id);
                     }
                 }
+                Faction::Nanites => {
+                    for p in world.players.iter_mut() {
+                        p.nanites = false;
+                    }
+                }
+                Faction::Metrons => end_duel(world, &mut e),
+                Faction::Pakleds => recover(world, &mut e),
+                Faction::SphereBuilders => world.terrain.retain(|t| t.owner.is_none()),
                 _ => {}
             }
         }
@@ -247,6 +262,9 @@ impl Director {
             Faction::Gorn | Faction::Mirror => 4,
             Faction::JemHadar => 5,
             Faction::Swarm => 8,
+            Faction::Changeling | Faction::Pakleds => 3,
+            Faction::SphereBuilders => 4,
+            Faction::Nanites => 0,
             // The core and a first climber; the rest climb out as slots free up.
             Faction::Tempest => 2,
             Faction::Tribbles => 0,
@@ -276,6 +294,8 @@ impl Director {
         };
         let mut ships = Vec::new();
         let mut trial = None;
+        let mut duel = None;
+        let mut waypoint = (ax, ay);
         let mut spawn = |world: &mut World, name: &str, ship: ShipType, (x, y): (f64, f64), bounty: f64| {
             if let Some(id) = world.spawn_alien(name, kind, ship, x, y, bounty) {
                 ships.push(id);
@@ -456,8 +476,125 @@ impl Director {
                 }
                 "A swarm of tiny ships has entered the sector! They latch onto hulls and drain power. Detonate (d) to shake them off.".to_string()
             }
+            Faction::Nomad => {
+                spawn(world, "Nomad", ShipType::NomadProbe, edge(), 20.0);
+                "A probe calling itself NOMAD has entered the sector to \"sterilise\" everything imperfect: damaged ships and weak colonies. Weapons can't touch it. But get within 3,000 and tell it (send a message) that it is imperfect...".to_string()
+            }
+            Faction::Armus => {
+                spawn(world, "Armus", ShipType::ArmusSlick, near(ax, ay, 8000.0), 0.0);
+                if let Some(&a) = ships.first() {
+                    world.players[a as usize].last_hit = world.tick;
+                }
+                format!(
+                    "A black, oily slick is spreading near {}. It is Armus, a creature of pure malice: it engulfs ships and feeds on violence. Every shot makes it bigger; starve it and it withers.",
+                    world.planets[anchor].name
+                )
+            }
+            Faction::Nanites => {
+                let hosts: Vec<usize> = (0..MAXPLAYER)
+                    .filter(|&j| world.players[j].alive() && world.players[j].faction.is_none() && world.players[j].ship != ShipType::Starbase)
+                    .collect();
+                let picked: Vec<usize> = hosts.choose_multiple(&mut rng, 2).copied().collect();
+                if picked.is_empty() {
+                    return;
+                }
+                let mut names = Vec::new();
+                for &j in &picked {
+                    world.players[j].nanites = true;
+                    names.push(world.players[j].label());
+                    world.warn(j as u8, "Your ship is infected with nanites! Orbit a friendly repair world, or detonate (d) to burn them out.");
+                }
+                format!(
+                    "Nanites have escaped from a science lab and infected {}! Infected ships glitch, and the nanites spread to ships close by. Cure: orbit a friendly repair world, or detonate (d).",
+                    names.join(" and ")
+                )
+            }
+            Faction::Changeling => {
+                let (x, y) = near(ax, ay, 8000.0);
+                for _ in 0..3 {
+                    spawn(world, "Changeling", ShipType::ChangelingShip, near(x, y, 2000.0), 8.0);
+                }
+                "Changelings have infiltrated the sector! To every empire they look like its own ships. They bomb colonies and pick off stragglers; any hit exposes one.".to_string()
+            }
+            Faction::Metrons => {
+                let Some((a, b)) = pick_duellists(world) else { return };
+                let Some((cx, cy)) = open_spot(world, ARENA_R + 4000.0) else { return };
+                spawn(world, "Metron", ShipType::MetronPresence, (cx, cy - ARENA_R - 1500.0), 0.0);
+                if ships.is_empty() {
+                    return;
+                }
+                let teams = (world.players[a].team, world.players[b].team);
+                for (j, side, foe) in [(a, -1.0, teams.1), (b, 1.0, teams.0)] {
+                    let q = &mut world.players[j];
+                    let s = q.stats();
+                    q.leave_orbit_pub();
+                    (q.x, q.y) = (cx + side * ARENA_R * 0.7, cy);
+                    (q.dir, q.desired_dir) = (if side < 0.0 { 64.0 } else { 192.0 }, if side < 0.0 { 64.0 } else { 192.0 });
+                    (q.lock, q.tractor) = (Lock::None, None);
+                    (q.damage, q.shield, q.fuel) = (0.0, s.max_shield, s.max_fuel);
+                    q.only_hurt_by = Some(foe);
+                }
+                let (na, nb) = (world.players[a].label(), world.players[b].label());
+                for (j, other) in [(a, &nb), (b, &na)] {
+                    world.warn(j as u8, format!("The Metrons have transported you into their arena! Defeat {} to go free.", other));
+                }
+                waypoint = (cx, cy);
+                duel = Some((a as u8, b as u8));
+                format!(
+                    "The Metrons have seized {} and {} and sealed them in an arena near {}! \"You will fight to the death. The victor will be allowed to go.\" Nobody may enter or leave.",
+                    na,
+                    nb,
+                    nearest_planet_name(world, cx, cy)
+                )
+            }
+            Faction::Pakleds => {
+                let (x, y) = edge();
+                for n in ["Grebnedlog", "Pakled", "Pakled"] {
+                    spawn(world, n, ShipType::PakledClunker, near(x, y, 1500.0), 5.0);
+                }
+                "Pakled clunkers have entered the sector. \"We look for things. Things to make us go.\" They tractor ships and steal advanced tech or empire upgrades; destroy the thief to get it back!".to_string()
+            }
+            Faction::TenC => {
+                let (x, y) = edge();
+                spawn(world, "10-C", ShipType::DarkMatterAnomaly, (x, y), 0.0);
+                waypoint = (GWIDTH - x, GWIDTH - y);
+                "A dark matter anomaly is crossing the galaxy, wiping out every world in its path and hurling ships aside. It is the work of Species 10-C, and weapons are useless. Make first contact: hold all three of its hyperfield beacons at once.".to_string()
+            }
+            Faction::Caretaker => {
+                let Some((x, y)) = open_spot(world, 6000.0) else { return };
+                spawn(world, "Caretaker", ShipType::CaretakerArray, (x, y), 30.0);
+                if let Some(&c) = ships.first() {
+                    world.players[c as usize].adapt = CARETAKER_SHIELD;
+                }
+                format!(
+                    "The Caretaker's array has appeared near {}! Its displacement waves pull ships from across the galaxy to it. The array is heavily shielded, but every wave it sends out weakens it.",
+                    nearest_planet_name(world, x, y)
+                )
+            }
+            Faction::Horta => {
+                let colonies: Vec<usize> = (0..world.planets.len())
+                    .filter(|&k| {
+                        let pl = &world.planets[k];
+                        Team::PLAYABLE.contains(&pl.owner) && pl.flags & PL_HOME == 0 && pl.armies >= 3
+                    })
+                    .collect();
+                let Some(&k) = colonies.choose(&mut rng) else { return };
+                let (px, py, name) = (world.planets[k].x, world.planets[k].y, world.planets[k].name);
+                spawn(world, "Horta", ShipType::Horta, (px, py), 10.0);
+                format!(
+                    "Something is tunnelling through the rock of {} and killing its armies: a Horta! Destroy it, or make peace: orbit its planet for 10 seconds without firing a shot.",
+                    name
+                )
+            }
+            Faction::SphereBuilders => {
+                for k in 0..4 {
+                    let Some(at) = open_spot(world, 5000.0) else { continue };
+                    spawn(world, &format!("Sphere {}", 41 + k * 7), ShipType::DelphicSphere, at, 8.0);
+                }
+                "The Sphere Builders have planted Delphic Expanse spheres across the galaxy! Each one warps the space around it into anomalies until it is destroyed.".to_string()
+            }
         };
-        if ships.is_empty() && kind != Faction::Tribbles {
+        if ships.is_empty() && !matches!(kind, Faction::Tribbles | Faction::Nanites) {
             return;
         }
         announce(world, text);
@@ -468,7 +605,7 @@ impl Director {
             anchor,
             goals: HashMap::new(),
             holds: HashMap::new(),
-            waypoint: (ax, ay),
+            waypoint,
             web_radius: 2500.0,
             web_angle: 0.0,
             lost_any: false,
@@ -482,6 +619,8 @@ impl Director {
             level: 0,
             queue: Vec::new(),
             next_at: world.tick + 3 * UPS as u32,
+            duel,
+            stolen: HashMap::new(),
         });
     }
 }
@@ -499,6 +638,9 @@ fn leading_empire(world: &World) -> Option<Team> {
 fn beaten(world: &World, e: &Event) -> bool {
     if e.kind == Faction::Tempest {
         return !e.ships.iter().any(|&s| world.players[s as usize].ship == ShipType::TempestCore);
+    }
+    if e.kind == Faction::Nanites {
+        return !world.players.iter().any(|p| p.nanites);
     }
     if e.kind == Faction::Tribbles {
         !world.planets.iter().any(|pl| pl.tribbles) && !world.players.iter().any(|p| p.tribbles)
@@ -529,6 +671,16 @@ fn defeat_text(kind: Faction) -> String {
         Faction::Ferengi => "The Ferengi marauders are gone.".into(),
         Faction::Swarm => "The Swarm has been scattered.".into(),
         Faction::Tempest => "The Tempest core is destroyed! Its web collapses and the trapped ships break free.".into(),
+        Faction::Nomad => "Nomad is no more. Its search for perfection is over.".into(),
+        Faction::Armus => "Armus is gone. The galaxy is a little less spiteful.".into(),
+        Faction::Nanites => "The last of the nanites have been purged from the empires' ships.".into(),
+        Faction::Changeling => "The Changelings have been rooted out and destroyed.".into(),
+        Faction::Metrons => "The Metrons withdraw, their contest decided.".into(),
+        Faction::Pakleds => "The Pakled clunkers have been destroyed. \"We are... not strong.\"".into(),
+        Faction::TenC => "Species 10-C's anomaly has left the galaxy. First contact has been made.".into(),
+        Faction::Caretaker => "The Caretaker's array has been destroyed! Nobody else will be taken.".into(),
+        Faction::Horta => "The Horta is no longer a threat to the colonies.".into(),
+        Faction::SphereBuilders => "The last Delphic sphere is destroyed, and the anomalies around it fade.".into(),
     }
 }
 
@@ -554,6 +706,16 @@ fn withdraw_text(kind: Faction) -> String {
         Faction::Ferengi => "The Ferengi marauders warp out in search of better profits.".into(),
         Faction::Swarm => "The Swarm moves on to other territory.".into(),
         Faction::Tempest => "The Tempest's web fades away, releasing the ships trapped on it.".into(),
+        Faction::Nomad => "Nomad turns away into deep space, still searching for perfection.".into(),
+        Faction::Armus => "Armus sinks back into the dark, bored of tormenting you.".into(),
+        Faction::Nanites => "The nanites go dormant and shut down.".into(),
+        Faction::Changeling => "The Changelings slip away to rejoin the Great Link.".into(),
+        Faction::Metrons => "The Metrons end their contest and withdraw.".into(),
+        Faction::Pakleds => "The Pakleds lumber away with everything they took. \"We are strong.\"".into(),
+        Faction::TenC => "The dark matter anomaly drifts out of the galaxy. Species 10-C remains a mystery.".into(),
+        Faction::Caretaker => "The Caretaker's array fades away to search for another species.".into(),
+        Faction::Horta => "The Horta burrows deep into the rock and falls silent.".into(),
+        Faction::SphereBuilders => "The Sphere Builders withdraw their spheres, and the anomalies fade.".into(),
     }
 }
 
@@ -692,7 +854,27 @@ fn run_event(world: &mut World, e: &mut Event) {
             Faction::Ferengi => ferengi(world, i, tick),
             Faction::Swarm => swarm(world, e, i, n, tick),
             Faction::Tempest => {}
+            Faction::Nomad => nomad(world, e, i, tick),
+            Faction::Armus => armus(world, e, i, tick),
+            Faction::Nanites | Faction::Metrons => {}
+            Faction::Changeling => changeling(world, e, i, tick),
+            Faction::Pakleds => pakled(world, e, i, tick),
+            Faction::TenC => ten_c(world, e, i, tick),
+            Faction::Caretaker => caretaker(world, e, i, tick),
+            Faction::Horta => horta(world, e, i, tick),
+            Faction::SphereBuilders => sphere(world, i, n, tick),
         }
+    }
+    match e.kind {
+        Faction::Nanites => nanites(world, e),
+        Faction::Metrons => metrons(world, e, tick),
+        Faction::Pakleds => recover(world, e),
+        Faction::SphereBuilders => {
+            // Anomalies go when the sphere that made them does.
+            let spheres: Vec<u8> = e.ships.iter().copied().filter(|&s| world.players[s as usize].alive()).collect();
+            world.terrain.retain(|t| t.owner.map_or(true, |o| spheres.contains(&o)));
+        }
+        _ => {}
     }
     if e.kind == Faction::Tempest {
         tempest(world, e, tick);
@@ -2014,6 +2196,734 @@ fn tempest(world: &mut World, e: &mut Event, tick: u32) {
     }
 }
 
+// ----------------------------------------------------------------------
+// The second wave: Nomad, Armus, nanites, Changelings, the Metrons, the
+// Pakleds, Species 10-C, the Caretaker, the Horta and the Sphere Builders.
+
+/// A clear stretch of space, at least `clear` from every planet.
+fn open_spot(world: &World, clear: f64) -> Option<(f64, f64)> {
+    let mut rng = rand::thread_rng();
+    (0..400)
+        .map(|_| (rng.gen_range(12_000.0..88_000.0), rng.gen_range(12_000.0..88_000.0)))
+        .find(|&(x, y)| world.planets.iter().all(|pl| dist(x, y, pl.x, pl.y) > clear))
+}
+
+fn nearest_planet_name(world: &World, x: f64, y: f64) -> &'static str {
+    world.planets.iter().min_by(|a, b| dist(x, y, a.x, a.y).total_cmp(&dist(x, y, b.x, b.y))).map_or("", |p| p.name)
+}
+
+fn award(world: &mut World, j: usize, kills: f64, honour: &str) {
+    let p = &mut world.players[j];
+    p.kills += kills;
+    p.total_kills += kills;
+    world.events.push(GameEvent::Honour { player: j as u8, text: honour.into() });
+}
+
+/// Wipe out a colony's armies a little at a time from orbit; `done` is
+/// announced when the last one dies.
+fn raid(world: &mut World, e: &mut Event, i: usize, tick: u32, done: &str) {
+    let id = i as u8;
+    let colony = |pl: &super::world::Planet| Team::PLAYABLE.contains(&pl.owner) && pl.armies > 0 && pl.flags & PL_HOME == 0;
+    let goal = match e.goals.get(&id) {
+        Some(&k) if colony(&world.planets[k]) => k,
+        _ => match nearest_planet(world, i, colony) {
+            Some(k) => {
+                e.goals.insert(id, k);
+                k
+            }
+            None => return,
+        },
+    };
+    if go_orbit(world, i, goal) && tick % 6 == 0 {
+        let pl = &mut world.planets[goal];
+        pl.armies -= 1;
+        if pl.armies <= 0 {
+            let (name, old) = (pl.name, pl.owner);
+            pl.armies = 0;
+            pl.owner = Team::Ind;
+            announce(world, done.replace("{}", name));
+            world.check_genocide(old, Team::Ind);
+            e.goals.remove(&id);
+        }
+    }
+}
+
+/// How close you must be for Nomad to hear you.
+pub const NOMAD_EARSHOT: f64 = 3500.0;
+const NOMAD_WORDS: [&str; 5] = ["imperfect", "error", "mistake", "flaw", "not perfect"];
+
+/// Nomad: "sterilise" the most damaged ships and the weakest colonies.
+/// Weapons can't touch it, but Kirk's trick works: tell it that it is
+/// imperfect and it destroys itself.
+fn nomad(world: &mut World, e: &mut Event, i: usize, tick: u32) {
+    let (x, y) = (world.players[i].x, world.players[i].y);
+    let talker = world
+        .chatter
+        .iter()
+        .find(|(from, text)| {
+            let q = &world.players[*from as usize];
+            let t = text.to_lowercase();
+            q.alive() && q.faction.is_none() && dist(x, y, q.x, q.y) < NOMAD_EARSHOT && NOMAD_WORDS.iter().any(|w| t.contains(w))
+        })
+        .map(|c| c.0);
+    if let Some(k) = talker {
+        let who = world.players[k as usize].label();
+        announce(world, format!("{} tells Nomad it is imperfect. NOMAD: \"ERROR... ERROR... EXAMINE... STERILISE...\" The probe destroys itself!", who));
+        world.kill(i, Some(k), "destroyed itself".into());
+        return;
+    }
+    if tick % 3 != 0 {
+        return;
+    }
+    // The most imperfect ship around: the most damaged one.
+    let hurt = |j: usize| world.players[j].damage / world.players[j].stats().max_damage;
+    let worst = (0..MAXPLAYER)
+        .filter(|&j| {
+            let q = &world.players[j];
+            q.alive() && q.faction.is_none() && !q.cloaked && q.damage > 0.0 && dist(x, y, q.x, q.y) < 25_000.0
+        })
+        .max_by(|&a, &b| hurt(a).total_cmp(&hurt(b)));
+    if let Some(t) = worst.or_else(|| nearest_enemy(world, i, 6000.0, None).map(|t| t.0)) {
+        fight(world, i, t);
+        return;
+    }
+    // Nobody to fix: sterilise the weakest colony instead.
+    let id = i as u8;
+    let weak = |pl: &super::world::Planet| Team::PLAYABLE.contains(&pl.owner) && (1..=6).contains(&pl.armies) && pl.flags & PL_HOME == 0;
+    let goal = match e.goals.get(&id) {
+        Some(&k) if weak(&world.planets[k]) => k,
+        _ => match nearest_planet(world, i, weak) {
+            Some(k) => {
+                e.goals.insert(id, k);
+                k
+            }
+            None => return,
+        },
+    };
+    let (px, py) = (world.planets[goal].x, world.planets[goal].y);
+    let d = dist(x, y, px, py);
+    steer_to(world, i, px, py, if d < 2000.0 { 0 } else { 6 });
+    if d < 2500.0 && tick % 10 == 0 {
+        let pl = &mut world.planets[goal];
+        pl.armies -= 1;
+        if pl.armies <= 0 {
+            let (name, old) = (pl.name, pl.owner);
+            pl.armies = 0;
+            pl.owner = Team::Ind;
+            announce(world, format!("Nomad has \"sterilised\" {}: its colony was imperfect.", name));
+            world.check_genocide(old, Team::Ind);
+            e.goals.remove(&id);
+        }
+    }
+}
+
+/// The slick's size before it has been fed.
+pub const ARMUS_BASE: f64 = 2500.0;
+/// Seconds Armus waits, unfed, before it starts to wither...
+const ARMUS_PATIENCE: u32 = 45;
+/// ...and ticks it takes to wither away.
+const ARMUS_WITHER: i32 = 300;
+
+/// Armus: an oily slick that oozes after ships, holds them and eats them.
+/// Every shot fired into it makes it bigger (see `World::inflict`); left
+/// alone it withers away.
+fn armus(world: &mut World, e: &mut Event, i: usize, tick: u32) {
+    let id = i as u8;
+    let unfed = tick.saturating_sub(world.players[i].last_hit) > ARMUS_PATIENCE * UPS as u32;
+    if !unfed {
+        e.dwell = 0;
+    } else if world.players[i].swell > 0.0 {
+        world.players[i].swell = (world.players[i].swell - 25.0).max(0.0);
+    } else {
+        e.dwell += 1;
+    }
+    if e.dwell >= ARMUS_WITHER {
+        announce(world, "Starved of the anger it feeds on, Armus shrivels into a puddle of tar and is gone.");
+        world.remove_player(id);
+        return;
+    }
+    let (x, y) = (world.players[i].x, world.players[i].y);
+    let r = ARMUS_BASE * (1.0 - e.dwell as f64 / ARMUS_WITHER as f64) + world.players[i].swell;
+    world.zones.push(ZoneInfo { kind: ZoneKind::Slick, x: x as i32, y: y as i32, r: r as i32 });
+    if tick % 5 == 0 {
+        match nearest_enemy(world, i, 30_000.0, None) {
+            Some((t, _)) => {
+                let (tx, ty) = (world.players[t].x, world.players[t].y);
+                steer_to(world, i, tx, ty, 1);
+            }
+            None => steer_to(world, i, x, y, 0),
+        }
+    }
+    let held = empire_ships_near(world, x, y, r);
+    e.progress.retain(|s, _| held.contains(&(*s as usize)));
+    for j in held {
+        if !e.progress.contains_key(&(j as u8)) {
+            e.progress.insert(j as u8, 0);
+            world.warn(j as u8, "Armus has engulfed your ship! It feeds on violence: every shot makes it stronger.");
+        }
+        let q = &mut world.players[j];
+        // Held fast: barely able to move, and dragged toward the middle.
+        q.speed = q.speed.min(2);
+        q.x += (x - q.x) * 0.005;
+        q.y += (y - q.y) * 0.005;
+        if tick % 5 == 0 {
+            world.inflict(j, 2.0, Some(id), "was swallowed by Armus".into());
+            if !world.players[j].alive() {
+                // Every ship it eats makes it bigger.
+                let p = &mut world.players[i];
+                p.swell = (p.swell + 1500.0).min(super::world::ARMUS_MAX_SWELL);
+                p.last_hit = tick;
+            }
+        }
+    }
+}
+
+/// Most ships the nanites can be in at once.
+const NANITE_CAP: usize = 10;
+
+/// Nanites: they make an infected ship's systems glitch, spread to ships
+/// flying close, and are flushed out at a friendly repair world or burnt
+/// out by a detonation (see `World::det_enemy`).
+fn nanites(world: &mut World, e: &mut Event) {
+    let mut rng = rand::thread_rng();
+    let infected: Vec<usize> = (0..MAXPLAYER).filter(|&j| world.players[j].alive() && world.players[j].nanites).collect();
+    e.progress.retain(|s, _| infected.contains(&(*s as usize)));
+    for &j in &infected {
+        let id = j as u8;
+        let p = &world.players[j];
+        let docked = p.orbiting.map_or(false, |k| world.planets[k].owner == p.team && world.planets[k].flags & PL_REPAIR != 0);
+        if docked {
+            let t = e.progress.entry(id).or_insert(0);
+            *t += 1;
+            if *t >= 30 {
+                e.progress.remove(&id);
+                world.players[j].nanites = false;
+                world.warn(id, "The repair crews flush the nanites out of your systems.");
+                continue;
+            }
+        } else {
+            e.progress.remove(&id);
+        }
+        if !rng.gen_bool(1.0 / 40.0) {
+            continue;
+        }
+        match rng.gen_range(0..3) {
+            0 if world.players[j].orbiting.is_none() => {
+                let p = &mut world.players[j];
+                p.desired_dir = (p.desired_dir + rng.gen_range(-50.0..50.0)).rem_euclid(256.0);
+                p.lock = Lock::None;
+                world.warn(id, "Nanites in the helm! Your ship swings off course.");
+            }
+            1 if world.players[j].shields_up => {
+                world.players[j].shields_up = false;
+                world.warn(id, "Nanites in the shield generators! Shields down.");
+            }
+            _ => {
+                world.handle(id, ClientMsg::Torp(rng.gen_range(0..=255)));
+                world.warn(id, "Nanites in the fire control! A torpedo misfires.");
+            }
+        }
+    }
+    let mut count = infected.len();
+    for &j in &infected {
+        if !world.players[j].nanites {
+            continue;
+        }
+        let (x, y) = (world.players[j].x, world.players[j].y);
+        for k in empire_ships_near(world, x, y, 1500.0) {
+            if k == j || count >= NANITE_CAP || world.players[k].nanites || !rng.gen_bool(1.0 / 120.0) {
+                continue;
+            }
+            count += 1;
+            world.players[k].nanites = true;
+            let (from, to) = (world.players[j].label(), world.players[k].label());
+            world.warn(k as u8, "Nanites have crossed over to your ship! Orbit a friendly repair world, or detonate (d) to burn them out.");
+            announce(world, format!("Nanites have spread from {} to {}!", from, to));
+        }
+    }
+}
+
+/// Changelings: pose as empire ships (see `World::frame_for`), pick off
+/// ships flying alone, and bomb colonies. A hit exposes one for a while,
+/// and then it fights back.
+fn changeling(world: &mut World, e: &mut Event, i: usize, tick: u32) {
+    if tick % 2 != 0 {
+        return;
+    }
+    let (x, y) = (world.players[i].x, world.players[i].y);
+    if tick < world.players[i].revealed_until {
+        if let Some((t, _)) = nearest_enemy(world, i, 12_000.0, None) {
+            fight(world, i, t);
+            return;
+        }
+    }
+    // A straggler: a ship with no friends within 8,000.
+    let alone = |j: usize| {
+        let q = &world.players[j];
+        !world.players.iter().any(|o| {
+            o.alive() && o.id != q.id && o.faction.is_none() && (o.team == q.team || world.allied(o.team, q.team)) && dist(o.x, o.y, q.x, q.y) < 8000.0
+        })
+    };
+    let straggler = (0..MAXPLAYER)
+        .filter(|&j| {
+            let q = &world.players[j];
+            q.alive() && q.faction.is_none() && !q.cloaked && dist(x, y, q.x, q.y) < 12_000.0 && alone(j)
+        })
+        .min_by(|&a, &b| {
+            let (pa, pb) = (&world.players[a], &world.players[b]);
+            dist(x, y, pa.x, pa.y).total_cmp(&dist(x, y, pb.x, pb.y))
+        });
+    if let Some(t) = straggler {
+        fight(world, i, t);
+        return;
+    }
+    raid(world, e, i, tick, "Changelings posing as its own garrison ships have wiped out the colony on {}!");
+}
+
+/// Radius of the Metrons' arena.
+pub const ARENA_R: f64 = 5000.0;
+/// How long the Metrons wait for a result.
+const DUEL_TIME: u32 = 120 * UPS as u32;
+
+/// The best pilot in the galaxy, and the best one of an empire at war with theirs.
+fn pick_duellists(world: &World) -> Option<(usize, usize)> {
+    let mut pilots: Vec<usize> = (0..MAXPLAYER)
+        .filter(|&j| {
+            let p = &world.players[j];
+            p.alive() && p.faction.is_none() && Team::PLAYABLE.contains(&p.team) && !p.trapped && !matches!(p.ship, ShipType::Starbase | ShipType::Freighter)
+        })
+        .collect();
+    pilots.sort_by(|&a, &b| {
+        let (pa, pb) = (&world.players[a], &world.players[b]);
+        pb.kills.total_cmp(&pa.kills).then(pb.total_kills.total_cmp(&pa.total_kills))
+    });
+    let &a = pilots.first()?;
+    let &b = pilots.iter().find(|&&b| world.hostile(world.players[a].team, world.players[b].team))?;
+    Some((a, b))
+}
+
+/// Let the Metrons' champions go (they can be hurt by anyone again).
+fn end_duel(world: &mut World, e: &mut Event) {
+    if let Some((a, b)) = e.duel.take() {
+        for s in [a, b] {
+            world.players[s as usize].only_hurt_by = None;
+        }
+    }
+}
+
+/// The Metrons: two champions fight in a sealed arena. Nobody else can get
+/// in (or hurt them), and they can't get out. The winner is rewarded.
+fn metrons(world: &mut World, e: &mut Event, tick: u32) {
+    let Some((a, b)) = e.duel else { return };
+    let (cx, cy) = e.waypoint;
+    world.zones.push(ZoneInfo { kind: ZoneKind::Arena, x: cx as i32, y: cy as i32, r: ARENA_R as i32 });
+    let (ai, bi) = (a as usize, b as usize);
+    let (a_ok, b_ok) = (world.players[ai].alive(), world.players[bi].alive());
+    if a_ok && b_ok && tick < e.started + DUEL_TIME {
+        // The arena wall: the champions can't leave, and nobody else can get in.
+        for j in 0..MAXPLAYER {
+            let p = &mut world.players[j];
+            if !p.alive() || p.faction == Some(Faction::Metrons) {
+                continue;
+            }
+            if dist(p.x, p.y, cx, cy) < 1.0 {
+                p.x += 1.0;
+            }
+            let d = dist(p.x, p.y, cx, cy);
+            let champion = j == ai || j == bi;
+            let edge = if champion { ARENA_R - 200.0 } else { ARENA_R + 400.0 };
+            if (champion && d > edge) || (!champion && d < edge) {
+                p.x = cx + (p.x - cx) / d * edge;
+                p.y = cy + (p.y - cy) / d * edge;
+                p.leave_orbit_pub();
+            }
+        }
+        // Torpedoes can't cross the wall either.
+        world.torps.retain(|t| {
+            let inside = dist(t.x, t.y, cx, cy) < ARENA_R;
+            inside == (t.owner == a || t.owner == b)
+        });
+        return;
+    }
+    end_duel(world, e);
+    match (a_ok, b_ok) {
+        (true, true) => announce(world, "The Metrons: \"Neither of you has the will to win. How disappointing.\" Both champions are released."),
+        (false, false) => announce(world, "Both champions have fallen. The Metrons are unimpressed."),
+        _ => {
+            let w = if a_ok { ai } else { bi };
+            award(world, w, 3.0, "Won the Metrons' arena");
+            let p = &mut world.players[w];
+            let s = p.stats();
+            (p.damage, p.shield, p.fuel) = (0.0, s.max_shield, s.max_fuel);
+            let who = p.label();
+            announce(world, format!("{} wins the Metrons' contest! \"You have shown mercy... or at least skill.\" The victor's ship is restored (+3 kills).", who));
+        }
+    }
+    for s in e.ships.clone() {
+        world.remove_player(s);
+    }
+}
+
+/// What a Pakled has taken.
+#[derive(Clone, Copy, Debug)]
+enum Stolen {
+    Tech { victim: u8, tech: Tech },
+    Upgrade { team: Team, which: usize },
+}
+
+fn stolen_name(s: Stolen) -> String {
+    match s {
+        Stolen::Tech { tech, .. } => tech.name().to_string(),
+        Stolen::Upgrade { team, which } => format!("a level of the {} {} upgrade", team.name(), UPGRADES[which].0),
+    }
+}
+
+/// Pakleds: lumbering clunkers that tractor a ship and take something
+/// clever (advanced tech, or a level of an empire upgrade), then run for
+/// the edge of the galaxy with it. Destroy the thief to get it back.
+fn pakled(world: &mut World, e: &mut Event, i: usize, tick: u32) {
+    let id = i as u8;
+    let (x, y) = (world.players[i].x, world.players[i].y);
+    if let Some(&loot) = e.stolen.get(&id) {
+        let (ex, ey) = if x.min(GWIDTH - x) < y.min(GWIDTH - y) {
+            (if x < GWIDTH / 2.0 { 0.0 } else { GWIDTH }, y)
+        } else {
+            (x, if y < GWIDTH / 2.0 { 0.0 } else { GWIDTH })
+        };
+        if tick % 3 == 0 {
+            let max = world.players[i].stats().max_speed;
+            steer_to(world, i, ex, ey, max);
+        }
+        if x.min(GWIDTH - x).min(y).min(GWIDTH - y) < 1500.0 {
+            e.stolen.remove(&id);
+            announce(world, format!("A Pakled clunker gets away with {}! \"We are strong.\"", stolen_name(loot)));
+            world.remove_player(id);
+        }
+        return;
+    }
+    if tick % 2 != 0 {
+        return;
+    }
+    let Some((t, d)) = nearest_enemy(world, i, 40_000.0, None) else { return };
+    if d > 2500.0 {
+        if world.players[i].tractor.is_some() {
+            cmd(world, i, ClientMsg::Tractor { target: None, pressor: false });
+        }
+        e.progress.remove(&id);
+        fight(world, i, t);
+        return;
+    }
+    // Grab it and hold on.
+    if world.players[i].tractor.map(|h| h.0) != Some(t as u8) {
+        cmd(world, i, ClientMsg::Tractor { target: Some(t as u8), pressor: false });
+    }
+    let (tx, ty) = (world.players[t].x, world.players[t].y);
+    steer_to(world, i, tx, ty, 2);
+    let held = e.progress.entry(id).or_insert(0);
+    *held += 2;
+    if *held < 40 {
+        return;
+    }
+    e.progress.remove(&id);
+    cmd(world, i, ClientMsg::Tractor { target: None, pressor: false });
+    steal(world, e, i, t);
+}
+
+fn steal(world: &mut World, e: &mut Event, i: usize, t: usize) {
+    let mut rng = rand::thread_rng();
+    let who = world.players[t].label();
+    if !world.players[t].techs.is_empty() {
+        let k = rng.gen_range(0..world.players[t].techs.len());
+        let tech = world.players[t].techs.remove(k);
+        e.stolen.insert(i as u8, Stolen::Tech { victim: t as u8, tech });
+        announce(world, format!("The Pakleds tractor {} and take its {}! \"It is ours now.\" Destroy the thief to get it back!", who, tech.name()));
+        return;
+    }
+    let team = world.players[t].team;
+    if world.features.supply {
+        let levels: Vec<usize> = (0..UPGRADES.len()).filter(|&u| world.supply[team.idx()].levels[u] > 0).collect();
+        if let Some(&u) = levels.choose(&mut rng) {
+            world.supply[team.idx()].levels[u] -= 1;
+            let loot = Stolen::Upgrade { team, which: u };
+            e.stolen.insert(i as u8, loot);
+            announce(world, format!("The Pakleds tractor {} and make off with {}! Destroy the thief to get it back!", who, stolen_name(loot)));
+            return;
+        }
+    }
+    // Nothing clever aboard: they help themselves to fuel instead.
+    let q = &mut world.players[t];
+    q.fuel *= 0.4;
+    world.warn(t as u8, "The Pakleds siphon off most of your fuel. \"We need things. Things to make us go.\"");
+}
+
+/// Give back whatever destroyed Pakleds had taken.
+fn recover(world: &mut World, e: &mut Event) {
+    let lost: Vec<u8> = e.stolen.keys().copied().filter(|s| !e.ships.contains(s) || !world.players[*s as usize].alive()).collect();
+    for s in lost {
+        let Some(loot) = e.stolen.remove(&s) else { continue };
+        match loot {
+            Stolen::Tech { victim, tech } => {
+                let q = &mut world.players[victim as usize];
+                if q.in_use && q.faction.is_none() && !q.techs.iter().any(|t| t.tier() == tech.tier()) {
+                    q.techs.push(tech);
+                }
+                let who = q.label();
+                announce(world, format!("The Pakled thief is destroyed, and {}'s {} is recovered!", who, tech.name()));
+            }
+            Stolen::Upgrade { team, which } => {
+                let l = &mut world.supply[team.idx()].levels[which];
+                *l = (*l + 1).min(MAX_UPGRADE);
+                announce(world, format!("The Pakled thief is destroyed, and {} is recovered!", stolen_name(loot)));
+            }
+        }
+    }
+}
+
+/// How far the anomaly's gravitational shear reaches.
+const SHEAR: f64 = 7000.0;
+/// The hyperfield beacons circle the anomaly this far out...
+pub const BEACON_ORBIT: f64 = 10_000.0;
+/// ...and a ship this close to one is holding it.
+pub const BEACON_R: f64 = 1500.0;
+
+/// Species 10-C's dark matter anomaly: it drifts across the galaxy wiping
+/// out planets and hurling ships aside, and can't be hurt. Holding all
+/// three of its hyperfield beacons at once makes first contact.
+fn ten_c(world: &mut World, e: &mut Event, i: usize, tick: u32) {
+    let mut rng = rand::thread_rng();
+    let id = i as u8;
+    let (x, y) = (world.players[i].x, world.players[i].y);
+    let (wx, wy) = e.waypoint;
+    if dist(x, y, wx, wy) < 3000.0 {
+        e.waypoint = (rng.gen_range(10_000.0..90_000.0), rng.gen_range(10_000.0..90_000.0));
+    }
+    if tick % 5 == 0 {
+        steer_to(world, i, wx, wy, 2);
+    }
+    for k in 0..world.planets.len() {
+        let pl = &mut world.planets[k];
+        if dist(x, y, pl.x, pl.y) < 3000.0 && (pl.armies > 0 || pl.owner != Team::Ind) {
+            let (name, old) = (pl.name, pl.owner);
+            pl.armies = 0;
+            pl.owner = Team::Ind;
+            announce(world, format!("The dark matter anomaly passes over {} and wipes it clean!", name));
+            world.check_genocide(old, Team::Ind);
+        }
+    }
+    for j in empire_ships_near(world, x, y, SHEAR) {
+        let q = &mut world.players[j];
+        let d = dist(q.x, q.y, x, y).max(1.0);
+        let push = 45.0 * (1.0 - d / SHEAR);
+        q.x = (q.x + (q.x - x) / d * push).clamp(0.0, GWIDTH);
+        q.y = (q.y + (q.y - y) / d * push).clamp(0.0, GWIDTH);
+        q.leave_orbit_pub();
+        if d < 3500.0 && tick % 5 == 0 {
+            world.inflict(j, 3.0, Some(id), "was torn apart by the dark matter anomaly".into());
+        }
+    }
+    // The hyperfield beacons.
+    let spin = tick as f64 * 0.002;
+    let mut holders = Vec::new();
+    let mut lit = 0;
+    for k in 0..3 {
+        let a = spin + k as f64 * TAU / 3.0;
+        let bx = (x + a.cos() * BEACON_ORBIT).clamp(1000.0, GWIDTH - 1000.0);
+        let by = (y + a.sin() * BEACON_ORBIT).clamp(1000.0, GWIDTH - 1000.0);
+        let here = empire_ships_near(world, bx, by, BEACON_R);
+        let kind = if here.is_empty() { ZoneKind::Beacon } else { ZoneKind::BeaconLit };
+        if !here.is_empty() {
+            lit += 1;
+            holders.extend(here);
+        }
+        world.zones.push(ZoneInfo { kind, x: bx as i32, y: by as i32, r: BEACON_R as i32 });
+    }
+    if lit < 3 {
+        e.dwell = 0;
+        return;
+    }
+    e.dwell += 1;
+    if e.dwell == 1 {
+        announce(world, "All three hyperfield beacons are lit! Hold them...");
+    }
+    if e.dwell >= 50 {
+        holders.sort_unstable();
+        holders.dedup();
+        for &j in &holders {
+            award(world, j, 2.0, "Made first contact with Species 10-C");
+        }
+        announce(world, "First contact! Species 10-C answers the hyperfield with a pattern of its own. The anomaly stops, then slowly withdraws. (+2 kills to each ship at a beacon)");
+        world.remove_player(id);
+    }
+}
+
+/// The Caretaker's array starts off taking this share of the damage done
+/// to it; every displacement wave it sends out adds more.
+pub const CARETAKER_SHIELD: f64 = 0.15;
+const WAVE_TICKS: i32 = 200;
+
+/// The Caretaker: a heavily shielded array whose displacement waves pull
+/// ships from all over the galaxy to it. Every wave weakens its shields.
+fn caretaker(world: &mut World, e: &mut Event, i: usize, tick: u32) {
+    let mut rng = rand::thread_rng();
+    let (x, y) = (world.players[i].x, world.players[i].y);
+    if tick % 15 == 0 {
+        if let Some((t, _)) = nearest_enemy(world, i, 6000.0, None) {
+            beam(world, i, t, 30.0, "was burned by the Caretaker's array");
+        }
+    }
+    e.dwell += 1;
+    if e.level > 0 && e.dwell < 20 {
+        world.zones.push(ZoneInfo { kind: ZoneKind::Displacement, x: x as i32, y: y as i32, r: 800 + e.dwell * 700 });
+    }
+    if e.dwell < WAVE_TICKS {
+        return;
+    }
+    e.dwell = 0;
+    e.level = e.level.saturating_add(1);
+    let far: Vec<usize> = (0..MAXPLAYER)
+        .filter(|&j| {
+            let q = &world.players[j];
+            q.alive() && q.faction.is_none() && q.ship != ShipType::Starbase && !q.trapped && q.only_hurt_by.is_none() && dist(x, y, q.x, q.y) > 10_000.0
+        })
+        .collect();
+    let mut names = Vec::new();
+    for j in far.choose_multiple(&mut rng, 2).copied().collect::<Vec<_>>() {
+        let a = rng.gen_range(0.0..TAU);
+        let r = rng.gen_range(3500.0..5000.0);
+        let q = &mut world.players[j];
+        q.leave_orbit_pub();
+        q.lock = Lock::None;
+        q.tractor = None;
+        q.x = (x + a.cos() * r).clamp(500.0, GWIDTH - 500.0);
+        q.y = (y + a.sin() * r).clamp(500.0, GWIDTH - 500.0);
+        names.push(q.label());
+        world.warn(j as u8, "A displacement wave has pulled you across the galaxy to the Caretaker's array!");
+    }
+    let p = &mut world.players[i];
+    p.adapt = (p.adapt + 0.15).min(1.0);
+    let shielding = ((1.0 - p.adapt) * 100.0).round();
+    if names.is_empty() {
+        announce(world, format!("The Caretaker's array sends out a displacement wave, but finds no one to take. (Its shielding is down to {}%.)", shielding));
+    } else {
+        announce(world, format!("A displacement wave pulls {} to the Caretaker's array! (Its shielding is down to {}%.)", names.join(" and "), shielding));
+    }
+}
+
+/// Ticks a ship must orbit the Horta's planet without firing to make peace.
+const HORTA_PEACE: i32 = 100;
+
+/// The Horta: tunnels through a colony killing its armies, then moves on
+/// to the next. Kill it, or make peace: orbit its planet for ten seconds
+/// without firing, and the colony gains armies and repair yards.
+fn horta(world: &mut World, e: &mut Event, i: usize, tick: u32) {
+    let id = i as u8;
+    let colony = |pl: &super::world::Planet| Team::PLAYABLE.contains(&pl.owner) && pl.armies > 0 && pl.flags & PL_HOME == 0;
+    let goal = match e.goals.get(&id) {
+        Some(&k) if colony(&world.planets[k]) => k,
+        _ => match nearest_planet(world, i, colony) {
+            Some(k) => {
+                e.goals.insert(id, k);
+                e.progress.clear();
+                k
+            }
+            None => return,
+        },
+    };
+    let (px, py) = (world.planets[goal].x, world.planets[goal].y);
+    if dist(world.players[i].x, world.players[i].y, px, py) > 900.0 {
+        if tick % 4 == 0 {
+            steer_to(world, i, px, py, 3);
+        }
+        return;
+    }
+    // Inside the rock.
+    {
+        let p = &mut world.players[i];
+        (p.x, p.y, p.speed, p.desired_speed) = (px, py, 0, 0);
+    }
+    if tick % 25 == 0 {
+        let pl = &mut world.planets[goal];
+        pl.armies -= 1;
+        if pl.armies <= 0 {
+            let (name, old) = (pl.name, pl.owner);
+            pl.armies = 0;
+            pl.owner = Team::Ind;
+            announce(world, format!("The Horta has killed every army on {}, and tunnels on to the next colony.", name));
+            world.check_genocide(old, Team::Ind);
+            e.goals.remove(&id);
+            return;
+        }
+    }
+    // Peace: a ship orbiting quietly.
+    for j in 0..MAXPLAYER {
+        let q = &world.players[j];
+        let sid = j as u8;
+        if !q.alive() || q.faction.is_some() || q.orbiting != Some(goal) {
+            e.progress.remove(&sid);
+            continue;
+        }
+        let firing = q.phaser_timer > 0 || world.torps.iter().any(|t| t.owner == sid);
+        let n = e.progress.entry(sid).or_insert(0);
+        *n = if firing { 0 } else { *n + 1 };
+        if *n == 1 {
+            world.warn(sid, "The Horta is watching you. Hold your fire and stay in orbit to make peace...");
+        }
+        if *n < HORTA_PEACE {
+            continue;
+        }
+        let who = world.players[j].label();
+        let pl = &mut world.planets[goal];
+        pl.armies += 10;
+        pl.flags |= PL_REPAIR;
+        let name = pl.name;
+        award(world, j, 2.0, "Made peace with the Horta");
+        announce(
+            world,
+            format!("{} makes peace with the Horta! \"NO KILL I.\" Its children join the colony on {} (+10 armies) and its tunnels become repair yards.", who, name),
+        );
+        world.remove_player(id);
+        return;
+    }
+}
+
+/// What a Delphic sphere can do to the space around it.
+const SPHERE_ANOMALIES: [(TerrainKind, &str, f64); 4] = [
+    (TerrainKind::GravitonEddy, "spatial eddy", 5000.0),
+    (TerrainKind::ChronitonField, "chroniton field", 4500.0),
+    (TerrainKind::TetryonField, "tetryon field", 4500.0),
+    (TerrainKind::FluidicRift, "spatial rift", 700.0),
+];
+/// Most anomalies one sphere keeps going at once.
+const SPHERE_MAX: usize = 3;
+
+/// Delphic sphere: scorches ships close by, and every so often warps the
+/// space around it into an anomaly. They last until the sphere is destroyed.
+fn sphere(world: &mut World, i: usize, n: usize, tick: u32) {
+    let mut rng = rand::thread_rng();
+    let id = i as u8;
+    let (x, y) = (world.players[i].x, world.players[i].y);
+    if tick % 50 == 0 {
+        for j in empire_ships_near(world, x, y, 3500.0) {
+            world.inflict(j, 15.0, Some(id), "was scorched by a Delphic sphere".into());
+        }
+    }
+    if (tick + n as u32 * 50) % 200 != 0 {
+        return;
+    }
+    let made = world.terrain.iter().filter(|t| t.owner == Some(id)).count();
+    if made >= SPHERE_MAX {
+        return;
+    }
+    let (kind, name, r) = *SPHERE_ANOMALIES.choose(&mut rng).unwrap();
+    let a = rng.gen_range(0.0..TAU);
+    let d = r.max(2000.0) + rng.gen_range(2500.0..4500.0);
+    let at = ((x + a.cos() * d).clamp(3000.0, GWIDTH - 3000.0), (y + a.sin() * d).clamp(3000.0, GWIDTH - 3000.0));
+    world.terrain.push(Terrain::planted(kind, name, at, r, id));
+    if made == 0 {
+        announce(world, format!("A Delphic sphere near {} is warping space into anomalies!", nearest_planet_name(world, x, y)));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2053,7 +2963,8 @@ mod tests {
                 .filter(|m| {
                     ["Khan", "Gorn", "Tholian", "Fesarius", "Balok", "Terran", "planet killer", "amoeba", "Borg", "V'Ger",
                         "Crystalline", "probe", "8472", "Jem'Hadar", "wormhole", "ribble", "Chang", "Hirogen", "Q", "Ferengi",
-                        "warm", "TEMPEST", "Tempest"]
+                        "warm", "TEMPEST", "Tempest", "NOMAD", "Nomad", "Armus", "anite", "hangeling", "Metron", "Pakled", "10-C",
+                        "Caretaker", "Horta", "Sphere"]
                         .iter()
                         .any(|k| m.contains(k))
                 })
@@ -2063,7 +2974,7 @@ mod tests {
                 println!("  {}", m);
             }
             // Tribbles have no ships: they arrive on a planet.
-            assert!(peak_aliens > 0 || kind == Faction::Tribbles, "{:?} never arrived", kind);
+            assert!(peak_aliens > 0 || matches!(kind, Faction::Tribbles | Faction::Nanites), "{:?} never arrived", kind);
             assert!(!alien_msgs.is_empty(), "{:?} made no announcements", kind);
         }
     }
@@ -2359,6 +3270,238 @@ mod tests {
         assert!(!w.players[s].alive(), "detonation kills it");
     }
 
+    fn say(w: &mut World, id: u8, text: &str) {
+        w.handle(id, ClientMsg::Message { to: crate::proto::MsgTarget::All, text: text.into() });
+    }
+
+    #[test]
+    fn nomad_is_talked_to_death() {
+        let (mut w, kirk) = with_cruiser(50_000.0, 50_000.0);
+        let mut e = test_event(Faction::Nomad);
+        let n = w.spawn_alien("Nomad", Faction::Nomad, ShipType::NomadProbe, 53_000.0, 50_000.0, 20.0).unwrap() as usize;
+        e.ships = vec![n as u8];
+        w.inflict(n, 500.0, Some(kirk), "test".into());
+        assert_eq!(w.players[n].damage, 0.0, "weapons can't touch it");
+        // Out of earshot, or the wrong words, and nothing happens.
+        say(&mut w, kirk, "hello there");
+        nomad(&mut w, &mut e, n, 1);
+        assert!(w.players[n].alive());
+        say(&mut w, kirk, "You are imperfect, Nomad!");
+        nomad(&mut w, &mut e, n, 2);
+        assert!(!w.players[n].alive(), "the logic bomb works");
+        assert!(w.players[kirk as usize].kills >= 3.0, "{}", w.players[kirk as usize].kills);
+    }
+
+    #[test]
+    fn armus_grows_when_shot_and_withers_when_ignored() {
+        let (mut w, kirk) = with_cruiser(50_000.0, 50_000.0);
+        let mut e = test_event(Faction::Armus);
+        let a = w.spawn_alien("Armus", Faction::Armus, ShipType::ArmusSlick, 51_000.0, 50_000.0, 0.0).unwrap() as usize;
+        e.ships = vec![a as u8];
+        w.inflict(a, 50.0, Some(kirk), "test".into());
+        assert!(w.players[a].swell > 0.0 && w.players[a].damage == 0.0, "shots feed it");
+        // It holds and hurts the cruiser inside it.
+        w.players[kirk as usize].speed = 9;
+        let now = w.tick;
+        armus(&mut w, &mut e, a, now + 5);
+        assert!(w.players[kirk as usize].speed <= 2);
+        assert!(w.players[kirk as usize].shield < w.players[kirk as usize].stats().max_shield);
+        // Left alone, it withers away.
+        w.players[kirk as usize].x = 90_000.0;
+        let start = w.tick;
+        for t in 0..2000 {
+            armus(&mut w, &mut e, a, start + ARMUS_PATIENCE * UPS as u32 + 1 + t);
+            if !w.players[a].in_use {
+                break;
+            }
+        }
+        assert!(!w.players[a].in_use, "withered away");
+    }
+
+    #[test]
+    fn nanites_spread_and_are_cured() {
+        let (mut w, kirk) = with_cruiser(50_000.0, 50_000.0);
+        let k = kirk as usize;
+        let s = w.add_player("Sulu", false).unwrap() as usize;
+        w.join(s as u8, Team::Fed, ShipType::Cruiser).unwrap();
+        (w.players[s].x, w.players[s].y) = (50_500.0, 50_000.0);
+        w.players[k].nanites = true;
+        let mut e = test_event(Faction::Nanites);
+        for _ in 0..2000 {
+            nanites(&mut w, &mut e);
+            if w.players[s].nanites {
+                break;
+            }
+        }
+        assert!(w.players[s].nanites, "spread to the ship alongside");
+        w.handle(kirk, ClientMsg::DetEnemy);
+        assert!(!w.players[k].nanites && !w.players[s].nanites, "detonation burns them out");
+        let frame = w.frame_for(kirk);
+        assert!(frame.players.iter().all(|p| p.flags & crate::proto::pf::NANITES == 0));
+    }
+
+    #[test]
+    fn changelings_look_like_your_own_until_hit() {
+        let (mut w, kirk) = with_cruiser(50_000.0, 50_000.0);
+        let c = w.spawn_alien("Changeling", Faction::Changeling, ShipType::ChangelingShip, 52_000.0, 50_000.0, 8.0).unwrap();
+        let seen = |w: &World| w.frame_for(kirk).players.into_iter().find(|p| p.id == c).unwrap();
+        let p = seen(&w);
+        assert_eq!((p.team, p.ship, p.faction), (Team::Fed, ShipType::Cruiser, None), "disguised");
+        w.inflict(c as usize, 5.0, Some(kirk), "test".into());
+        let p = seen(&w);
+        assert_eq!((p.ship, p.faction), (ShipType::ChangelingShip, Some(Faction::Changeling)), "exposed");
+    }
+
+    #[test]
+    fn metrons_arena_duel() {
+        let (mut w, kirk) = with_cruiser(20_000.0, 20_000.0);
+        let r = w.add_player("Tomalak", false).unwrap();
+        w.join(r, Team::Rom, ShipType::Cruiser).unwrap();
+        let o = w.add_player("Outsider", false).unwrap();
+        w.join(o, Team::Kli, ShipType::Cruiser).unwrap();
+        w.players[kirk as usize].kills = 3.0;
+        w.players[r as usize].kills = 2.0;
+        let mut d = Director::new(AlienConfig { kinds: vec![Faction::Metrons], interval: 9999 });
+        d.spawn_kind(&mut w, Faction::Metrons, None);
+        assert_eq!(d.events[0].duel, Some((kirk, r)));
+        let (cx, cy) = d.events[0].waypoint;
+        // The outsider can't get in, or hurt the champions.
+        (w.players[o as usize].x, w.players[o as usize].y) = (cx, cy);
+        d.tick(&mut w);
+        assert!(dist(w.players[o as usize].x, w.players[o as usize].y, cx, cy) > ARENA_R);
+        w.inflict(kirk as usize, 50.0, Some(o), "test".into());
+        assert_eq!(w.players[kirk as usize].damage, 0.0);
+        // The champions can't get out.
+        (w.players[kirk as usize].x, w.players[kirk as usize].y) = (cx + ARENA_R * 2.0, cy);
+        d.tick(&mut w);
+        assert!(dist(w.players[kirk as usize].x, w.players[kirk as usize].y, cx, cy) < ARENA_R);
+        // Kirk wins.
+        let before = w.players[kirk as usize].kills;
+        w.kill(r as usize, Some(kirk), "test".into());
+        d.tick(&mut w);
+        assert!(w.players[kirk as usize].kills >= before + 3.0);
+        assert!(w.players[kirk as usize].only_hurt_by.is_none());
+        for _ in 0..3 {
+            d.tick(&mut w);
+            w.tick();
+        }
+        assert!(d.events.is_empty(), "the Metrons leave");
+    }
+
+    #[test]
+    fn pakleds_steal_tech_and_give_it_back_when_destroyed() {
+        let (mut w, kirk) = with_cruiser(50_000.0, 50_000.0);
+        let k = kirk as usize;
+        w.players[k].techs = vec![Tech::QuantumTorps];
+        let p = w.spawn_alien("Pakled", Faction::Pakleds, ShipType::PakledClunker, 51_500.0, 50_000.0, 5.0).unwrap() as usize;
+        let mut e = test_event(Faction::Pakleds);
+        e.ships = vec![p as u8];
+        for t in 0..60 {
+            pakled(&mut w, &mut e, p, t * 2);
+        }
+        assert!(w.players[k].techs.is_empty(), "stolen");
+        assert!(e.stolen.contains_key(&(p as u8)));
+        w.kill(p, Some(kirk), "test".into());
+        recover(&mut w, &mut e);
+        assert_eq!(w.players[k].techs, vec![Tech::QuantumTorps], "recovered");
+    }
+
+    #[test]
+    fn ten_c_first_contact() {
+        let mut w = World::new();
+        let a = w.spawn_alien("10-C", Faction::TenC, ShipType::DarkMatterAnomaly, 50_000.0, 50_000.0, 0.0).unwrap() as usize;
+        let mut e = test_event(Faction::TenC);
+        e.ships = vec![a as u8];
+        e.waypoint = (50_000.0, 50_000.0);
+        w.inflict(a, 5000.0, None, "test".into());
+        assert_eq!(w.players[a].damage, 0.0, "weapons are useless");
+        let mut ids = Vec::new();
+        for (k, name) in ["Burnham", "Tilly", "Saru"].iter().enumerate() {
+            let id = w.add_player(name, false).unwrap();
+            w.join(id, [Team::Fed, Team::Rom, Team::Kli][k], ShipType::Cruiser).unwrap();
+            ids.push(id as usize);
+        }
+        let tick = 1000;
+        for t in 0..60 {
+            // Keep one ship on each beacon as they turn.
+            let spin = (tick + t) as f64 * 0.002;
+            for (k, &j) in ids.iter().enumerate() {
+                let a = spin + k as f64 * TAU / 3.0;
+                (w.players[j].x, w.players[j].y) = (50_000.0 + a.cos() * BEACON_ORBIT, 50_000.0 + a.sin() * BEACON_ORBIT);
+            }
+            w.zones.clear();
+            ten_c(&mut w, &mut e, a, tick + t);
+            if !w.players[a].in_use {
+                break;
+            }
+        }
+        assert!(!w.players[a].in_use, "first contact sends it away");
+        assert!(ids.iter().all(|&j| w.players[j].kills >= 2.0));
+    }
+
+    #[test]
+    fn caretaker_pulls_ships_in_and_weakens() {
+        let (mut w, kirk) = with_cruiser(90_000.0, 90_000.0);
+        let c = w.spawn_alien("Caretaker", Faction::Caretaker, ShipType::CaretakerArray, 20_000.0, 20_000.0, 30.0).unwrap() as usize;
+        w.players[c].adapt = CARETAKER_SHIELD;
+        let mut e = test_event(Faction::Caretaker);
+        e.ships = vec![c as u8];
+        w.players[c].shields_up = false;
+        w.inflict(c, 100.0, Some(kirk), "test".into());
+        let first = w.players[c].damage;
+        assert!((first - 15.0).abs() < 1e-6, "heavily shielded: {}", first);
+        for t in 0..WAVE_TICKS as u32 {
+            caretaker(&mut w, &mut e, c, t * 7 + 1);
+        }
+        let k = &w.players[kirk as usize];
+        assert!(dist(k.x, k.y, 20_000.0, 20_000.0) < 6000.0, "pulled to the array");
+        w.inflict(c, 100.0, Some(kirk), "test".into());
+        assert!(w.players[c].damage - first > 15.0 + 1e-6, "weaker after firing");
+    }
+
+    #[test]
+    fn horta_peace() {
+        let (mut w, kirk) = with_cruiser(0.0, 0.0);
+        let k = kirk as usize;
+        let pl = (0..w.planets.len()).find(|&p| w.planets[p].owner == Team::Fed && w.planets[p].flags & PL_HOME == 0).unwrap();
+        let (px, py) = (w.planets[pl].x, w.planets[pl].y);
+        w.planets[pl].armies = 8;
+        w.planets[pl].flags &= !PL_REPAIR;
+        let h = w.spawn_alien("Horta", Faction::Horta, ShipType::Horta, px, py, 10.0).unwrap() as usize;
+        let mut e = test_event(Faction::Horta);
+        e.ships = vec![h as u8];
+        (w.players[k].x, w.players[k].y) = (px + 800.0, py);
+        w.players[k].orbiting = Some(pl);
+        for t in 1..=(HORTA_PEACE as u32 + 1) {
+            horta(&mut w, &mut e, h, t * 100 + 1);
+            if !w.players[h].in_use {
+                break;
+            }
+        }
+        assert!(!w.players[h].in_use, "peace made");
+        assert!(w.planets[pl].armies >= 18 && w.planets[pl].flags & PL_REPAIR != 0);
+        assert!(w.players[k].kills >= 2.0);
+    }
+
+    #[test]
+    fn spheres_plant_anomalies_that_vanish_with_them() {
+        let mut w = World::new();
+        let s = w.spawn_alien("Sphere 41", Faction::SphereBuilders, ShipType::DelphicSphere, 50_000.0, 50_000.0, 8.0).unwrap() as usize;
+        let mut d = Director::new(AlienConfig { kinds: vec![Faction::SphereBuilders], interval: 9999 });
+        let mut e = test_event(Faction::SphereBuilders);
+        e.ships = vec![s as u8];
+        d.events.push(e);
+        for _ in 0..700 {
+            d.tick(&mut w);
+            w.tick();
+        }
+        let made = w.terrain.iter().filter(|t| t.owner == Some(s as u8)).count();
+        assert!(made >= 2 && made <= SPHERE_MAX, "{}", made);
+        w.kill(s, None, "test".into());
+        d.tick(&mut w);
+        assert!(w.terrain.is_empty(), "anomalies fade with the sphere");
+    }
+
     fn test_event(kind: Faction) -> Event {
         Event {
             kind,
@@ -2381,6 +3524,8 @@ mod tests {
             level: 0,
             queue: Vec::new(),
             next_at: 0,
+            duel: None,
+            stolen: HashMap::new(),
         }
     }
 

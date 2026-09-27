@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 pub const DEFAULT_PORT: u16 = 2592; // the traditional Netrek port
-pub const PROTOCOL_VERSION: u32 = 14;
+pub const PROTOCOL_VERSION: u32 = 15;
 
 pub const UPS: u64 = 10; // server updates per second, like the original
 pub const GWIDTH: f64 = 100_000.0;
@@ -136,10 +136,20 @@ pub enum Faction {
     Ferengi,
     Swarm,
     Tempest,
+    Nomad,
+    Armus,
+    Nanites,
+    Changeling,
+    Metrons,
+    Pakleds,
+    TenC,
+    Caretaker,
+    Horta,
+    SphereBuilders,
 }
 
 impl Faction {
-    pub const ALL: [Faction; 20] = [
+    pub const ALL: [Faction; 30] = [
         Faction::Khan,
         Faction::Gorn,
         Faction::Tholian,
@@ -160,6 +170,16 @@ impl Faction {
         Faction::Ferengi,
         Faction::Swarm,
         Faction::Tempest,
+        Faction::Nomad,
+        Faction::Armus,
+        Faction::Nanites,
+        Faction::Changeling,
+        Faction::Metrons,
+        Faction::Pakleds,
+        Faction::TenC,
+        Faction::Caretaker,
+        Faction::Horta,
+        Faction::SphereBuilders,
     ];
 
     /// Name used on the command line.
@@ -185,6 +205,16 @@ impl Faction {
             Faction::Ferengi => "ferengi",
             Faction::Swarm => "swarm",
             Faction::Tempest => "tempest",
+            Faction::Nomad => "nomad",
+            Faction::Armus => "armus",
+            Faction::Nanites => "nanites",
+            Faction::Changeling => "changeling",
+            Faction::Metrons => "metrons",
+            Faction::Pakleds => "pakled",
+            Faction::TenC => "10c",
+            Faction::Caretaker => "caretaker",
+            Faction::Horta => "horta",
+            Faction::SphereBuilders => "spheres",
         }
     }
 
@@ -210,6 +240,16 @@ impl Faction {
             Faction::Ferengi => "the Ferengi",
             Faction::Swarm => "the Swarm",
             Faction::Tempest => "the Tempest",
+            Faction::Nomad => "Nomad",
+            Faction::Armus => "Armus",
+            Faction::Nanites => "the nanites",
+            Faction::Changeling => "the Changelings",
+            Faction::Metrons => "the Metrons",
+            Faction::Pakleds => "the Pakleds",
+            Faction::TenC => "Species 10-C",
+            Faction::Caretaker => "the Caretaker",
+            Faction::Horta => "the Horta",
+            Faction::SphereBuilders => "the Sphere Builders",
         }
     }
 
@@ -236,6 +276,16 @@ impl Faction {
             Faction::Ferengi => "Ferengi",
             Faction::Swarm => "Swarm",
             Faction::Tempest => "Tempest",
+            Faction::Nomad => "Nomad",
+            Faction::Armus => "Armus",
+            Faction::Nanites => "Nanites",
+            Faction::Changeling => "Changeling",
+            Faction::Metrons => "Metron",
+            Faction::Pakleds => "Pakled",
+            Faction::TenC => "10-C",
+            Faction::Caretaker => "Caretaker",
+            Faction::Horta => "Horta",
+            Faction::SphereBuilders => "Sphere",
         }
     }
 
@@ -262,6 +312,16 @@ impl Faction {
             Faction::Ferengi => "FE",
             Faction::Swarm => "SW",
             Faction::Tempest => "TP",
+            Faction::Nomad => "NM",
+            Faction::Armus => "AR",
+            Faction::Nanites => "NA",
+            Faction::Changeling => "CL",
+            Faction::Metrons => "ME",
+            Faction::Pakleds => "PA",
+            Faction::TenC => "TC",
+            Faction::Caretaker => "CT",
+            Faction::Horta => "HO",
+            Faction::SphereBuilders => "SB",
         }
     }
 
@@ -330,6 +390,16 @@ pub enum ShipType {
     Tanker,
     Pulsar,
     Fuseball,
+    // The second wave of incursions.
+    NomadProbe,
+    ArmusSlick,
+    ChangelingShip,
+    MetronPresence,
+    PakledClunker,
+    DarkMatterAnomaly,
+    CaretakerArray,
+    Horta,
+    DelphicSphere,
 }
 
 impl ShipType {
@@ -464,8 +534,28 @@ impl ShipType {
             ShipType::WhaleProbe => 1200.0,
             ShipType::QEntity => 600.0,
             ShipType::TempestCore => 1200.0,
+            ShipType::ArmusSlick => 1500.0,
+            ShipType::MetronPresence => 700.0,
+            ShipType::DarkMatterAnomaly => 2000.0,
+            ShipType::CaretakerArray => 1300.0,
+            ShipType::DelphicSphere => 1400.0,
             _ => EXPDIST,
         }
+    }
+
+    /// Aliens that weapons can't hurt (or, like Armus, that shooting only
+    /// makes worse): robots and overwatch hold their fire.
+    pub fn pointless_target(self) -> bool {
+        matches!(
+            self,
+            ShipType::QEntity
+                | ShipType::VgerCloud
+                | ShipType::WhaleProbe
+                | ShipType::NomadProbe
+                | ShipType::ArmusSlick
+                | ShipType::MetronPresence
+                | ShipType::DarkMatterAnomaly
+        )
     }
 
     pub fn is_alien(self) -> bool {
@@ -508,7 +598,7 @@ pub struct ShipStats {
     pub tract_str: f64,
 }
 
-pub static SHIPS: [ShipStats; 47] = [
+pub static SHIPS: [ShipStats; 56] = [
     ShipStats {
         name: "Scout", abbr: "SC", max_speed: 12, max_shield: 75.0, max_damage: 75.0,
         max_fuel: 5000.0, max_armies: 2, torp_damage: 25.0, torp_speed: 16.0, torp_fuse: 16,
@@ -932,6 +1022,86 @@ pub static SHIPS: [ShipStats; 47] = [
         recharge: 500.0, repair: 0.0, warp_cost: 0.0, cloak_cost: 0.0, shield_cost: 0.0,
         turns: 600_000.0, acc: 400, dec: 400, wpn_cool: 50.0, egn_cool: 50.0,
         max_etemp: 100_000.0, max_wtemp: 100_000.0, mass: 800.0, tract_range: 1.0, tract_str: 1.0,
+    },    ShipStats {
+        name: "Nomad", abbr: "NM", max_speed: 6, max_shield: 200.0, max_damage: 200.0,
+        max_fuel: 100_000.0, max_armies: 0, torp_damage: 30.0, torp_speed: 14.0, torp_fuse: 40,
+        torp_cost: 7.0 * 30.0, phaser_damage: 70.0, phaser_cost: 7.0 * 70.0,
+        plasma_damage: 0.0, plasma_speed: 0.0, plasma_fuse: 0, plasma_cost: 0.0,
+        recharge: 20.0, repair: 100.0, warp_cost: 2.0, cloak_cost: 20.0, shield_cost: 2.0,
+        turns: 200000.0, acc: 150, dec: 250, wpn_cool: 2.5, egn_cool: 7.0,
+        max_etemp: 100_000.0, max_wtemp: 1100.0, mass: 3000.0, tract_range: 1.0, tract_str: 3000.0,
+    },
+    ShipStats {
+        name: "Armus", abbr: "AR", max_speed: 2, max_shield: 0.0, max_damage: 10_000.0,
+        max_fuel: 1_000_000.0, max_armies: 0, torp_damage: 0.0, torp_speed: 10.0, torp_fuse: 40,
+        torp_cost: 7.0 * 0.0, phaser_damage: 0.0, phaser_cost: 7.0 * 0.0,
+        plasma_damage: 0.0, plasma_speed: 0.0, plasma_fuse: 0, plasma_cost: 0.0,
+        recharge: 50.0, repair: 100.0, warp_cost: 2.0, cloak_cost: 20.0, shield_cost: 2.0,
+        turns: 100000.0, acc: 150, dec: 250, wpn_cool: 2.5, egn_cool: 7.0,
+        max_etemp: 100_000.0, max_wtemp: 1100.0, mass: 50000.0, tract_range: 1.0, tract_str: 3000.0,
+    },
+    ShipStats {
+        name: "Changeling ship", abbr: "CL", max_speed: 9, max_shield: 90.0, max_damage: 100.0,
+        max_fuel: 12000.0, max_armies: 0, torp_damage: 35.0, torp_speed: 13.0, torp_fuse: 40,
+        torp_cost: 7.0 * 35.0, phaser_damage: 85.0, phaser_cost: 7.0 * 85.0,
+        plasma_damage: 0.0, plasma_speed: 0.0, plasma_fuse: 0, plasma_cost: 0.0,
+        recharge: 14.0, repair: 100.0, warp_cost: 2.0, cloak_cost: 20.0, shield_cost: 2.0,
+        turns: 250000.0, acc: 150, dec: 250, wpn_cool: 2.5, egn_cool: 7.0,
+        max_etemp: 100_000.0, max_wtemp: 1100.0, mass: 1800.0, tract_range: 1.0, tract_str: 3000.0,
+    },
+    ShipStats {
+        name: "Metron presence", abbr: "ME", max_speed: 0, max_shield: 0.0, max_damage: 10_000.0,
+        max_fuel: 1_000_000.0, max_armies: 0, torp_damage: 0.0, torp_speed: 10.0, torp_fuse: 40,
+        torp_cost: 7.0 * 0.0, phaser_damage: 0.0, phaser_cost: 7.0 * 0.0,
+        plasma_damage: 0.0, plasma_speed: 0.0, plasma_fuse: 0, plasma_cost: 0.0,
+        recharge: 50.0, repair: 100.0, warp_cost: 2.0, cloak_cost: 20.0, shield_cost: 2.0,
+        turns: 100000.0, acc: 150, dec: 250, wpn_cool: 2.5, egn_cool: 7.0,
+        max_etemp: 100_000.0, max_wtemp: 1100.0, mass: 50000.0, tract_range: 1.0, tract_str: 3000.0,
+    },
+    ShipStats {
+        name: "Pakled clunker", abbr: "PA", max_speed: 5, max_shield: 140.0, max_damage: 160.0,
+        max_fuel: 12000.0, max_armies: 0, torp_damage: 20.0, torp_speed: 10.0, torp_fuse: 40,
+        torp_cost: 7.0 * 20.0, phaser_damage: 40.0, phaser_cost: 7.0 * 40.0,
+        plasma_damage: 0.0, plasma_speed: 0.0, plasma_fuse: 0, plasma_cost: 0.0,
+        recharge: 10.0, repair: 100.0, warp_cost: 2.0, cloak_cost: 20.0, shield_cost: 2.0,
+        turns: 90000.0, acc: 150, dec: 250, wpn_cool: 2.5, egn_cool: 7.0,
+        max_etemp: 100_000.0, max_wtemp: 1100.0, mass: 3500.0, tract_range: 1.0, tract_str: 3000.0,
+    },
+    ShipStats {
+        name: "Dark matter anomaly", abbr: "DM", max_speed: 2, max_shield: 0.0, max_damage: 10_000.0,
+        max_fuel: 1_000_000.0, max_armies: 0, torp_damage: 0.0, torp_speed: 10.0, torp_fuse: 40,
+        torp_cost: 7.0 * 0.0, phaser_damage: 0.0, phaser_cost: 7.0 * 0.0,
+        plasma_damage: 0.0, plasma_speed: 0.0, plasma_fuse: 0, plasma_cost: 0.0,
+        recharge: 50.0, repair: 100.0, warp_cost: 2.0, cloak_cost: 20.0, shield_cost: 2.0,
+        turns: 100000.0, acc: 150, dec: 250, wpn_cool: 2.5, egn_cool: 7.0,
+        max_etemp: 100_000.0, max_wtemp: 1100.0, mass: 500000.0, tract_range: 1.0, tract_str: 3000.0,
+    },
+    ShipStats {
+        name: "Caretaker array", abbr: "CA", max_speed: 0, max_shield: 300.0, max_damage: 600.0,
+        max_fuel: 1_000_000.0, max_armies: 0, torp_damage: 0.0, torp_speed: 10.0, torp_fuse: 40,
+        torp_cost: 7.0 * 0.0, phaser_damage: 120.0, phaser_cost: 7.0 * 120.0,
+        plasma_damage: 0.0, plasma_speed: 0.0, plasma_fuse: 0, plasma_cost: 0.0,
+        recharge: 30.0, repair: 100.0, warp_cost: 2.0, cloak_cost: 20.0, shield_cost: 2.0,
+        turns: 100000.0, acc: 150, dec: 250, wpn_cool: 2.5, egn_cool: 7.0,
+        max_etemp: 100_000.0, max_wtemp: 1100.0, mass: 500000.0, tract_range: 1.0, tract_str: 3000.0,
+    },
+    ShipStats {
+        name: "Horta", abbr: "HO", max_speed: 3, max_shield: 0.0, max_damage: 150.0,
+        max_fuel: 12000.0, max_armies: 0, torp_damage: 0.0, torp_speed: 10.0, torp_fuse: 40,
+        torp_cost: 7.0 * 0.0, phaser_damage: 0.0, phaser_cost: 7.0 * 0.0,
+        plasma_damage: 0.0, plasma_speed: 0.0, plasma_fuse: 0, plasma_cost: 0.0,
+        recharge: 10.0, repair: 100.0, warp_cost: 2.0, cloak_cost: 20.0, shield_cost: 2.0,
+        turns: 150000.0, acc: 150, dec: 250, wpn_cool: 2.5, egn_cool: 7.0,
+        max_etemp: 100_000.0, max_wtemp: 1100.0, mass: 2000.0, tract_range: 1.0, tract_str: 3000.0,
+    },
+    ShipStats {
+        name: "Delphic sphere", abbr: "SP", max_speed: 0, max_shield: 0.0, max_damage: 350.0,
+        max_fuel: 1_000_000.0, max_armies: 0, torp_damage: 0.0, torp_speed: 10.0, torp_fuse: 40,
+        torp_cost: 7.0 * 0.0, phaser_damage: 0.0, phaser_cost: 7.0 * 0.0,
+        plasma_damage: 0.0, plasma_speed: 0.0, plasma_fuse: 0, plasma_cost: 0.0,
+        recharge: 50.0, repair: 100.0, warp_cost: 2.0, cloak_cost: 20.0, shield_cost: 2.0,
+        turns: 100000.0, acc: 150, dec: 250, wpn_cool: 2.5, egn_cool: 7.0,
+        max_etemp: 100_000.0, max_wtemp: 1100.0, mass: 500000.0, tract_range: 1.0, tract_str: 3000.0,
     },
 ];
 

@@ -96,6 +96,8 @@ pub mod pf {
     pub const TRAPPED: u32 = 262144;
     /// Superzapper ready (trapped, and not used yet).
     pub const ZAPPER: u32 = 524288;
+    /// Infected with nanites.
+    pub const NANITES: u32 = 1048576;
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -352,6 +354,29 @@ pub struct LeaderInfo {
     pub points: f32,
 }
 
+/// A patch of space an alien incursion has marked out.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ZoneKind {
+    /// Armus: the oily slick (grows when shot).
+    Slick,
+    /// The Metrons' sealed arena.
+    Arena,
+    /// One of Species 10-C's hyperfield beacons (unmanned).
+    Beacon,
+    /// A hyperfield beacon with a ship holding it.
+    BeaconLit,
+    /// The Caretaker's displacement wave, rippling out.
+    Displacement,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct ZoneInfo {
+    pub kind: ZoneKind,
+    pub x: i32,
+    pub y: i32,
+    pub r: i32,
+}
+
 /// Armies dropped by a destroyed Ferengi marauder, free for anyone to pick up.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct LootInfo {
@@ -417,6 +442,8 @@ pub struct Frame {
     pub leaders: Vec<LeaderInfo>,
     /// The Tempest's web, while it's in the galaxy.
     pub tempest: Option<TempestInfo>,
+    /// Patches of space marked out by alien incursions.
+    pub zones: Vec<ZoneInfo>,
     /// Teams that are currently allowed to be joined.
     pub open_teams: Vec<Team>,
     /// Planets held by Fed, Rom, Kli, Ori (public knowledge, like the team window).
