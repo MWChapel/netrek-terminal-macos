@@ -33,6 +33,8 @@ pub enum ClientMsg {
     Tractor { target: Option<u8>, pressor: bool },
     DetEnemy,
     DetOwn,
+    /// Toggle overwatch: fire automatically at enemies that come into range.
+    Overwatch,
     LockPlanet(u8),
     LockPlayer(u8),
     Refit(ShipType),
@@ -82,6 +84,8 @@ pub mod pf {
     pub const TRIBBLES: u16 = 8192;
     /// Hidden from sensors (nebula or ion storm) — only set on your own ship.
     pub const HIDDEN: u16 = 16384;
+    /// Overwatch is on: firing automatically at enemies in range.
+    pub const OVERWATCH: u16 = 32768;
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

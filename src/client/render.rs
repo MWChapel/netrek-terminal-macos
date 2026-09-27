@@ -705,6 +705,7 @@ impl App {
             (pf::BEAMDOWN, "BEAM-DOWN"),
             (pf::TRACTOR, "TRACTOR"),
             (pf::PRESSOR, "PRESSOR"),
+            (pf::OVERWATCH, "OVERWATCH"),
             (pf::HUNTED, "HUNTED"),
             (pf::TRIBBLES, "TRIBBLES"),
         ] {
@@ -1064,6 +1065,7 @@ pub(super) const HELP: &[(&str, &str)] = &[
     ("R", "repair mode (stop, shields down, repair faster)"),
     ("T / y", "tractor / pressor beam on the ship nearest the pointer"),
     ("d / D", "detonate nearby enemy torps / your own torps"),
+    ("w", "overwatch: auto-fire at any enemy that comes into weapons range"),
     ("r", "refit to another ship (orbiting your home planet)"),
     ("i", "info on the thing nearest the pointer"),
     ("m", "send a message (then A, T, F/R/K/O or a player slot)"),

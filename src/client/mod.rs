@@ -896,6 +896,7 @@ impl App {
             'x' => self.cmd(ClientMsg::BeamDown),
             'R' => self.cmd(ClientMsg::Repair),
             'd' => self.cmd(ClientMsg::DetEnemy),
+            'w' => self.cmd(ClientMsg::Overwatch),
             'D' => self.cmd(ClientMsg::DetOwn),
             'T' | 'y' => {
                 let pressor = c == 'y';

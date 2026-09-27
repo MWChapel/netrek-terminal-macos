@@ -288,11 +288,28 @@ map. With no mouse, they fire along your current heading.
 | `s` or `u` | Shields up / down |
 | `c` | Cloak on / off (drains fuel; you can't fire while cloaked) |
 | `d` | Detonate enemy torpedoes near you (costs fuel) |
+| `w` | **Overwatch** on / off: automatically fire at the nearest enemy that comes into weapons range (also `/overwatch`) |
 | `D` | Detonate your own torpedoes |
 | `T` | Tractor beam on the ship nearest the pointer (again to release) |
 | `y` | Pressor beam on the ship nearest the pointer (again to release) |
 | `R` | Repair mode: stop, drop shields, repair faster |
 
+
+**Overwatch** (`w`) turns your ship into a sentry. While it's on, the status line shows
+**OVERWATCH** (vector mode: the orange **OVWT** lamp), and every enemy that comes into
+range draws fire from you. It picks the nearest enemy you can see, fires phasers when the
+enemy is close, and fires torpedoes aimed ahead of it at longer range, about two a second.
+Against Species 8472 it fires plasma, if you have it. You still steer.
+
+It holds fire:
+- at allies, at ships you can't see (cloaked or hidden in a nebula), and at targets
+  weapons can't hurt (Q, V'Ger, the whale probe)
+- while you're cloaked or in repair mode
+- when your fuel is below 25% or your weapons are running hot, so it never leaves you
+  stranded
+
+It stays on through deaths until you switch it off. Overwatch works on any server
+(protocol version 6).
 ### Planets and armies
 
 | Key | Action |

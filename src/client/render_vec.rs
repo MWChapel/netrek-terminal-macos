@@ -543,8 +543,9 @@ impl App {
         let label_col = rgb(0xa0a8b8);
 
         // Row 1: status lamps, lit when active.
-        let lamps: [(&str, bool, Rgb); 12] = [
+        let lamps: [(&str, bool, Rgb); 13] = [
             ("SHLD", me.flags & pf::SHIELD != 0, rgb(0x40a0ff)),
+            ("OVWT", me.flags & pf::OVERWATCH != 0, rgb(0xff8040)),
             ("CLOAK", me.flags & pf::CLOAK != 0, rgb(0xc070ff)),
             ("REPAIR", me.flags & pf::REPAIR != 0, green),
             ("ORBIT", mi.orbiting.is_some(), rgb(0x40d0d0)),

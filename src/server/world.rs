@@ -89,6 +89,8 @@ pub struct Player {
     pub salvage: i32,
     /// Terrain: no wormhole transit until this tick.
     pub wormhole_until: u32,
+    /// Overwatch: fire automatically at enemies that come into range.
+    pub overwatch: bool,
 }
 
 impl Player {
@@ -151,6 +153,7 @@ impl Player {
             detected: false,
             salvage: 0,
             wormhole_until: 0,
+            overwatch: false,
         }
     }
 
@@ -689,6 +692,7 @@ impl World {
             }
             ClientMsg::Tractor { target, pressor } => self.tractor(i, target, pressor),
             ClientMsg::DetEnemy => self.det_enemy(i),
+            ClientMsg::Overwatch => self.toggle_overwatch(i),
             ClientMsg::DetOwn => {
                 for t in self.torps.iter_mut() {
                     if t.owner == id && t.explode == 0 && t.kind == TorpKind::Photon {
@@ -954,6 +958,83 @@ impl World {
         self.planets[k].known[team.idx()] = true;
         let id = p.id;
         self.warn(id, format!("Helmsman: Entering orbit around {}", name));
+    }
+
+    fn toggle_overwatch(&mut self, i: usize) {
+        let p = &mut self.players[i];
+        p.overwatch = !p.overwatch;
+        let text = if p.overwatch {
+            "Overwatch ON: firing at any enemy that comes into weapons range"
+        } else {
+            "Overwatch off"
+        };
+        self.warn(i as u8, text);
+    }
+
+    /// Overwatch: pick the nearest enemy inside weapons range and fire at it,
+    /// phasers when close, torpedoes (aimed ahead of it) further out. Holds
+    /// fire to keep a fuel and heat reserve, while cloaked, and while
+    /// repairing, so it never leaves the ship stranded.
+    fn overwatch_fire(&mut self, i: usize) {
+        let p = &self.players[i];
+        let s = p.stats();
+        let tick = self.tick;
+        if (p.cloaked && p.ship != ShipType::BirdOfPrey) || p.repair_mode || p.w_overheat > 0 {
+            return;
+        }
+        if p.fuel < s.max_fuel * 0.25 || p.wtemp > s.max_wtemp * 0.7 {
+            return;
+        }
+        let (x, y, team) = (p.x, p.y, p.team);
+        let phaser_range = PHASEDIST * s.phaser_damage * (1.0 + 0.1 * self.upgrade(team, UPGRADE_PHASERS)) / 100.0;
+        let torp_speed = s.torp_speed * WARP1;
+        let torp_range = torp_speed * s.torp_fuse as f64 * 0.8;
+        let reach = torp_range.max(phaser_range * 0.7);
+        let target = (0..MAXPLAYER)
+            .filter(|&j| j != i && self.at_war(i, j))
+            .filter(|&j| {
+                let q = &self.players[j];
+                let d2 = (q.x - x).powi(2) + (q.y - y).powi(2);
+                q.alive()
+                    && (!q.cloaked || q.detected)
+                    && (!q.hidden || d2 < super::terrain::SENSOR_RANGE.powi(2))
+                    && !matches!(q.ship, ShipType::QEntity | ShipType::VgerCloud | ShipType::WhaleProbe)
+                    && q.only_hurt_by.map_or(true, |t| t == team)
+                    && d2 < reach * reach
+            })
+            .min_by(|&a, &b| {
+                let da = (self.players[a].x - x).powi(2) + (self.players[a].y - y).powi(2);
+                let db = (self.players[b].x - x).powi(2) + (self.players[b].y - y).powi(2);
+                da.total_cmp(&db)
+            });
+        let Some(j) = target else { return };
+        let q = &self.players[j];
+        let d = ((q.x - x).powi(2) + (q.y - y).powi(2)).sqrt();
+        let straight = dir_to(x, y, q.x, q.y);
+        let (vx, vy) = dir_vec(q.dir);
+        let v = q.speed as f64 * WARP1;
+        let aim = super::bot::lead(x, y, q.x, q.y, vx * v, vy * v, torp_speed);
+        // Only plasma hurts Species 8472 bioships.
+        let bioship = q.ship == ShipType::Bioship;
+        let p = &self.players[i];
+        if bioship {
+            let can_plasma = s.plasma_damage > 0.0
+                && p.kills >= 2.0
+                && !self.torps.iter().any(|t| t.owner == i as u8 && t.kind == TorpKind::Plasma);
+            if can_plasma {
+                self.fire_torp(i, aim, TorpKind::Plasma);
+            }
+            return;
+        }
+        if d < phaser_range * 0.7 && p.phaser_timer == 0 && !p.in_storm && s.phaser_damage > 0.0 {
+            self.fire_phaser(i, straight);
+            return;
+        }
+        let out = self.torps.iter().filter(|t| t.owner == i as u8 && t.kind == TorpKind::Photon).count();
+        if d < torp_range && s.torp_damage > 0.0 && out < MAXTORP && (tick + i as u32) % 5 == 0 {
+            let spread = ((tick % 7) as f64 - 3.0) * 0.8;
+            self.fire_torp(i, (aim + spread).rem_euclid(256.0), TorpKind::Photon);
+        }
     }
 
     fn toggle_bomb(&mut self, i: usize) {
@@ -1319,6 +1400,11 @@ impl World {
                     }
                 }
                 _ => {}
+            }
+        }
+        for i in 0..MAXPLAYER {
+            if self.players[i].overwatch && self.players[i].alive() {
+                self.overwatch_fire(i);
             }
         }
         if self.features.terrain {
@@ -1813,9 +1899,10 @@ impl World {
                 let levels: Vec<String> = UPGRADES.iter().zip(s.levels).map(|((n, _), l)| format!("{} {}", n, l)).collect();
                 self.reply(id, format!("{} supplies. Upgrades: {}. Buy with /upgrade <name>.", s.stock, levels.join(", ")));
             }
+            "overwatch" | "ow" => self.toggle_overwatch(id as usize),
             "record" | "orders" | "order" => self.commands.push((id, verb)),
             "help" | "" => {
-                let mut cmds = vec!["/record", "/orders"];
+                let mut cmds = vec!["/overwatch", "/record", "/orders"];
                 if d {
                     cmds.extend(["/treaty <empire>", "/break", "/treaties"]);
                 }
@@ -2113,6 +2200,7 @@ impl World {
                 set(&mut flags, p.marked, pf::HUNTED);
                 set(&mut flags, p.tribbles, pf::TRIBBLES);
                 set(&mut flags, p.hidden && p.id == me, pf::HIDDEN);
+                set(&mut flags, p.overwatch && friendly, pf::OVERWATCH);
                 PlayerInfo {
                     id: p.id,
                     name: p.name.clone(),
@@ -2336,5 +2424,53 @@ mod tests {
         assert!(w.join(id, Team::Fed, ShipType::Starbase).is_err());
         w.players[id as usize].rank = Some(STARBASE_RANK);
         assert!(w.join(id, Team::Fed, ShipType::Starbase).is_ok());
+    }
+
+    /// Overwatch fires at enemies that come into range, and only them.
+    #[test]
+    fn overwatch_fires_at_enemies_in_range() {
+        let mut w = World::new();
+        w.features.diplomacy = true;
+        let kirk = pilot(&mut w, "Kirk", Team::Fed, 50_000.0, 50_000.0);
+        let tal = pilot(&mut w, "Tal", Team::Rom, 80_000.0, 50_000.0);
+        w.handle(kirk, ClientMsg::Overwatch);
+        assert!(w.players[kirk as usize].overwatch);
+        let run = |w: &mut World| {
+            for _ in 0..10 {
+                w.tick();
+            }
+        };
+        // Far away: holds fire.
+        run(&mut w);
+        assert!(w.torps.is_empty() && w.phasers.is_empty());
+        // In torpedo range: fires.
+        w.players[tal as usize].x = 56_000.0;
+        run(&mut w);
+        assert!(w.torps.iter().any(|t| t.owner == kirk), "no torpedoes");
+        // Close in: phasers.
+        w.torps.clear();
+        w.players[tal as usize].x = 52_500.0;
+        let mut phasered = false;
+        for _ in 0..10 {
+            w.tick();
+            phasered |= w.phasers.iter().any(|p| p.info.owner == kirk);
+        }
+        assert!(phasered, "no phasers at close range");
+        // Allies are left alone.
+        w.treaties.push((Team::Fed, Team::Rom));
+        w.torps.clear();
+        w.phasers.clear();
+        w.players[kirk as usize].phaser_timer = 0;
+        run(&mut w);
+        assert!(!w.torps.iter().any(|t| t.owner == kirk) && !w.phasers.iter().any(|p| p.info.owner == kirk));
+        // A low tank holds fire, keeping a reserve.
+        w.treaties.clear();
+        w.players[kirk as usize].fuel = 100.0;
+        w.torps.clear();
+        run(&mut w);
+        assert!(!w.torps.iter().any(|t| t.owner == kirk));
+        // And off again.
+        w.handle(kirk, ClientMsg::Message { to: MsgTarget::All, text: "/overwatch".into() });
+        assert!(!w.players[kirk as usize].overwatch);
     }
 }
