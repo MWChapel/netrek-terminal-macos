@@ -315,9 +315,18 @@ map. With no mouse, they fire along your current heading.
 
 **Overwatch** (`w`) turns your ship into a sentry. While it's on, the status line shows
 **OVERWATCH** (vector mode: the orange **OVWT** lamp), and every enemy that comes into
-range draws fire from you. It picks the nearest enemy you can see, fires phasers when the
-enemy is close, and fires torpedoes aimed ahead of it at longer range, about two a second.
-Against Species 8472 it fires plasma, if you have it. You still steer.
+range draws fire from you. It picks the nearest enemy you can see and reaches for **special
+weapons first**:
+1. Your heavy weapon (`e`), whenever it's ready: the isokinetic cannon out to 9,000, the
+   antiproton burst within 4,500, or the tricobalt device, but only at a safe 4,500 to
+   5,400 and never with a friendly ship near the target.
+2. A starbase's fighter wing (`j`), when an enemy comes within 15,000.
+3. Plasma, whenever your ship has it, you have the kills and none is already in flight.
+4. Otherwise phasers when the enemy is close, and torpedoes aimed ahead of it at longer
+   range, about two a second.
+
+Against Species 8472 it only fires plasma. You still steer, and the sensor and escape
+techs are left to you.
 
 It holds fire:
 - at allies, at ships you can't see (cloaked or hidden in a nebula), and at targets

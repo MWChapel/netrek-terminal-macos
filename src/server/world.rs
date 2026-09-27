@@ -1611,7 +1611,18 @@ impl World {
         let phaser_range = PHASEDIST * s.phaser_damage * (1.0 + 0.1 * self.upgrade(team, UPGRADE_PHASERS)) / 100.0;
         let torp_speed = s.torp_speed * WARP1;
         let torp_range = torp_speed * s.torp_fuse as f64 * 0.8;
-        let reach = torp_range.max(phaser_range * 0.7);
+        // Special weapons can reach further than the phasers and photons.
+        let p = &self.players[i];
+        let mut reach = torp_range.max(phaser_range * 0.7);
+        if s.plasma_damage > 0.0 {
+            reach = reach.max(s.plasma_speed * WARP1 * s.plasma_fuse as f64 * 0.8);
+        }
+        if p.techs.contains(&Tech::Isokinetic) && tick >= p.tech_ready[1] {
+            reach = reach.max(9000.0);
+        }
+        if p.techs.contains(&Tech::FighterWing) && tick >= p.tech_ready[2] {
+            reach = reach.max(15_000.0);
+        }
         let target = (0..MAXPLAYER)
             .filter(|&j| j != i && self.at_war(i, j))
             .filter(|&j| {
@@ -1636,18 +1647,30 @@ impl World {
         let (vx, vy) = dir_vec(q.dir);
         let v = q.speed as f64 * WARP1;
         let aim = super::bot::lead(x, y, q.x, q.y, vx * v, vy * v, torp_speed);
-        // Only plasma hurts Species 8472 bioships.
+        let (qx, qy) = (q.x, q.y);
         let bioship = q.ship == ShipType::Bioship;
-        let p = &self.players[i];
-        if bioship {
-            let can_plasma = s.plasma_damage > 0.0
-                && p.kills >= 2.0
-                && !self.torps.iter().any(|t| t.owner == i as u8 && t.kind == TorpKind::Plasma);
-            if can_plasma {
-                self.fire_torp(i, aim, TorpKind::Plasma);
-            }
+        // Special weapons go first, whenever they're ready and it makes sense.
+        if self.overwatch_special(i, j, d, straight, aim) {
             return;
         }
+        // Plasma next: the Warbird's needs one kill, everyone else's two.
+        let p = &self.players[i];
+        let plasma_range = s.plasma_speed * WARP1 * s.plasma_fuse as f64 * 0.8;
+        let need = if p.ship == ShipType::Warbird { 1.0 } else { 2.0 };
+        let can_plasma = s.plasma_damage > 0.0
+            && p.kills >= need
+            && p.fuel - s.plasma_cost >= s.max_fuel * 0.25
+            && !self.torps.iter().any(|t| t.owner == i as u8 && t.kind == TorpKind::Plasma);
+        let plasma_aim = dir_to(x, y, qx, qy);
+        if can_plasma && d < plasma_range {
+            self.fire_torp(i, plasma_aim, TorpKind::Plasma);
+            return;
+        }
+        // Only plasma hurts Species 8472 bioships; nothing else is worth firing.
+        if bioship {
+            return;
+        }
+        let p = &self.players[i];
         if d < phaser_range * 0.7 && p.phaser_timer == 0 && !p.in_storm && s.phaser_damage > 0.0 {
             self.fire_phaser(i, straight);
             return;
@@ -1657,6 +1680,48 @@ impl World {
             let spread = ((tick % 7) as f64 - 3.0) * 0.8;
             self.fire_torp(i, (aim + spread).rem_euclid(256.0), TorpKind::Photon);
         }
+    }
+
+    /// Overwatch: fire a special weapon at target `j` (distance `d`) if one
+    /// is ready and worth using. Returns whether it fired.
+    fn overwatch_special(&mut self, i: usize, j: usize, d: f64, straight: f64, aim: f64) -> bool {
+        let tick = self.tick;
+        let p = &self.players[i];
+        let s = p.stats();
+        let reserve = s.max_fuel * 0.25;
+        // Starbase fighters, when an enemy comes near the base.
+        if p.ship == ShipType::Starbase && p.techs.contains(&Tech::FighterWing) && tick >= p.tech_ready[2] && d < 15_000.0 {
+            self.use_tech(i, 2, straight);
+            return self.players[i].tech_ready[2] > tick;
+        }
+        if p.ship == ShipType::Starbase || tick < p.tech_ready[1] {
+            return false;
+        }
+        let Some(tech) = p.techs.iter().copied().find(|t| t.slot() == Some(1)) else { return false };
+        let (tx, ty) = (self.players[j].x, self.players[j].y);
+        let team = p.team;
+        let usable = match tech {
+            Tech::Isokinetic => d < 9000.0 && p.fuel - 1500.0 >= reserve,
+            Tech::Antiproton => d < 4500.0 && p.fuel - 2000.0 >= reserve,
+            Tech::Tricobalt => {
+                // Its blast hurts everyone: only at a safe distance, and never
+                // with a friendly ship near the target.
+                let friends_near = self.players.iter().any(|q| {
+                    q.alive()
+                        && q.faction.is_none()
+                        && (q.team == team || self.allied(q.team, team))
+                        && (q.x - tx).powi(2) + (q.y - ty).powi(2) < 4000.0f64.powi(2)
+                });
+                (4500.0..5400.0).contains(&d) && !friends_near && p.fuel - TRICOBALT_COST >= reserve
+            }
+            _ => false,
+        };
+        if !usable {
+            return false;
+        }
+        let dir = if tech == Tech::Tricobalt { aim } else { straight };
+        self.use_tech(i, 1, dir);
+        self.players[i].tech_ready[1] > tick
     }
 
     fn toggle_bomb(&mut self, i: usize) {
@@ -3851,5 +3916,58 @@ mod tests {
             assert_eq!(w.join(id, Team::Fed, ShipType::IconianShip).is_ok(), rank >= RELIC_RANK, "relic at rank {}", rank);
             w.remove_player(id);
         }
+    }
+
+    /// Overwatch reaches for special weapons first.
+    #[test]
+    fn overwatch_fires_special_weapons_first() {
+        let fire = |techs: &[Tech], range: f64| {
+            let mut w = World::new();
+            let me = officer(&mut w, Team::Fed, 50_000.0, 50_000.0, techs);
+            let tal = pilot(&mut w, "Tal", Team::Rom, 50_000.0 + range, 50_000.0) as usize;
+            w.players[me].overwatch = true;
+            for _ in 0..3 {
+                w.tick();
+            }
+            (w, me, tal)
+        };
+        // Isokinetic cannon at 8,000: out of phaser range, but not its range.
+        let (w, me, tal) = fire(&[Tech::Isokinetic], 8000.0);
+        assert!(w.players[me].tech_ready[1] > 0, "fired the cannon");
+        assert_eq!(w.players[tal].damage, 120.0, "straight through the shields");
+        // Antiproton burst up close.
+        let (w, me, _) = fire(&[Tech::Antiproton], 3000.0);
+        assert!(w.players[me].tech_ready[1] > 0);
+        // Tricobalt: fired at a safe distance...
+        let (w, me, _) = fire(&[Tech::Tricobalt], 5000.0);
+        assert!(w.torps.iter().any(|t| t.owner == me as u8 && t.kind == TorpKind::Tricobalt));
+        // ...but never with a friend near the target.
+        let mut w = World::new();
+        let me = officer(&mut w, Team::Fed, 50_000.0, 50_000.0, &[Tech::Tricobalt]);
+        pilot(&mut w, "Tal", Team::Rom, 55_000.0, 50_000.0);
+        pilot(&mut w, "Friend", Team::Fed, 56_000.0, 51_000.0);
+        w.players[me].overwatch = true;
+        for _ in 0..3 {
+            w.tick();
+        }
+        assert!(!w.torps.iter().any(|t| t.kind == TorpKind::Tricobalt), "held fire");
+        // Plasma before photons, when the ship has it and the kills.
+        let (mut w, me, _) = fire(&[], 50_000.0);
+        let tal = pilot(&mut w, "Kor", Team::Rom, 56_000.0, 50_000.0);
+        let _ = tal;
+        w.players[me].kills = 2.0;
+        for _ in 0..3 {
+            w.tick();
+        }
+        assert!(w.torps.iter().any(|t| t.owner == me as u8 && t.kind == TorpKind::Plasma), "plasma first");
+        // A starbase launches its fighters.
+        let mut w = World::new();
+        let sb = officer(&mut w, Team::Fed, 50_000.0, 50_000.0, &[Tech::FighterWing]);
+        w.players[sb].ship = ShipType::Starbase;
+        w.players[sb].fuel = ShipType::Starbase.stats().max_fuel;
+        pilot(&mut w, "Tal", Team::Rom, 60_000.0, 50_000.0);
+        w.players[sb].overwatch = true;
+        w.tick();
+        assert!(w.players.iter().any(|p| p.fighter_of.is_some()), "fighters out");
     }
 }
