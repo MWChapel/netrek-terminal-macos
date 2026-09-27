@@ -603,17 +603,10 @@ impl App {
         let mi = &f.me_info;
         let pad = 6.0;
         let (w, h) = (pw as f32, ph as f32);
-        // Scale text and rows to fill the panel: lamps + bar rows + status line.
-        let mut cols = if w > 900.0 { 3 } else if w > 380.0 { 2 } else { 1 };
-        let mut fs;
-        loop {
-            let per_col = (6 + cols - 1) / cols;
-            fs = ((h - pad) / ((per_col as f32 + 2.0) * 1.75)).clamp(8.0, 22.0);
-            if fs >= 10.0 || cols == 3 {
-                break;
-            }
-            cols += 1;
-        }
+        // One fixed text size (the message panel's), laid out from the top:
+        // a wider panel spreads out, it never blows up.
+        let (fs, _) = self.panel_font();
+        let cols = if w > 900.0 { 3 } else if w > 300.0 { 2 } else { 1 };
         let rh = (fs * 1.75).round();
         let (green, yellow, red) = (rgb(0x30d050), rgb(0xf0d030), rgb(0xf03030));
         let label_col = rgb(0xa0a8b8);
@@ -638,12 +631,14 @@ impl App {
         ];
         let lfs = fs * 0.78;
         let mut x = pad;
-        let ly = pad;
+        let mut ly = pad;
         let lh = rh - 6.0;
+        // Lamps flow onto a second row rather than dropping off the end.
         for (name, on, col) in lamps {
             let lw = tr.width(name, lfs) + 12.0;
             if x + lw > w - pad {
-                break;
+                x = pad;
+                ly += lh + 4.0;
             }
             if on {
                 c.glow(x + lw / 2.0, ly + lh / 2.0, lw * 0.7, col, 0.35);
@@ -670,7 +665,7 @@ impl App {
             ("Wtp", temp_frac(mi.wtemp), if whot { "OVERHEAT".into() } else { format!("{}%", mi.wtemp) }, &down, false),
             ("Etp", temp_frac(mi.etemp), if ehot { "OVERHEAT".into() } else { format!("{}%", mi.etemp) }, &down, false),
         ];
-        let top = ly + rh + 2.0;
+        let top = ly + lh + 8.0;
         let per_col = (6 + cols - 1) / cols;
         let col_w = (w - pad * 2.0 - (cols - 1) as f32 * 14.0) / cols as f32;
         let label_w = tr.width("Spd ", fs);
@@ -714,13 +709,14 @@ impl App {
         let sy = top + per_col as f32 * rh + rh * 0.62;
         if sy < h {
             let mut status = format!(
-                "{} {}  kills {:.2}  armies {}/{}  torps {}/8",
+                "{} {}  kills {:.2}  armies {}/{}  torps {}/{}",
                 me.ship.stats().abbr,
                 me.name,
                 mi.kills,
                 mi.armies,
                 mi.max_armies_now,
-                mi.torps_out
+                mi.torps_out,
+                me.ship.max_torps()
             );
             if let Some(k) = mi.orbiting {
                 status += &format!("  orbiting {}", PLANETS[k as usize].name);
@@ -728,11 +724,50 @@ impl App {
             if let Some(l) = &mi.lock {
                 status += &format!("  lock {}", l);
             }
-            c.text(tr, pad, sy, &status, fs * 0.9, team_rgb(me.team));
+            // Wrapped if the panel is narrow, with the clock on the right.
             let secs = f.tick / UPS as u32;
             let clock = format!("{:02}:{:02}:{:02}", secs / 3600, secs / 60 % 60, secs % 60);
-            if tr.width(&status, fs * 0.9) + tr.width(&clock, fs * 0.9) + pad * 3.0 < w {
-                c.text_right(tr, w - pad, sy, &clock, fs * 0.9, label_col);
+            let sfs = fs * 0.9;
+            let clock_w = tr.width(&clock, sfs) + pad * 2.0;
+            let status_lines = wrap(tr, &status, sfs, w - 2.0 * pad - clock_w);
+            for (k, line) in status_lines.iter().enumerate() {
+                c.text(tr, pad, sy + k as f32 * fs * 1.3, line, sfs, team_rgb(me.team));
+            }
+            c.text_right(tr, w - pad, sy, &clock, sfs, label_col);
+            // Special or relic ship and advanced tech, under a divider.
+            let tech = self.tech_lines();
+            let ship = self.ship_lines();
+            if self.tech_in_controls && (!tech.is_empty() || !ship.is_empty()) {
+                let lh = (fs * 1.45).round();
+                let mut ty = sy + status_lines.len().max(1) as f32 * fs * 1.3;
+                c.line(pad, ty - fs * 0.5, w - pad, ty - fs * 0.5, 1.0, rgb(0x3a404c), 1.0, 0.0);
+                ty += fs * 0.6;
+                for (k, (text, col)) in ship.iter().enumerate() {
+                    let indent = if k > 0 { fs } else { 0.0 };
+                    for part in wrap(tr, text, sfs, w - 2.0 * pad - indent) {
+                        if ty < h - 2.0 {
+                            c.text(tr, pad + indent, ty, &part, sfs, *col);
+                        }
+                        ty += lh;
+                    }
+                }
+                if tech.is_empty() {
+                    ty = h;
+                }
+                if ty < h - 2.0 {
+                    c.text(tr, pad, ty, "Advanced tech", sfs, super::render::TECH_COLOR);
+                }
+                // Two columns when the panel is wide enough for them.
+                let widest = tech.iter().map(|(t, _)| tr.width(t, sfs)).fold(0.0, f32::max);
+                let cols = if w - 2.0 * pad >= 2.0 * (widest + 3.0 * fs) { 2 } else { 1 };
+                let rows = tech.len().div_ceil(cols);
+                for (k, (text, col)) in tech.into_iter().enumerate() {
+                    let (ci, ri) = (k / rows, k % rows);
+                    let y = ty + (ri + 1) as f32 * lh;
+                    if y <= h - 2.0 {
+                        c.text(tr, pad + fs + ci as f32 * (w - 2.0 * pad) / 2.0, y, &text, sfs, col);
+                    }
+                }
             }
         }
         c
@@ -919,12 +954,18 @@ impl App {
         let x_tag = pad + lh * 1.1;
         let x_ty = x_tag + cw * 5.0;
         let x_name = x_ty + cw * 3.5;
-        // With ranks on (server --ranks), a Rank column after the name.
-        // Name (16), gap, Rank (4), gap, then Kills right-aligned (5 wide).
-        let ranks = f.players.iter().any(|p| p.rank.is_some()) && x_name + cw * 27.0 <= w - cw * 14.0;
-        let x_rank = x_name + cw * 16.5;
-        let x_kills = (x_name + cw * if ranks { 27.0 } else { 18.0 }).min(w - cw * 14.0);
-        let x_arm = x_kills + cw * 4.0;
+        // Columns after the name, in character widths: Rank (with ranks on;
+        // always shown), Kills (right-aligned), Arm, and the robot/convoy
+        // note, which is the first thing dropped when space is short. The
+        // name gets what's left, up to 16 characters.
+        let ranks = f.players.iter().any(|p| p.rank.is_some());
+        let (rank_w, kills_w, arm_w, status_w) = (if ranks { 5.5 } else { 0.0 }, 6.0, 4.0, 7.5);
+        let free = (w - pad - x_name) / cw - rank_w - kills_w - arm_w - 1.0;
+        let show_status = free - status_w >= 10.0;
+        let name_room = (if show_status { free - status_w } else { free }).clamp(4.0, 16.0);
+        let x_rank = x_name + cw * (name_room + 1.0);
+        let x_kills = x_rank + cw * (rank_w + kills_w - 0.5);
+        let x_arm = x_kills + cw * arm_w;
         let x_status = x_arm + cw * 1.5;
         let head = rgb(0xe8ecf2);
         let yb = pad + lh * 0.7;
@@ -955,7 +996,9 @@ impl App {
                 c.round_rect(pad - 2.0, top, w - 2.0 * pad + 4.0, lh, 3.0, base_col, 0.14, None);
             }
             self.ship_icon(&mut c, x_icon, mid, lh * 0.4, p, col);
-            let name: String = p.name.chars().take(16).collect();
+            // Names get whatever room there is before the Kills column.
+            let room = name_room as usize;
+            let name: String = p.name.chars().take(room).collect();
             if let (true, Some(r)) = (ranks, p.rank) {
                 c.text(tr, x_rank, y, RANKS[r as usize].1, fs, col);
             }
@@ -977,7 +1020,7 @@ impl App {
             } else {
                 ""
             };
-            if x_status + cw * 5.0 < w {
+            if show_status {
                 c.text(tr, x_status, y, status, fs * 0.9, scale(col, 0.75));
             }
         }

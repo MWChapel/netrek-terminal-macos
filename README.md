@@ -3,9 +3,10 @@
 A graphical client and game server for **Netrek**, the 1988 multiplayer space battle game,
 that runs entirely inside a terminal window on macOS.
 
-![A four-empire game in vector mode: tactical view on the left, galactic map in the middle, player list on the right, ship controls and messages below](screen.png)
+![A game in vector mode: the tactical view with terrain (asteroid fields, a slipstream, a comet) on the left, the galactic map in the middle, the player list with ranks on the right, and below them the ship controls with a relic ship and its advanced tech, and the message panel with orders and supplies](screeNew1.png)
 
-- **Classic layout:** tactical and galactic maps side by side as two squares, with the
+- **Classic layout:** tactical and galactic maps side by side (square, or taller on a tall
+  window), with the
   dashboard, player list and message window underneath, like the original X11 client.
 - **Real graphics in the terminal:** vector-style maps and control panel drawn with
   [tiny-skia](https://github.com/linebender/tiny-skia) and sent as SIXEL images. On
@@ -260,8 +261,15 @@ look, run in iTerm2 instead.
   tractor, pressor, lock), gauges with current/max values, and a status line with kills,
   armies carried, torpedoes out, orbit/lock target and the game clock.
 - **Player list:** shows in a column beside the maps when the window is wide enough,
-  otherwise under the controls. Robots are marked, and your own line is bold. With a lot
+  otherwise under the controls. With ranks on there's always a Rank column. Names get
+  the room that's left, and the robot/convoy note is dropped first when space is short. Robots are marked, and your own line is bold. With a lot
   of players the rows close up so everyone fits.
+- **Panels below the maps:** the controls and message panels keep a fixed height (room
+  for the talk line, orders, supplies and a handful of messages, with the tech list on the
+  left) and their text stays the same size whatever the window size. The maps take all
+  the remaining height: on a tall window they grow taller than they are wide (up to 1.6
+  times), so the tactical view shows more of space above and below you and the galaxy map
+  stretches to match. Nothing is left empty at the bottom.
 - **Messages:** the panel under the galactic map runs the full width of the window. It
   holds warnings, the talk line, any orders, alliance, supply and tech lines, and the
   message log. Long lines **wrap** instead of being cut off, and messages can be up to 160
@@ -767,8 +775,7 @@ tab-separated text.
 With `--ranks`, officers from **Captain** up get advanced tech. Each rank from Captain to
 Admiral has three techs, and your ship is fitted with **one from every rank you've
 reached**, drawn at random each time you launch. So a Captain has one tech and an Admiral
-has five. You're told what's aboard when you launch. `/tech` repeats it, and the line
-above the message log shows it along with cooldowns and armor. Robots never get tech.
+has five. You're told what's aboard when you launch. `/tech` repeats it. The controls panel lists each tech on its own line, with the key, whether it's ready (or the seconds until it is) and armor left. On a narrow window, where the player list sits under the controls, it's one line above the message log instead. Robots never get tech.
 Turn it off with `--no-rank-tech`.
 
 | Rank | Role | The three techs |
@@ -827,11 +834,12 @@ launch, and it's drawn in your empire's colours.
 | **Sheliak colony ship** | 8 | 160 | 150 | While it's in orbit around one of your planets, that planet can't be bombed |
 | **Kelvan ship** | 9 | 120 | 120 | Neural field: enemy ships within 2,500 can't fire torpedoes (phasers still work) |
 | **Husnock warship** | 8 | 140 | 150 | Planet cracker: bombs 3 armies at a time, and can bomb a planet down to 1 army instead of 4 |
-| **Suliban cell ship** | 11 | 70 | 80 | Enhanced reflexes: about 35% of shots and hits against it miss entirely |
+| **Suliban cell ship** (`SU`) | 11 | 70 | 80 | Enhanced reflexes: about 35% of shots and hits against it miss entirely |
 | **Excalbian shapeshifter** | 9 | 110 | 120 | To enemy pilots more than 3,000 away it looks like one of their own cruisers. Up close, the disguise fails |
 
 Special and relic ships get your advanced tech like any other hull. Robots never fly
-them.
+them. While you fly one, the controls panel names it and says what it does, above your
+advanced tech.
 
 ### Orders
 

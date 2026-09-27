@@ -871,7 +871,7 @@ pub static SHIPS: [ShipStats; 47] = [
         max_etemp: 1200.0, max_wtemp: 1100.0, mass: 2500.0, tract_range: 1.0, tract_str: 3000.0,
     },
     ShipStats {
-        name: "Suliban cell ship", abbr: "SC", max_speed: 11, max_shield: 70.0, max_damage: 80.0,
+        name: "Suliban cell ship", abbr: "SU", max_speed: 11, max_shield: 70.0, max_damage: 80.0,
         max_fuel: 9000.0, max_armies: 4, torp_damage: 30.0, torp_speed: 15.0, torp_fuse: 30,
         torp_cost: 7.0 * 30.0, phaser_damage: 80.0, phaser_cost: 7.0 * 80.0,
         plasma_damage: 0.0, plasma_speed: 0.0, plasma_fuse: 0, plasma_cost: 0.0,

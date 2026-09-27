@@ -207,20 +207,50 @@ impl App {
         if !info.is_empty() {
             out.push((info.join("  •  "), [140.0, 210.0, 255.0]));
         }
-        if !mi.techs.is_empty() {
-            let v: Vec<String> = mi
-                .techs
-                .iter()
-                .map(|&(t, left)| match t.key() {
-                    Some(k) if left == 0 => format!("[{}] {} ready", k, t.name()),
-                    Some(k) => format!("[{}] {} {}s", k, t.name(), left),
-                    None if t == Tech::AblativeArmor => format!("{} {}", t.name(), mi.armor),
-                    None => t.name().to_string(),
-                })
-                .collect();
-            out.push((format!("Tech: {}", v.join(" • ")), [200.0, 170.0, 255.0]));
+        if !self.tech_in_controls {
+            let ship = self.ship_lines();
+            if let [(name, _), (what, _)] = ship.as_slice() {
+                out.push((format!("{} ({})", name, what), SHIP_COLOR));
+            }
+        }
+        if !mi.techs.is_empty() && !self.tech_in_controls {
+            let v: Vec<String> = self.tech_lines().into_iter().map(|(t, _)| t).collect();
+            out.push((format!("Tech: {}", v.join(" • ")), TECH_COLOR));
         }
         out
+    }
+
+    /// Your special or relic ship, if you're flying one: its name, then what
+    /// makes it special.
+    pub(super) fn ship_lines(&self) -> Vec<(String, [f32; 3])> {
+        let Some(me) = self.me() else { return Vec::new() };
+        let kind = if me.ship.is_relic() {
+            "Relic ship"
+        } else if me.ship.is_special() {
+            "Special ship"
+        } else {
+            return Vec::new();
+        };
+        vec![
+            (format!("{}: {}", kind, me.ship.stats().name), SHIP_COLOR),
+            (me.ship.trait_text().to_string(), [185.0, 190.0, 200.0]),
+        ]
+    }
+
+    /// Your advanced tech, one line each: the key for active ones, and
+    /// whether it's ready (or seconds to go); armor left for ablative armor.
+    pub(super) fn tech_lines(&self) -> Vec<(String, [f32; 3])> {
+        let Some(f) = self.frame.as_ref() else { return Vec::new() };
+        let mi = &f.me_info;
+        mi.techs
+            .iter()
+            .map(|&(t, left)| match t.key() {
+                Some(k) if left == 0 => (format!("[{}] {} ready", k, t.name()), [140.0, 230.0, 150.0]),
+                Some(k) => (format!("[{}] {} {}s", k, t.name(), left), [150.0, 150.0, 165.0]),
+                None if t == Tech::AblativeArmor => (format!("{} {}/{}", t.name(), mi.armor, 40), TECH_COLOR),
+                None => (t.name().to_string(), TECH_COLOR),
+            })
+            .collect()
     }
 
     fn draw_title(&self, scr: &mut Screen) {
@@ -251,27 +281,35 @@ impl App {
         scr.text(right - 9, 0, "planets:", DIM, false);
     }
 
-    /// Classic Netrek layout: tactical and galactic as two equal squares across
+    /// Classic Netrek layout: tactical and galactic as two equal maps across
     /// the top; gauges below the tactical, warnings, talk line and messages
     /// below the galactic, and the player list in a side column when the
-    /// window is wide enough. Sized in real pixels so the maps stay square.
+    /// window is wide enough. Sized in real pixels so shapes stay true.
     fn draw_game(&mut self, scr: &mut Screen) {
         use super::Gfx;
         let (w, h) = (scr.w as i32, scr.h as i32);
         let (cw, ch) = self.cell_px;
-        let bottom_min = 9;
-        let max_h = ((h - bottom_min - 2).max(6)) as f64 * ch;
+        // The controls and messages keep a fixed height; only the maps grow
+        // (or shrink) with the window.
+        let max_h = ((h - BOTTOM_ROWS - 2).max(6)) as f64 * ch;
         let full = max_h.min(((w - 4) / 2) as f64 * cw);
-        // Prefer keeping a player-list column if the maps shrink only a little.
-        let with_list = max_h.min(((w - 4 - 34) / 2) as f64 * cw);
-        let side_px = if with_list >= full * 0.8 { with_list } else { full };
+        // Prefer a player-list column (wide enough for names and ranks) if the
+        // maps only shrink a little for it.
+        let with_list = max_h.min(((w - 4 - LIST_COLS) / 2) as f64 * cw);
+        let side_px = if with_list >= full * 0.75 { with_list } else { full };
         let sc = ((side_px / cw).floor() as i32).max(8);
-        let sr = ((side_px / ch).floor() as i32).max(4);
+        // The maps are as wide as fits; their height takes whatever the
+        // panels below don't need (up to 1.6x their width), so a tall window
+        // shows more of space instead of leaving the panels half empty.
+        let square = ((side_px / ch).floor() as i32).max(4);
+        let tallest = ((side_px * 1.6 / ch).floor() as i32).max(square);
+        let sr = (h - BOTTOM_ROWS - 2).clamp(square, tallest);
         let tac = Rect { x: 1, y: 1, w: sc, h: sr };
         let gx = sc + 2;
         let gal = Rect { x: gx + 1, y: 1, w: sc, h: sr };
         let maps_right = 2 * sc + 4;
         let side_col = w - maps_right >= 24;
+        self.tech_in_controls = side_col;
 
         let f = self.frame.as_ref().unwrap();
         let me = self.me().cloned();
@@ -338,6 +376,9 @@ impl App {
         }
 
         // Bottom left: gauges (and the player list if there's no side column).
+        // The panels always have room for their contents; any height the
+        // (square) maps can't use goes to them too, as more message history,
+        // with the text staying the same size.
         let by = sr + 2;
         let bh = h - by;
         scr.frame(0, by, sc + 2, bh, "", Color::White);
@@ -345,7 +386,7 @@ impl App {
         let list_top;
         if vector {
             // Controls drawn as a vector image; leave room for the list if needed.
-            let dash_rows = if side_col { inner.h } else { inner.h.min(((5.5 * 1.75 * 0.62 * ch) / ch).ceil() as i32 + 1) };
+            let dash_rows = if side_col { inner.h } else { inner.h.min(DASH_ROWS) };
             let img = self.draw_dashboard_vec((inner.w as f64 * cw) as i32, (dash_rows as f64 * ch) as i32);
             self.images.push(super::Image { x: inner.x, y: inner.y, slot: 2, data: super::sixel::encode_canvas(&img) });
             scr.masks.push((inner.x, inner.y, inner.w, dash_rows));
@@ -767,7 +808,39 @@ impl App {
                 line += name;
             }
         }
-        scr.text_clip(r.x, r.y + 3, &line, Color::Grey, false, maxx);
+        let status = wrap_chars(&line, r.w.max(1) as usize);
+        for (k, part) in status.iter().enumerate() {
+            if r.y + 3 + (k as i32) < r.y + r.h {
+                scr.text_clip(r.x, r.y + 3 + k as i32, part, Color::Grey, false, maxx);
+            }
+        }
+        // Special or relic ship, then advanced tech, below the status line.
+        if self.tech_in_controls {
+            let mut ty = r.y + 4 + status.len() as i32;
+            for (k, (text, col)) in self.ship_lines().into_iter().enumerate() {
+                for part in wrap_chars(&text, (r.w - 1).max(1) as usize) {
+                    if ty < r.y + r.h {
+                        scr.text_clip(r.x + usize::from(k > 0) as i32, ty, &part, super::palette::to_color(col, self.truecolor), k == 0, maxx);
+                    }
+                    ty += 1;
+                }
+            }
+            let tech = self.tech_lines();
+            if !tech.is_empty() && ty < r.y + r.h {
+                scr.text_clip(r.x, ty, "Advanced tech", super::palette::to_color(TECH_COLOR, self.truecolor), true, maxx);
+                ty += 1;
+            }
+            // Two columns when the panel is wide enough for them.
+            let widest = tech.iter().map(|(t, _)| t.chars().count() as i32).max().unwrap_or(0);
+            let cols = if r.w >= 2 * (widest + 3) { 2 } else { 1 };
+            let rows = tech.len().div_ceil(cols as usize) as i32;
+            for (k, (text, col)) in tech.into_iter().enumerate() {
+                let (c, row) = (k as i32 / rows, k as i32 % rows);
+                if ty + row < r.y + r.h {
+                    scr.text_clip(r.x + 1 + c * (r.w / 2), ty + row, &text, super::palette::to_color(col, self.truecolor), false, maxx);
+                }
+            }
+        }
         let secs = f.tick / UPS as u32;
         let clock = format!("{:02}:{:02}:{:02}", secs / 3600, secs / 60 % 60, secs % 60);
         let cx = r.x + 5 * (gw + 1);
@@ -836,16 +909,20 @@ impl App {
                 _ => "dead",
             };
             let rank = rank_col(p.rank.map_or("", |r| RANKS[r as usize].1));
-            let line = format!(
-                "{:<4}{:<3}{:<16.16}{}{:>7.2}{:>6}  {}",
+            let mut line = format!(
+                "{:<4}{:<3}{:<16.16}{}{:>7.2}{:>6}",
                 super::palette::callsign(p),
                 p.ship.stats().abbr,
                 p.name,
                 rank,
                 p.kills,
-                arm,
-                status
+                arm
             );
+            // The robot/convoy note only if it fits whole.
+            if !status.is_empty() && line.chars().count() + 2 + status.len() <= r.w as usize {
+                line += "  ";
+                line += status;
+            }
             let col = if p.state == PState::Alive { self.player_color(p) } else { DIM };
             scr.text_clip(r.x, y, &line, col, p.id == self.slot, maxx);
         }
@@ -1201,6 +1278,20 @@ pub(super) fn wrap_chars(text: &str, width: usize) -> Vec<String> {
     }
     lines
 }
+
+/// The colour of advanced tech in the panels.
+pub(super) const TECH_COLOR: [f32; 3] = [200.0, 170.0, 255.0];
+/// The colour of your special or relic ship's name in the panels.
+pub(super) const SHIP_COLOR: [f32; 3] = [255.0, 200.0, 90.0];
+
+/// Rows (frames included) the controls and message panels always get: room
+/// for the warning and talk lines, orders, supplies, two lines of tech and
+/// four messages. Taller windows give them more (as message history).
+pub(super) const BOTTOM_ROWS: i32 = 15;
+/// Columns for the player list beside the maps (names, ranks and kills).
+const LIST_COLS: i32 = 46;
+/// Rows the controls need when the player list shares their panel.
+const DASH_ROWS: i32 = 8;
 
 pub(super) const HELP: &[(&str, &str)] = &[
     ("mouse", "move to aim; left click torp, right click steer, middle click phaser"),

@@ -361,6 +361,9 @@ pub struct App {
     /// Guard against mouse reports that leak through as keystrokes.
     leak: LeakFilter,
     tmux_hint: bool,
+    /// The advanced tech list goes in the controls panel (when there's a
+    /// player-list column), otherwise on one line in the message panel.
+    tech_in_controls: bool,
     sound: sound::Sound,
 }
 
@@ -429,6 +432,7 @@ pub fn run(cfg: ClientConfig) -> io::Result<()> {
         phaser_age: HashMap::new(),
         leak: LeakFilter::default(),
         tmux_hint,
+        tech_in_controls: false,
         sound: sound::Sound::new(!cfg_mute),
     };
     if let Some(h) = hint {
