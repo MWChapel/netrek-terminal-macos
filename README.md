@@ -16,7 +16,7 @@ that runs entirely inside a terminal window on macOS.
 - **Trek-style ships:** each empire has its own ship designs (Federation saucers and
   nacelles, Klingon D7s and Birds-of-Prey, Romulan warbirds, Orion raiders).
 - **Robots:** AI pilots fight, bomb, carry armies and capture planets, so you can play solo.
-- **Alien incursions** (optional): nineteen Star Trek threats, from Khan, the Borg and the
+- **Alien incursions** (optional): twenty threats, from Khan, the Borg and the
   planet killer to V'Ger, Species 8472, the Jem'Hadar, General Chang, Q and a plague of
   tribbles, drop into the game.
 - **Extras** (optional, each its own server option): career ranks and service records,
@@ -136,7 +136,7 @@ netrek <COMMAND>
 | `-b, --bind <ADDR>` | `0.0.0.0` | Address to bind; use `127.0.0.1` for local-only |
 | `--bots <N>` | `6` | Robot players kept in the game |
 | `-e, --empires <LIST>` | `fed,rom` | Empires the robots play for: `all`, or a comma list such as `fed,rom,kli` |
-| `--aliens [LIST]` | off | Alien incursions: bare `--aliens` for all nineteen, or a list such as `khan,borg,vger`. See [Alien incursions](#alien-incursions) |
+| `--aliens [LIST]` | off | Alien incursions: bare `--aliens` for all twenty, or a list such as `khan,borg,vger`. See [Alien incursions](#alien-incursions) |
 | `--alien-interval <SECS>` | `150` | Average seconds between incursions |
 | `--ranks [FILE]` | off | Career ranks, service records and a leaderboard, saved to `FILE` (default `~/.netrek/service-records.tsv`). See [Extras](#extras) |
 | `--orders` | off | Personal orders from command, with rewards |
@@ -259,8 +259,14 @@ look, run in iTerm2 instead.
 - **Controls:** status lamps (shields, cloak, repair, orbit, bomb, beam up/down,
   tractor, pressor, lock), gauges with current/max values, and a status line with kills,
   armies carried, torpedoes out, orbit/lock target and the game clock.
-- **Player list:** shows in a side column when the window is wide enough, otherwise
-  under the controls. Robots are marked, and your own line is bold.
+- **Player list:** shows in a column beside the maps when the window is wide enough,
+  otherwise under the controls. Robots are marked, and your own line is bold. With a lot
+  of players the rows close up so everyone fits.
+- **Messages:** the panel under the galactic map runs the full width of the window. It
+  holds warnings, the talk line, any orders, alliance, supply and tech lines, and the
+  message log. Long lines **wrap** instead of being cut off, and messages can be up to 160
+  characters (classic Netrek allowed 80). While you type a long message, the end of it
+  stays in view.
 
 ## Controls
 
@@ -517,11 +523,13 @@ on two fronts. Robots are marked in the player list.
 
 Pass `--aliens` to `server` or `solo` and episodes from Star Trek drop into the galaxy.
 One arrives roughly every `--alien-interval` seconds (150 by default, with some random
-variation), and at most **two** are active at once. Each arrival, defeat and withdrawal
+variation), and at most **two** are active at once. The galaxy has 32 player slots, so
+with aliens on the server keeps 8 of them free for incursions, running fewer robots than
+`--bots` asks for if it has to (it says so at startup). Each arrival, defeat and withdrawal
 is announced to everyone as a magenta **ALERT** message with a klaxon.
 
 ```sh
-netrek server --empires all --bots 12 --aliens            # all nineteen
+netrek server --empires all --bots 12 --aliens            # all twenty
 netrek solo --aliens khan,borg,doomsday --alien-interval 90
 ```
 
@@ -546,6 +554,7 @@ netrek solo --aliens khan,borg,doomsday --alien-interval 90
 | `q` | **Q** (TNG): appears near the home world of the empire holding the most planets and puts it **on trial** for 90 seconds, with one of three tests: **hold** your territory (lose no more than two planets), bring Q a **tribute** of five armies, or destroy Q's **champion**, a warship only that empire's weapons can hurt. Pass and every ship of that empire is repaired and refuelled and its home world gains 5 armies. Fail and Q hands its richest colony to the weakest empire. Q himself is invulnerable. |
 | `ferengi` | **Ferengi marauders** (*The Last Outpost*): three marauders loot armies from undefended colonies, tractor passing ships to siphon their fuel, and once full (6 armies) run for the edge of the galaxy. If one escapes, its armies are gone. Destroy one and its stolen armies **spill into space** (shown as a gold `+N`), where the first ship of any empire to fly over them takes them. Marauders **surrender** to any battleship or starbase that gets within 2,500 units (+1 kill). |
 | `swarm` | **The Swarm** (Voyager): eight tiny, fast ships that **latch onto hulls**, draining fuel and slowly eating the ship. Detonating (`d`) shakes off every swarm ship within range, and the swarm always leaves enough fuel in the tank to do it. Each swarm ship is worth only a fifth of a kill. |
+| `tempest` | **The Tempest** (after Atari's 1981 vector arcade game): a neon-blue web, 13,000 across, forms in open space. As in the arcade, it comes in several shapes (a round 16-lane tube, a **square** of 16 lanes, or a **triangle** of 15), starts in a random one, and **reshapes at every new level**. Any empire ship that touches it is **trapped on its rim**: it can only slide around the edge, and there's no escape until the Tempest dies or dissolves. Creatures climb the lanes out of the core in waves, each wave bigger and faster, and ride the web as in the arcade game: small deep in the tube, growing to fill their lane as they reach the rim. **Flippers** (red bowties) climb while flipping end over end into neighbouring lanes, then flip along the rim toward you and **grab** you, dragging you into the core after 5 seconds unless someone shoots them. **Tankers** (purple diamonds) climb dead straight and split into two flippers. **Pulsars** (cyan zigzags) climb slowly, flipping now and then, and electrify their whole lane. **Fuseballs** ride the spokes between lanes, drifting in and out and darting across lanes. They can only be hit while crossing a lane (on a spoke they show as a ghost), and they burn anything they touch at the rim. Trapped ships get one **Superzapper** each (`d`), which destroys everything on the web. The **core** is untouchable while anything is on the web; clear a wave and it's exposed for 20 seconds. Ships trapped on the rim hit it full on; ships outside the web do half damage. It slowly regenerates while shielded, has 1,600 hull, and is worth 6 kills. |
 
 **How aliens behave:**
 
@@ -591,6 +600,7 @@ netrek solo --aliens khan,borg,doomsday --alien-interval 90
 | Q | warm white | `QQ` | A flash of light; his champion is a dark angular warship |
 | Ferengi | copper | `FE` | A horseshoe with its prongs forward; spilled armies are a gold `+N` |
 | Swarm | lime | `SW` | A tiny dart |
+| Tempest | neon blue web | `TP` | Arcade vector art: red bowtie flippers, purple diamond tankers, cyan zigzag pulsars, white spiky fuseballs, a yellow starburst core |
 
 The status line shows **HUNTED** (vector mode: **PREY**) when the Hirogen are after you,
 and **TRIBBLES** (**TRIB**) when you're carrying them.
@@ -618,6 +628,8 @@ and **TRIBBLES** (**TRIB**) when you're carrying them.
 | Q's champion | 9 | 200 | 250 | torpedo 50, phaser 110; only the accused can hurt it | 2.5 |
 | Ferengi marauder | 10 | 90 | 110 | torpedo 25, phaser 70, tractor, fuel siphon | 1.5 (+0.1 per army carried) |
 | Swarm ship | 12 | – | 20 | latches on, drains fuel | 0.2 |
+| Tempest core | – | – | 1,600 | untouchable unless its web is clear; full damage from the rim, half from outside; regenerates | 6 |
+| Flipper / tanker / pulsar / fuseball | climb the web | – | 30 / 60 / 40 / 45 | grab and drag / split / electrify a lane / burn on contact | 0.2 (tanker 0.5) |
 
 The monsters regenerate quickly. The planet killer only takes 40% of normal weapon
 damage, and a Borg cube's resistance builds as it's hit.
@@ -679,6 +691,13 @@ damage, and a Borg cube's resistance builds as it's hit.
   simply makes them surrender.
 - **Swarm:** as soon as they latch on, press `d`. One detonation clears everything within
   about 1,700 units.
+- **Tempest:** stay away from its web unless you mean to fight. Once trapped, keep sliding
+  around the rim (on a square or triangle web the rim has corners, and lanes are narrower
+  near them) toward the flippers and shoot them *before* they reach you. A grabbed ship
+  has 5 seconds, and teammates on the rim can shoot the flipper off. Save your Superzapper
+  (`d`) for when the web is crowded. When the core is exposed, pour fire into it: you get 20
+  seconds, and it heals a little between waves. Ships on the rim hit it full on and ships
+  outside the web at half, so a mix of both works best.
 - **Borg:** a cube assimilates a ship it holds in its tractor beam within about 2,600
   units for four seconds. Its tractor is far stronger than any pressor, so don't try to
   push free. Instead stay out of range, and if you're caught, run at full speed: cubes
@@ -1063,15 +1082,17 @@ The tests include:
 
 - **`four_empire_game`:** 16 robots across all four empires. Checks every empire gets
   its share of ships and that the fighting spreads across the galaxy.
-- **`every_incursion_plays_out`:** runs each of the nineteen alien incursions against a
+- **`every_incursion_plays_out`:** runs each of the twenty alien incursions against a
   four-empire robot war and checks it arrives, acts and ends cleanly.
 - **Alien mechanics:** `vger_merge_ends_the_threat`, `crystal_shatters_on_resonance`,
   `whale_probe_drains_and_is_answered`, `bioships_only_fear_plasma`,
   `polaron_beams_ignore_shields`, `borg_and_8472_fight_each_other`,
   `chang_fires_cloaked_until_hit`, `tribbles_spread_by_ship_and_flee_klingons`,
   `hirogen_trophy_and_bonus`, `q_champion_only_hurt_by_the_accused`, `q_tribute_trial`,
-  `ferengi_loot_is_dropped_and_recovered` and
-  `swarm_latches_and_detonation_shakes_it_off`.
+  `ferengi_loot_is_dropped_and_recovered`,
+  `swarm_latches_and_detonation_shakes_it_off`, `tempest_traps_ships_on_its_rim`,
+  `tempest_core_is_only_exposed_when_the_web_is_clear`,
+  `flippers_drag_ships_into_the_core` and `tempest_shapes`.
 - **`retaking_alien_planets`:** liberated and resettled planets lose their alien mark.
 - **Extras:** `galaxy_has_ten_kinds_of_terrain_clear_of_planets` and a test for each
   terrain effect; `treaties_between_players`, `one_ally_at_a_time_and_robots_decide`,

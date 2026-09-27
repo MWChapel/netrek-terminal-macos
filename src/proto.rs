@@ -92,6 +92,10 @@ pub mod pf {
     pub const CHARGING: u32 = 65536;
     /// Out of phase (phase cloak): untouchable, can't fire.
     pub const PHASED: u32 = 131072;
+    /// Trapped on the rim of the Tempest's web.
+    pub const TRAPPED: u32 = 262144;
+    /// Superzapper ready (trapped, and not used yet).
+    pub const ZAPPER: u32 = 524288;
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -206,6 +210,120 @@ pub struct TerrainInfo {
     pub name: String,
 }
 
+/// The shape of the Tempest's web (it changes each level, as in the arcade).
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TempestShape {
+    Circle,
+    Square,
+    Triangle,
+}
+
+impl TempestShape {
+    pub const ALL: [TempestShape; 3] = [TempestShape::Circle, TempestShape::Square, TempestShape::Triangle];
+
+    pub fn lanes(self) -> u8 {
+        match self {
+            TempestShape::Circle | TempestShape::Square => 16,
+            TempestShape::Triangle => 15,
+        }
+    }
+
+    pub fn next(self) -> TempestShape {
+        match self {
+            TempestShape::Circle => TempestShape::Square,
+            TempestShape::Square => TempestShape::Triangle,
+            TempestShape::Triangle => TempestShape::Circle,
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            TempestShape::Circle => "circle",
+            TempestShape::Square => "square",
+            TempestShape::Triangle => "triangle",
+        }
+    }
+
+    /// Polygon corners (none for the circle), `r` from the centre: the
+    /// square sits flat, the triangle points up the screen.
+    fn corners(self, cx: f64, cy: f64, r: f64) -> Vec<(f64, f64)> {
+        let (n, start) = match self {
+            TempestShape::Circle => return Vec::new(),
+            TempestShape::Square => (4, std::f64::consts::FRAC_PI_4),
+            TempestShape::Triangle => (3, -std::f64::consts::FRAC_PI_2),
+        };
+        (0..n)
+            .map(|k| {
+                let a = start + k as f64 * std::f64::consts::TAU / n as f64;
+                (cx + a.cos() * r, cy + a.sin() * r)
+            })
+            .collect()
+    }
+
+    /// The rim point at lane coordinate `s`: lane centres are at whole
+    /// numbers and the lane edges (spokes) halfway between.
+    pub fn rim(self, cx: f64, cy: f64, r: f64, lanes: u8, s: f64) -> (f64, f64) {
+        let lanes = lanes.max(1) as f64;
+        let corners = self.corners(cx, cy, r);
+        if corners.is_empty() {
+            let a = s / lanes * std::f64::consts::TAU;
+            return (cx + a.cos() * r, cy + a.sin() * r);
+        }
+        let n = corners.len() as f64;
+        let t = ((s + 0.5) / lanes).rem_euclid(1.0) * n;
+        let j = (t.floor() as usize).min(corners.len() - 1);
+        let u = t - j as f64;
+        let (a, b) = (corners[j], corners[(j + 1) % corners.len()]);
+        (a.0 + (b.0 - a.0) * u, a.1 + (b.1 - a.1) * u)
+    }
+
+    /// Where the rim crosses the line from the centre toward (x, y), and the
+    /// lane coordinate there.
+    pub fn rim_toward(self, cx: f64, cy: f64, r: f64, lanes: u8, x: f64, y: f64) -> ((f64, f64), f64) {
+        let (dx, dy) = (x - cx, y - cy);
+        let len = dx.hypot(dy).max(1e-9);
+        let (ux, uy) = (dx / len, dy / len);
+        let corners = self.corners(cx, cy, r);
+        let lanes_f = lanes.max(1) as f64;
+        if corners.is_empty() {
+            let a = uy.atan2(ux).rem_euclid(std::f64::consts::TAU);
+            return ((cx + ux * r, cy + uy * r), a / std::f64::consts::TAU * lanes_f);
+        }
+        let n = corners.len();
+        for j in 0..n {
+            let (a, b) = (corners[j], corners[(j + 1) % n]);
+            // Solve centre + k*u = a + m*(b - a) for k >= 0, 0 <= m <= 1.
+            let (ex, ey) = (b.0 - a.0, b.1 - a.1);
+            let den = ux * ey - uy * ex;
+            if den.abs() < 1e-12 {
+                continue;
+            }
+            let (wx, wy) = (a.0 - cx, a.1 - cy);
+            let k = (wx * ey - wy * ex) / den;
+            let m = (wx * uy - wy * ux) / den;
+            if k >= 0.0 && (-1e-9..=1.0 + 1e-9).contains(&m) {
+                let s = ((j as f64 + m.clamp(0.0, 1.0)) / n as f64 * lanes_f - 0.5).rem_euclid(lanes_f);
+                return ((cx + ux * k, cy + uy * k), s);
+            }
+        }
+        ((cx + ux * r, cy + uy * r), 0.0)
+    }
+}
+
+/// The Tempest's web: a tube of `lanes` lanes between two rings.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct TempestInfo {
+    pub x: i32,
+    pub y: i32,
+    pub r_in: i32,
+    pub r_out: i32,
+    pub shape: TempestShape,
+    pub lanes: u8,
+    /// The core is exposed (the web has been cleared).
+    pub exposed: bool,
+    pub level: u8,
+}
+
 /// A career on the leaderboard (with --ranks).
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct LeaderInfo {
@@ -277,6 +395,8 @@ pub struct Frame {
     pub treaties: Vec<(Team, Team)>,
     /// Top careers (with --ranks).
     pub leaders: Vec<LeaderInfo>,
+    /// The Tempest's web, while it's in the galaxy.
+    pub tempest: Option<TempestInfo>,
     /// Teams that are currently allowed to be joined.
     pub open_teams: Vec<Team>,
     /// Planets held by Fed, Rom, Kli, Ori (public knowledge, like the team window).

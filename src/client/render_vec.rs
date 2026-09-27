@@ -80,6 +80,55 @@ fn draw_phaser(px: &mut Canvas, a: (f32, f32), b: (f32, f32), col: Rgb, hit: boo
     }
 }
 
+/// Break `text` into lines no wider than `max_w` pixels, at spaces where
+/// possible (a single overlong word is split).
+pub(super) fn wrap(tr: &super::sixel::TextRenderer, text: &str, fs: f32, max_w: f32) -> Vec<String> {
+    let mut lines = Vec::new();
+    let mut cur = String::new();
+    for word in text.split(' ') {
+        let candidate = if cur.is_empty() { word.to_string() } else { format!("{} {}", cur, word) };
+        if tr.width(&candidate, fs) <= max_w || cur.is_empty() && tr.width(word, fs) <= max_w {
+            cur = candidate;
+            continue;
+        }
+        if !cur.is_empty() {
+            lines.push(std::mem::take(&mut cur));
+        }
+        // A word too long for a whole line: split it.
+        let mut piece = String::new();
+        for ch in word.chars() {
+            piece.push(ch);
+            if tr.width(&piece, fs) > max_w && piece.chars().count() > 1 {
+                piece.pop();
+                lines.push(std::mem::take(&mut piece));
+                piece.push(ch);
+            }
+        }
+        cur = piece;
+    }
+    if !cur.is_empty() {
+        lines.push(cur);
+    }
+    lines
+}
+
+/// For something climbing the Tempest's web: the width of its lane where
+/// it is (lanes widen toward the rim, which gives the tube its depth).
+pub(super) fn web_lane_width(f: &Frame, p: &PlayerInfo) -> Option<f64> {
+    let t = f.tempest.as_ref()?;
+    if !matches!(p.ship, ShipType::Flipper | ShipType::Tanker | ShipType::Pulsar | ShipType::Fuseball) {
+        return None;
+    }
+    // Measure the lane's width at the rim, then scale it to this depth.
+    let (cx, cy, ro) = (t.x as f64, t.y as f64, t.r_out as f64);
+    let ((rx, ry), s) = t.shape.rim_toward(cx, cy, ro, t.lanes, p.x as f64, p.y as f64);
+    let (a, b) = (t.shape.rim(cx, cy, ro, t.lanes, s.round() - 0.5), t.shape.rim(cx, cy, ro, t.lanes, s.round() + 0.5));
+    let rim_width = (a.0 - b.0).hypot(a.1 - b.1);
+    let rim_dist = (rx - cx).hypot(ry - cy).max(1.0);
+    let d = ((p.x as f64 - cx).hypot(p.y as f64 - cy)).max(t.r_in as f64 * 0.6);
+    Some(rim_width * d / rim_dist)
+}
+
 /// The little pictures inside a planet, as in the classic Netrek client.
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum PlanetIcon {
@@ -178,8 +227,9 @@ impl App {
             }
         }
 
-        // Space terrain (with the server's --terrain option).
+        // Space terrain (with the server's --terrain option), and the Tempest.
         super::render_terrain::draw_vec(&mut px, f, &to, &u, true, tr, fs);
+        super::render_terrain::draw_tempest_vec(&mut px, f, &to, &u, true);
 
         // Edge of the galaxy.
         let corners = [(0.0, 0.0), (GWIDTH, 0.0), (GWIDTH, GWIDTH), (0.0, GWIDTH)];
@@ -371,7 +421,10 @@ impl App {
             let dash = if cloaked { 2.0 } else { 0.0 };
             let a = p.dir as f32 * TAU / 256.0;
             let (sa, ca) = (a.sin(), a.cos());
-            let sr = if ship_size_units(p.ship) > 0.0 {
+            let sr = if let Some(w) = web_lane_width(f, p) {
+                // Tempest perspective: small deep in the tube, spanning the lane at the rim.
+                u(w * 0.36).max(2.5)
+            } else if ship_size_units(p.ship) > 0.0 {
                 u(ship_size_units(p.ship))
             } else if p.ship == ShipType::Starbase {
                 sr * 1.5
@@ -484,6 +537,7 @@ impl App {
 
         let ug = |units: f64| (units * sx) as f32;
         super::render_terrain::draw_vec(&mut px, f, &to, &ug, false, tr, fs);
+        super::render_terrain::draw_tempest_vec(&mut px, f, &to, &ug, false);
 
         for w in &f.webs {
             let (a, b) = (to(w.x1 as f64, w.y1 as f64), to(w.x2 as f64, w.y2 as f64));
@@ -565,8 +619,10 @@ impl App {
         let label_col = rgb(0xa0a8b8);
 
         // Row 1: status lamps, lit when active.
-        let lamps: [(&str, bool, Rgb); 13] = [
+        let lamps: [(&str, bool, Rgb); 15] = [
             ("SHLD", me.flags & pf::SHIELD != 0, rgb(0x40a0ff)),
+            ("TRAP", me.flags & pf::TRAPPED != 0, red),
+            ("ZAP", me.flags & pf::ZAPPER != 0, yellow),
             ("OVWT", me.flags & pf::OVERWATCH != 0, rgb(0xff8040)),
             ("CLOAK", me.flags & pf::CLOAK != 0, rgb(0xc070ff)),
             ("REPAIR", me.flags & pf::REPAIR != 0, green),
@@ -728,24 +784,29 @@ impl App {
         let mut c = Canvas::new(pw, ph, [0.0, 0.0, 0.0]);
         let (w, h) = (pw as f32, ph as f32);
         let pad = 6.0;
+        let text_w = w - 2.0 * pad;
         let base = |row: f32| pad + row * lh + lh * 0.7;
-        if let Some((text, col)) = self.warning_text() {
-            c.text(tr, pad, base(0.0), &text, fs, col);
+        let mut row = 0.0;
+        // Warning, talk line and status lines, wrapped to the panel's width.
+        let mut top: Vec<(String, Rgb)> = Vec::new();
+        top.push(self.warning_text().unwrap_or_default());
+        top.push(self.input_line_text());
+        top.extend(self.status_lines());
+        for (text, col) in top {
+            let lines = wrap(tr, &text, fs, text_w);
+            for line in if lines.is_empty() { vec![String::new()] } else { lines } {
+                c.text(tr, pad, base(row), &line, fs, col);
+                row += 1.0;
+            }
         }
-        let (line, col) = self.input_line_text();
-        c.text(tr, pad, base(1.0), &line, fs, col);
-        let status = self.status_lines();
-        for (k, (text, col)) in status.iter().enumerate() {
-            c.text(tr, pad, base(2.0 + k as f32), text, fs, *col);
-        }
-        let sep = pad + (2.0 + status.len() as f32) * lh + lh * 0.25;
+        let sep = pad + row * lh + lh * 0.25;
         c.line(pad, sep, w - pad, sep, 1.0, rgb(0x3a404c), 1.0, 0.0);
+        // Messages, newest at the bottom, each wrapped under its sender.
         let my_team = self.me().map(|p| p.team).unwrap_or(Team::Ind);
         let rows = (((h - sep - pad) / lh).floor() as usize).max(1);
-        let start = self.msgs.len().saturating_sub(rows);
         let from_w = tr.width("MMMMMMMMM", fs);
-        for (k, m) in self.msgs.iter().skip(start).enumerate() {
-            let y = sep + lh * 0.2 + k as f32 * lh + lh * 0.7;
+        let mut lines: Vec<(Option<(String, Rgb)>, String, Rgb)> = Vec::new();
+        for m in self.msgs.iter().rev() {
             let col = match m.kind {
                 MsgKind::System if m.from == "ALERT" => rgb(0xff5cf0),
                 MsgKind::System => rgb(0xa0a6b0),
@@ -753,8 +814,26 @@ impl App {
                 MsgKind::Team => team_rgb(my_team),
                 MsgKind::Indiv => rgb(0x5fd7ff),
             };
-            c.text(tr, pad, y, &m.from, fs, if m.kind == MsgKind::System && m.from != "ALERT" { rgb(0x7a808a) } else { col });
-            c.text(tr, pad + from_w, y, &m.text, fs, col);
+            let from_col = if m.kind == MsgKind::System && m.from != "ALERT" { rgb(0x7a808a) } else { col };
+            let mut wrapped = wrap(tr, &m.text, fs, text_w - from_w);
+            if wrapped.is_empty() {
+                wrapped.push(String::new());
+            }
+            for (k, part) in wrapped.into_iter().enumerate().rev() {
+                let from = (k == 0).then(|| (m.from.clone(), from_col));
+                lines.push((from, part, col));
+            }
+            if lines.len() >= rows {
+                break;
+            }
+        }
+        let shown: Vec<_> = lines.into_iter().take(rows).collect();
+        for (k, (from, text, col)) in shown.into_iter().rev().enumerate() {
+            let y = sep + lh * 0.2 + k as f32 * lh + lh * 0.7;
+            if let Some((name, fc)) = from {
+                c.text(tr, pad, y, &name, fs, fc);
+            }
+            c.text(tr, pad + from_w, y, &text, fs, col);
         }
         c
     }
@@ -828,6 +907,9 @@ impl App {
         let f = self.frame.as_ref().unwrap();
         let tr = &self.text;
         let (fs, lh) = self.panel_font();
+        // Squeeze the rows (down to the font size) so everyone fits.
+        let n = f.players.iter().filter(|p| p.state != PState::Outfit).count() as f32;
+        let lh = lh.min(((ph as f32 - 12.0) / (n + 1.5)).max(fs + 1.0));
         let mut c = Canvas::new(pw, ph, [0.0, 0.0, 0.0]);
         let (w, h) = (pw as f32, ph as f32);
         let pad = 6.0;
@@ -964,5 +1046,19 @@ mod tests {
             }
         }
         std::fs::write(std::env::temp_dir().join("netrek-phasers.ppm"), out).unwrap();
+    }
+
+    /// Long lines wrap at spaces, and nothing is lost.
+    #[test]
+    fn text_wraps_to_width() {
+        let tr = super::super::sixel::TextRenderer::load();
+        let text = "Tech: Phaser overcharge • Ablative armor 40 • [v] Graviton pulse ready • [e] Tricobalt device ready • [j] Emergency reserve ready";
+        let lines = wrap(&tr, text, 12.0, 200.0);
+        assert!(lines.len() > 1);
+        assert!(lines.iter().all(|l| tr.width(l, 12.0) <= 200.0 || !l.contains(' ')));
+        assert_eq!(lines.join(" "), text);
+        let chars = super::super::render::wrap_chars(text, 40);
+        assert!(chars.iter().all(|l| l.chars().count() <= 40));
+        assert_eq!(chars.join(" "), text);
     }
 }

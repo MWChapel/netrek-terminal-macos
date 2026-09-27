@@ -85,6 +85,15 @@ fn serve(listener: TcpListener, cfg: ServerConfig) -> io::Result<()> {
         if !on.is_empty() {
             println!("extras: {}", on.join(", "));
         }
+        let room = MAXPLAYER - 1 - if cfg.aliens.is_empty() { 0 } else { ALIEN_RESERVE } - if f.supply { 4 } else { 0 };
+        if cfg.bots > room {
+            println!(
+                "note: {} robots won't all fit; running up to {} to leave room for players{}",
+                cfg.bots,
+                room,
+                if cfg.aliens.is_empty() { "" } else { " and alien incursions" }
+            );
+        }
         if let (true, Some(p)) = (f.ranks, &cfg.records) {
             println!("service records: {}", p.display());
         }
@@ -221,7 +230,8 @@ fn game_loop(rx: Receiver<Event>, cfg: ServerConfig) {
         }
 
         if world.tick % UPS as u32 == 0 {
-            balance_bots(&mut world, &mut bots, cfg.bots, &cfg.empires);
+            let want = robots_that_fit(&world, &bots, cfg.bots, !cfg.aliens.is_empty());
+            balance_bots(&mut world, &mut bots, want, &cfg.empires);
         }
         director.tick(&mut world);
         logistics.tick(&mut world);
@@ -269,6 +279,22 @@ fn game_loop(rx: Receiver<Event>, cfg: ServerConfig) {
             next = now;
         }
     }
+}
+
+/// Player slots kept free for alien incursions (when they're on).
+pub const ALIEN_RESERVE: usize = 8;
+
+/// How many robots fit: the configured number, less whatever it takes to
+/// leave room for humans, the server's own ships (freighters, fighters,
+/// decoys) and, with aliens on, the slots incursions need.
+fn robots_that_fit(world: &World, bots: &[bot::Bot], wanted: usize, aliens: bool) -> usize {
+    let others = world
+        .players
+        .iter()
+        .filter(|p| p.in_use && p.faction.is_none() && !bots.iter().any(|b| b.id == p.id))
+        .count();
+    let reserve = if aliens { ALIEN_RESERVE } else { 0 };
+    wanted.min(MAXPLAYER.saturating_sub(others + reserve))
 }
 
 /// Hand this tick's events and slash commands to the orders and career
@@ -529,5 +555,39 @@ mod tests {
         }
         let _ = std::fs::remove_file(&records);
         assert!(terrain && supply && service && reply, "terrain {} supply {} service {} reply {}", terrain, supply, service, reply);
+    }
+
+    /// A crowded server (25 robots, supply freighters, a human) with only
+    /// the Tempest turned on: it must still get room to appear.
+    #[test]
+    fn crowded_server_leaves_room_for_aliens() {
+        let features = Features { supply: true, ..Features::default() };
+        let mut world = World::with_features(features);
+        let human = world.add_player("Chappie", false).unwrap();
+        world.join(human, Team::Fed, ShipType::Cruiser).unwrap();
+        let mut bots = Vec::new();
+        let all = Team::PLAYABLE;
+        let mut director = aliens::Director::new(aliens::AlienConfig { kinds: vec![Faction::Tempest], interval: 60 });
+        let mut logistics = supply::Logistics::new();
+        let mut seen = false;
+        for _ in 0..(UPS as u32 * 60 * 3) {
+            if world.tick % UPS as u32 == 0 {
+                let want = robots_that_fit(&world, &bots, 25, true);
+                balance_bots(&mut world, &mut bots, want, &all);
+            }
+            director.tick(&mut world);
+            logistics.tick(&mut world);
+            for b in bots.iter_mut() {
+                b.think(&mut world);
+            }
+            world.tick();
+            world.outbox.clear();
+            world.warnings.clear();
+            seen |= world.tempest.is_some();
+        }
+        let used = world.players.iter().filter(|p| p.in_use).count();
+        println!("robots {}, slots used {}", bots.len(), used);
+        assert!(seen, "the Tempest never formed");
+        assert!(bots.len() >= 15, "still plenty of robots");
     }
 }

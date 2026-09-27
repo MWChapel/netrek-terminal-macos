@@ -298,6 +298,70 @@ pub fn draw_vec(
     }
 }
 
+/// Points of the Tempest's web in galaxy units: for each lane edge
+/// (spoke), where it meets the rim and the core ring, plus lane centres.
+fn tempest_points(t: &crate::proto::TempestInfo) -> (Vec<(f64, f64)>, Vec<(f64, f64)>, Vec<(f64, f64)>) {
+    let (cx, cy, r) = (t.x as f64, t.y as f64, t.r_out as f64);
+    let k_in = t.r_in as f64 / r;
+    let n = t.lanes.max(3) as usize;
+    let rim = |s: f64| t.shape.rim(cx, cy, r, t.lanes, s);
+    let inner = |(x, y): (f64, f64)| (cx + (x - cx) * k_in, cy + (y - cy) * k_in);
+    let outer: Vec<(f64, f64)> = (0..n).map(|k| rim(k as f64 + 0.5)).collect();
+    let inner_pts: Vec<(f64, f64)> = outer.iter().map(|&p| inner(p)).collect();
+    let centres: Vec<(f64, f64)> = (0..n).map(|k| rim(k as f64)).collect();
+    (outer, inner_pts, centres)
+}
+
+/// The Tempest's web: a neon tube of lanes from the core out to the rim,
+/// as in Atari's Tempest (circle, square or triangle). It flashes when the
+/// core is exposed.
+pub fn draw_tempest_vec(px: &mut Canvas, f: &Frame, to: &dyn Fn(f64, f64) -> (f32, f32), u: &dyn Fn(f64) -> f32, detail: bool) {
+    let Some(t) = &f.tempest else { return };
+    let (cx, cy) = to(t.x as f64, t.y as f64);
+    let ri = u(t.r_in as f64).max(2.0);
+    let flash = t.exposed && (f.tick / 3) % 2 == 0;
+    let col = if flash { rgb(0xffe040) } else { super::palette::TEMPEST_BLUE };
+    let (outer, inner, centres) = tempest_points(t);
+    let outer: Vec<(f32, f32)> = outer.iter().map(|&(x, y)| to(x, y)).collect();
+    let inner: Vec<(f32, f32)> = inner.iter().map(|&(x, y)| to(x, y)).collect();
+    if detail {
+        px.polyline(&outer, true, 5.0, col, 0.15, 0.0);
+    }
+    px.polyline(&outer, true, 1.5, col, 1.0, 0.0);
+    px.polyline(&inner, true, 1.2, col, 0.9, 0.0);
+    for k in 0..outer.len() {
+        let (a, b) = (inner[k], outer[k]);
+        px.line(a.0, a.1, b.0, b.1, 1.0, col, if detail { 0.8 } else { 0.5 }, 0.0);
+    }
+    if detail {
+        // Faint lane centre lines, and the core pulsing within.
+        let k_in = t.r_in as f64 / t.r_out as f64;
+        for &(x, y) in &centres {
+            let (ax, ay) = to(t.x as f64 + (x - t.x as f64) * k_in, t.y as f64 + (y - t.y as f64) * k_in);
+            let (bx, by) = to(x, y);
+            px.line(ax, ay, bx, by, 0.8, col, 0.12, 3.0);
+        }
+        let pulse = 0.5 + 0.5 * ((f.tick as f32) * 0.4).sin();
+        let core = if t.exposed { rgb(0xff4040) } else { rgb(0xffe040) };
+        px.glow(cx, cy, ri * (1.2 + 0.3 * pulse), core, if t.exposed { 0.8 } else { 0.35 });
+    }
+}
+
+/// The Tempest's web in braille.
+pub fn draw_tempest_braille(b: &mut Braille, f: &Frame, to_dot: &dyn Fn(f64, f64) -> (f64, f64), _per_dot: f64) {
+    let Some(t) = &f.tempest else { return };
+    let col = if t.exposed && (f.tick / 3) % 2 == 0 { Color::Yellow } else { Color::Blue };
+    let (outer, inner, _) = tempest_points(t);
+    let n = outer.len();
+    for k in 0..n {
+        let (o0, o1) = (to_dot(outer[k].0, outer[k].1), to_dot(outer[(k + 1) % n].0, outer[(k + 1) % n].1));
+        let (i0, i1) = (to_dot(inner[k].0, inner[k].1), to_dot(inner[(k + 1) % n].0, inner[(k + 1) % n].1));
+        b.line(o0.0, o0.1, o1.0, o1.1, col, 1);
+        b.line(i0.0, i0.1, i1.0, i1.1, col, 1);
+        b.line(i0.0, i0.1, o0.0, o0.1, col, 1);
+    }
+}
+
 /// Terrain in braille graphics. `per_dot` is galaxy units per braille dot.
 pub fn draw_braille(
     b: &mut Braille,
@@ -484,6 +548,7 @@ mod tests {
             terrain,
             treaties: vec![],
             leaders: vec![],
+            tempest: None,
             open_teams: vec![],
             team_planets: [0; 4],
             starbase_teams: vec![],

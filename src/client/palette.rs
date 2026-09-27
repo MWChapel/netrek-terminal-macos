@@ -84,13 +84,24 @@ pub fn faction_rgb(f: Faction) -> Rgb {
         Faction::Q => rgb(0xfffbe0),
         Faction::Ferengi => rgb(0xc8843c),
         Faction::Swarm => rgb(0xe0ff70),
+        Faction::Tempest => rgb(0xff3030),
     }
 }
 
 /// A ship's colour: its alien faction's, or its empire's.
 pub fn player_rgb(p: &PlayerInfo) -> Rgb {
-    p.faction.map_or(team_rgb(p.team), faction_rgb)
+    // The Tempest's climbers keep their arcade colours.
+    match p.ship {
+        ShipType::TempestCore => rgb(0xffe040),
+        ShipType::Tanker => rgb(0xc050ff),
+        ShipType::Pulsar => rgb(0x40f0ff),
+        ShipType::Fuseball => rgb(0xf0f0f0),
+        _ => p.faction.map_or(team_rgb(p.team), faction_rgb),
+    }
 }
+
+/// The Tempest's neon-blue web.
+pub const TEMPEST_BLUE: Rgb = rgb(0x2060ff);
 
 /// A planet's colour; devoured planets are dead grey rock.
 pub fn planet_rgb(info: &PlanetInfo) -> Rgb {

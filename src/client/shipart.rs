@@ -561,6 +561,43 @@ fn alien(f: Faction, ship: ShipType) -> Vec<Part> {
             // A tiny dart.
             v.push(sym(&[(0.0, -1.0), (0.6, 0.8), (0.0, 0.4)]));
         }
+        // The Tempest's arcade creatures (drawn with the lane pointing up).
+        Faction::Tempest => match ship {
+            ShipType::Flipper => {
+                // The bowtie flipper.
+                v.push(Poly { pts: vec![(-0.95, -0.55), (0.0, 0.0), (-0.95, 0.55)], fill: false });
+                v.push(Poly { pts: vec![(0.95, -0.55), (0.0, 0.0), (0.95, 0.55)], fill: false });
+                v.push(line((-0.95, -0.55), (0.95, 0.55)));
+                v.push(line((-0.95, 0.55), (0.95, -0.55)));
+            }
+            ShipType::Tanker => {
+                v.push(Poly { pts: vec![(0.0, -0.9), (0.8, 0.0), (0.0, 0.9), (-0.8, 0.0)], fill: false });
+                v.push(Poly { pts: vec![(0.0, -0.45), (0.4, 0.0), (0.0, 0.45), (-0.4, 0.0)], fill: false });
+            }
+            ShipType::Pulsar => {
+                // A crackling zigzag.
+                let pts: Vec<(f32, f32)> = (0..7).map(|k| (-0.9 + k as f32 * 0.3, if k % 2 == 0 { -0.45 } else { 0.45 })).collect();
+                for w in pts.windows(2) {
+                    v.push(line(w[0], w[1]));
+                }
+            }
+            ShipType::Fuseball => {
+                // A spiky ball of curling tendrils.
+                for k in 0..7 {
+                    let a = k as f32 / 7.0 * TAU;
+                    v.push(line((a.cos() * 0.15, a.sin() * 0.15), ((a + 0.4).cos() * 0.95, (a + 0.4).sin() * 0.95)));
+                }
+                v.push(Circle { c: (0.0, 0.0), r: 0.18, fill: true });
+            }
+            _ => {
+                // The core: a spiked star around a burning eye.
+                v.push(Poly {
+                    pts: (0..16).map(|k| { let a = k as f32 / 16.0 * TAU; let r = if k % 2 == 0 { 1.0 } else { 0.45 }; (a.cos() * r, a.sin() * r) }).collect(),
+                    fill: true,
+                });
+                v.push(Circle { c: (0.0, 0.0), r: 0.28, fill: false });
+            }
+        },
     }
     v
 }
@@ -617,7 +654,7 @@ mod tests {
     #[test]
     fn gallery() {
         let (cell, r) = (120.0f32, 44.0f32);
-        let mut c = Canvas::new(8 * cell as i32, 11 * cell as i32, [0.0, 0.0, 0.0]);
+        let mut c = Canvas::new(8 * cell as i32, 12 * cell as i32, [0.0, 0.0, 0.0]);
         let mut rows: Vec<Vec<(Team, ShipType, Option<Faction>)>> = Team::PLAYABLE
             .iter()
             .map(|&t| ShipType::ALL.iter().map(|&s| (t, s, None)).collect())
@@ -666,6 +703,13 @@ mod tests {
             (Team::Fed, ShipType::ExcalbianShip, None),
         ]);
         rows.push(vec![
+            (Team::Ind, ShipType::TempestCore, Some(Faction::Tempest)),
+            (Team::Ind, ShipType::Flipper, Some(Faction::Tempest)),
+            (Team::Ind, ShipType::Tanker, Some(Faction::Tempest)),
+            (Team::Ind, ShipType::Pulsar, Some(Faction::Tempest)),
+            (Team::Ind, ShipType::Fuseball, Some(Faction::Tempest)),
+        ]);
+        rows.push(vec![
             (Team::Ind, ShipType::QChampion, Some(Faction::Q)),
             (Team::Ind, ShipType::FerengiMarauder, Some(Faction::Ferengi)),
             (Team::Ind, ShipType::SwarmShip, Some(Faction::Swarm)),
@@ -673,9 +717,13 @@ mod tests {
         for (row, ships) in rows.iter().enumerate() {
             for (col, &(team, ship, faction)) in ships.iter().enumerate() {
                 let (x, y) = (col as f32 * cell + cell / 2.0, row as f32 * cell + cell / 2.0);
-                let team_c = match faction {
-                    Some(f) => crate::client::palette::faction_rgb(f),
-                    None => team_rgb(team),
+                let team_c = match (ship, faction) {
+                    (ShipType::TempestCore, _) => crate::client::palette::rgb(0xffe040),
+                    (ShipType::Tanker, _) => crate::client::palette::rgb(0xc050ff),
+                    (ShipType::Pulsar, _) => crate::client::palette::rgb(0x40f0ff),
+                    (ShipType::Fuseball, _) => crate::client::palette::rgb(0xf0f0f0),
+                    (_, Some(f)) => crate::client::palette::faction_rgb(f),
+                    (_, None) => team_rgb(team),
                 };
                 let fill = [team_c[0] * 0.42, team_c[1] * 0.42, team_c[2] * 0.42];
                 let rot = |p: (f32, f32)| (x + p.0 * r, y + p.1 * r);

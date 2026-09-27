@@ -117,6 +117,10 @@ pub struct Player {
     pub fighter_of: Option<(u8, u32)>,
     /// Relic ships: the Iconian gateway or the Kazon ram is ready at this tick.
     pub relic_ready: u32,
+    /// Pinned to the rim of the Tempest's web.
+    pub trapped: bool,
+    /// Has used the Superzapper against this Tempest.
+    pub zapped: bool,
 }
 
 impl Player {
@@ -193,6 +197,8 @@ impl Player {
             netted_until: 0,
             fighter_of: None,
             relic_ready: 0,
+            trapped: false,
+            zapped: false,
         }
     }
 
@@ -278,6 +284,61 @@ pub struct Planet {
     pub tribbles: bool,
     /// Supplies waiting for a convoy (with --supply).
     pub supply: u32,
+}
+
+/// The Tempest's web (an alien incursion): ships that touch its rim are
+/// held there until the Tempest dies or dissolves.
+#[derive(Clone, Debug)]
+pub struct TempestWeb {
+    pub x: f64,
+    pub y: f64,
+    pub r_in: f64,
+    pub r_out: f64,
+    pub shape: TempestShape,
+    pub lanes: u8,
+    pub exposed: bool,
+    pub level: u8,
+    /// Tick the last Superzapper went off (zapped tankers don't split).
+    pub zapped_at: u32,
+}
+
+/// How far inside the rim a climber at the top of its lane sits.
+pub const RIM_INSET: f64 = 450.0;
+
+impl TempestWeb {
+    /// The lane (0..lanes) that (x, y) is in, seen from the centre.
+    pub fn lane_of(&self, x: f64, y: f64) -> i32 {
+        let (_, s) = self.shape.rim_toward(self.x, self.y, self.r_out, self.lanes, x, y);
+        (s.round() as i32).rem_euclid(self.lanes as i32)
+    }
+
+    /// Where the rim is, in the direction of (x, y) from the centre.
+    pub fn rim_toward(&self, x: f64, y: f64) -> (f64, f64) {
+        self.shape.rim_toward(self.x, self.y, self.r_out, self.lanes, x, y).0
+    }
+
+    /// Centre-line point of `lane`, `prog` of the way from core (0) to rim (1).
+    pub fn lane_point(&self, lane: i32, prog: f64) -> (f64, f64) {
+        self.web_point(lane as f64, prog)
+    }
+
+    /// A point on the web: `lane` may be fractional (mid-flip, or on a
+    /// spoke at .5). The core ring is the rim's shape, scaled down, and
+    /// climbers at the top sit just inside the rim, in their lane.
+    pub fn web_point(&self, lane: f64, prog: f64) -> (f64, f64) {
+        let (rx, ry) = self.shape.rim(self.x, self.y, self.r_out, self.lanes, lane);
+        let (vx, vy) = (rx - self.x, ry - self.y);
+        let len = vx.hypot(vy).max(1.0);
+        let inner = self.r_in / self.r_out;
+        let outer = (len - RIM_INSET) / len;
+        let k = inner + (outer - inner) * prog.clamp(0.0, 1.0);
+        (self.x + vx * k, self.y + vy * k)
+    }
+}
+
+/// Things that climb the Tempest's web.
+pub fn is_tempest_minion(s: ShipType) -> bool {
+    matches!(s, ShipType::Flipper | ShipType::Tanker | ShipType::Pulsar | ShipType::Fuseball)
 }
 
 /// Optional rules, switched on by server options.
@@ -400,6 +461,8 @@ pub struct World {
     pub terrain: Vec<super::terrain::Terrain>,
     /// Top careers (with --ranks), kept up to date by the career system.
     pub leaders: Vec<LeaderInfo>,
+    /// The Tempest's web, while that incursion is on.
+    pub tempest: Option<TempestWeb>,
 }
 
 impl World {
@@ -426,6 +489,7 @@ impl World {
             supply: [TeamSupply::default(); 5],
             terrain: Vec::new(),
             leaders: Vec::new(),
+            tempest: None,
         };
         w.reset_galaxy();
         w
@@ -798,7 +862,7 @@ impl World {
     }
 
     fn chat(&mut self, id: u8, to: MsgTarget, text: &str) {
-        let text: String = text.chars().filter(|c| !c.is_control()).take(80).collect();
+        let text: String = text.chars().filter(|c| !c.is_control()).take(MAX_MESSAGE).collect();
         if text.trim().is_empty() {
             return;
         }
@@ -1246,6 +1310,40 @@ impl World {
         p.desired_speed = speed.min(p.stats().max_speed);
     }
 
+    /// The Tempest's web: an empire ship that reaches the rim is pinned
+    /// there, free only to slide around the edge.
+    fn tempest_trap(&mut self) {
+        let Some(web) = self.tempest.clone() else {
+            for p in self.players.iter_mut() {
+                p.trapped = false;
+            }
+            return;
+        };
+        for i in 0..MAXPLAYER {
+            let p = &mut self.players[i];
+            if !p.alive() || p.faction.is_some() {
+                p.trapped = false;
+                continue;
+            }
+            let (rx, ry) = web.rim_toward(p.x, p.y);
+            let d = ((p.x - web.x).powi(2) + (p.y - web.y).powi(2)).sqrt();
+            let rim = ((rx - web.x).powi(2) + (ry - web.y).powi(2)).sqrt();
+            if !p.trapped && d > rim {
+                continue;
+            }
+            if !p.trapped {
+                p.trapped = true;
+                p.leave_orbit();
+                p.lock = Lock::None;
+                p.tractor = None;
+                let id = p.id;
+                self.warn(id, "Caught on the Tempest's web! Slide along the rim and shoot down the climbers. d = SUPERZAPPER (once)");
+            }
+            let p = &mut self.players[i];
+            (p.x, p.y) = (rx, ry);
+        }
+    }
+
     /// Whether a Sheliak colony ship hostile to `bomber` is in orbit around
     /// planet `k`, shielding it from bombing.
     fn sheliak_shield(&self, k: usize, bomber: Team) -> bool {
@@ -1643,6 +1741,21 @@ impl World {
 
     fn det_enemy(&mut self, i: usize) {
         let id = i as u8;
+        // Trapped on the Tempest's web: the Superzapper, once, clears it.
+        if self.players[i].trapped && !self.players[i].zapped {
+            self.players[i].zapped = true;
+            let tick = self.tick;
+            if let Some(t) = self.tempest.as_mut() {
+                t.zapped_at = tick;
+            }
+            let minions: Vec<usize> = (0..MAXPLAYER).filter(|&j| self.players[j].alive() && is_tempest_minion(self.players[j].ship)).collect();
+            let who = self.players[i].label();
+            self.alert(format!("{} fires the SUPERZAPPER! {} climbers destroyed.", who, minions.len()));
+            for j in minions {
+                self.kill(j, Some(id), "was superzapped".into());
+            }
+            return;
+        }
         let (x, y, team) = (self.players[i].x, self.players[i].y, self.players[i].team);
         if self.players[i].fuel < 100.0 || self.players[i].w_overheat > 0 {
             return;
@@ -1788,6 +1901,7 @@ impl World {
     pub fn inflict(&mut self, i: usize, amount: f64, killer: Option<u8>, how: String) {
         let kind = std::mem::replace(&mut self.hit_kind, HitKind::Other);
         let killer_team = killer.map(|k| self.players[k as usize].team);
+        let killer_trapped = killer.map_or(false, |k| self.players[k as usize].trapped);
         let tick = self.tick;
         let p = &mut self.players[i];
         if !p.alive() || amount <= 0.0 || tick < p.phased_until {
@@ -1814,6 +1928,10 @@ impl World {
         let amount = match p.ship {
             // Invulnerable: they have to be dealt with some other way.
             ShipType::VgerCloud | ShipType::WhaleProbe | ShipType::QEntity => return,
+            // The Tempest core is only exposed when its web has been cleared;
+            // ships trapped on its rim hit it full on, others at half strength.
+            ShipType::TempestCore if !self.tempest.as_ref().map_or(false, |t| t.exposed) => return,
+            ShipType::TempestCore if !killer_trapped => amount * 0.5,
             // Only resonance (several phasers at once) can shatter it.
             ShipType::CrystalEntity => amount * 0.05,
             // Impervious to conventional weapons; plasma is our "nanoprobe" warhead.
@@ -1895,6 +2013,7 @@ impl World {
             p.lock = Lock::None;
             p.tribbles = false;
             p.marked = false;
+            p.trapped = false;
         }
         let with_armies = if victim_armies > 0 { format!(" (carrying {} armies)", victim_armies) } else { String::new() };
         if self.players[i].ship == ShipType::Freighter && self.players[i].cargo > 0 {
@@ -2037,6 +2156,7 @@ impl World {
                 _ => {}
             }
         }
+        self.tempest_trap();
         for i in 0..MAXPLAYER {
             if self.players[i].overwatch && self.players[i].alive() {
                 self.overwatch_fire(i);
@@ -2960,6 +3080,8 @@ impl World {
                 set(&mut flags, p.overwatch && friendly, pf::OVERWATCH);
                 set(&mut flags, p.jump_at.is_some(), pf::CHARGING);
                 set(&mut flags, self.tick < p.phased_until, pf::PHASED);
+                set(&mut flags, p.trapped, pf::TRAPPED);
+                set(&mut flags, p.trapped && !p.zapped && friendly, pf::ZAPPER);
                 // An Excalbian shapeshifter looks like one of your own cruisers from afar.
                 let disguised = p.ship == ShipType::ExcalbianShip
                     && !friendly
@@ -3061,6 +3183,16 @@ impl World {
             terrain: self.terrain.iter().filter(|t| t.visible()).map(|t| t.info()).collect(),
             treaties: self.treaties.clone(),
             leaders: self.leaders.clone(),
+            tempest: self.tempest.as_ref().map(|t| TempestInfo {
+                x: t.x as i32,
+                y: t.y as i32,
+                r_in: t.r_in as i32,
+                r_out: t.r_out as i32,
+                shape: t.shape,
+                lanes: t.lanes,
+                exposed: t.exposed,
+                level: t.level,
+            }),
             open_teams: self.open_teams(),
             team_planets: [Team::Fed, Team::Rom, Team::Kli, Team::Ori].map(|t| self.team_planet_count(t) as u8),
             starbase_teams: Team::PLAYABLE.into_iter().filter(|&t| self.has_starbase(t, me)).collect(),

@@ -6,9 +6,9 @@
 //! Their special powers (webs, planet eating, assimilation...) live here.
 
 use super::bot::lead;
-use super::world::{Dest, GameEvent, Lock, Loot, Outgoing, PhaserShot, Web, World};
+use super::world::{is_tempest_minion, Dest, GameEvent, Lock, Loot, Outgoing, PhaserShot, TempestWeb, Web, World};
 use crate::consts::*;
-use crate::proto::{ChatMsg, ClientMsg, MsgKind, PState, PhaserInfo};
+use crate::proto::{ChatMsg, ClientMsg, MsgKind, PState, PhaserInfo, TempestShape};
 use rand::seq::SliceRandom;
 use rand::Rng;
 use std::collections::HashMap;
@@ -48,6 +48,28 @@ struct Event {
     latched: HashMap<u8, u8>,
     /// Q: the trial under way.
     trial: Option<Trial>,
+    /// Tempest: the climbers on its web.
+    climbers: HashMap<u8, Climber>,
+    /// Tempest: flipper -> (ship it has grabbed, ticks held).
+    grabs: HashMap<u8, (u8, i32)>,
+    /// Tempest: the current wave, the climbers still to come out of the
+    /// core, and when the next one (or the next wave) is due.
+    level: u8,
+    queue: Vec<ShipType>,
+    next_at: u32,
+}
+
+/// Something climbing the Tempest's web.
+#[derive(Clone, Copy, Debug)]
+struct Climber {
+    kind: ShipType,
+    lane: i32,
+    /// 0 at the core, 1 at the rim.
+    prog: f64,
+    /// Which way a fuseball drifts along its spoke (+1 out, -1 in).
+    dir: i32,
+    /// A flip under way: the lane it's flipping into, and how far (0..1).
+    flip: Option<(i32, f64)>,
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -181,6 +203,16 @@ impl Director {
                         p.marked = false;
                     }
                 }
+                Faction::Tempest => {
+                    world.tempest = None;
+                    for p in world.players.iter_mut() {
+                        p.zapped = false;
+                    }
+                    let left: Vec<u8> = world.players.iter().filter(|p| p.in_use && is_tempest_minion(p.ship)).map(|p| p.id).collect();
+                    for id in left {
+                        world.remove_player(id);
+                    }
+                }
                 _ => {}
             }
         }
@@ -215,6 +247,8 @@ impl Director {
             Faction::Gorn | Faction::Mirror => 4,
             Faction::JemHadar => 5,
             Faction::Swarm => 8,
+            // The core and a first climber; the rest climb out as slots free up.
+            Faction::Tempest => 2,
             Faction::Tribbles => 0,
             _ => 1,
         };
@@ -389,6 +423,31 @@ impl Director {
                 }
                 "Ferengi marauders have entered the sector to plunder lightly defended colonies. Destroy them to recover the armies they steal!".to_string()
             }
+            Faction::Tempest => {
+                // A clear stretch of space for the web.
+                let spot = (0..400).map(|_| (rng.gen_range(12_000.0..88_000.0), rng.gen_range(12_000.0..88_000.0))).find(|&(x, y)| {
+                    world.planets.iter().all(|pl| dist(x, y, pl.x, pl.y) > TEMPEST_RIM + 2500.0)
+                });
+                let Some((x, y)) = spot else { return };
+                spawn(world, "Tempest", ShipType::TempestCore, (x, y), 50.0);
+                let shape = *TempestShape::ALL.choose(&mut rng).unwrap();
+                world.tempest = Some(TempestWeb {
+                    x,
+                    y,
+                    r_in: TEMPEST_CORE,
+                    r_out: TEMPEST_RIM,
+                    shape,
+                    lanes: shape.lanes(),
+                    exposed: false,
+                    level: 1,
+                    zapped_at: 0,
+                });
+                let near_pl = world.planets.iter().min_by(|a, b| dist(x, y, a.x, a.y).total_cmp(&dist(x, y, b.x, b.y))).map_or("", |p| p.name);
+                format!(
+                    "A TEMPEST has formed near {}! Any ship that touches its web is trapped on the rim. Shoot down what climbs out of the core (d = SUPERZAPPER, once); clear the web to expose the core.",
+                    near_pl
+                )
+            }
             Faction::Swarm => {
                 let (x, y) = near(ax, ay, 6000.0);
                 for _ in 0..8 {
@@ -418,6 +477,11 @@ impl Director {
             prey: None,
             latched: HashMap::new(),
             trial,
+            climbers: HashMap::new(),
+            grabs: HashMap::new(),
+            level: 0,
+            queue: Vec::new(),
+            next_at: world.tick + 3 * UPS as u32,
         });
     }
 }
@@ -433,6 +497,9 @@ fn leading_empire(world: &World) -> Option<Team> {
 /// Whether an incursion has been defeated (tribbles have no ships: they're
 /// beaten when no planet or ship carries them any more).
 fn beaten(world: &World, e: &Event) -> bool {
+    if e.kind == Faction::Tempest {
+        return !e.ships.iter().any(|&s| world.players[s as usize].ship == ShipType::TempestCore);
+    }
     if e.kind == Faction::Tribbles {
         !world.planets.iter().any(|pl| pl.tribbles) && !world.players.iter().any(|p| p.tribbles)
     } else {
@@ -461,6 +528,7 @@ fn defeat_text(kind: Faction) -> String {
         Faction::Q => "Q snaps his fingers and vanishes in a flash of light.".into(),
         Faction::Ferengi => "The Ferengi marauders are gone.".into(),
         Faction::Swarm => "The Swarm has been scattered.".into(),
+        Faction::Tempest => "The Tempest core is destroyed! Its web collapses and the trapped ships break free.".into(),
     }
 }
 
@@ -485,6 +553,7 @@ fn withdraw_text(kind: Faction) -> String {
         Faction::Q => "Q grows bored and vanishes in a flash of light.".into(),
         Faction::Ferengi => "The Ferengi marauders warp out in search of better profits.".into(),
         Faction::Swarm => "The Swarm moves on to other territory.".into(),
+        Faction::Tempest => "The Tempest's web fades away, releasing the ships trapped on it.".into(),
     }
 }
 
@@ -622,7 +691,11 @@ fn run_event(world: &mut World, e: &mut Event) {
             Faction::Q => q(world, e, i, tick),
             Faction::Ferengi => ferengi(world, i, tick),
             Faction::Swarm => swarm(world, e, i, n, tick),
+            Faction::Tempest => {}
         }
+    }
+    if e.kind == Faction::Tempest {
+        tempest(world, e, tick);
     }
     if e.kind == Faction::Tribbles {
         tribbles(world, e, tick);
@@ -1658,6 +1731,289 @@ fn swarm(world: &mut World, e: &mut Event, i: usize, n: usize, tick: u32) {
     steer_to(world, i, tx, ty, 12);
 }
 
+pub const TEMPEST_RIM: f64 = 6500.0;
+pub const TEMPEST_CORE: f64 = 1200.0;
+/// Ticks a flipper must hold a ship to drag it into the core.
+const DRAG_TICKS: i32 = 50;
+
+/// The climbers of wave `level`: more of them, and nastier kinds, as the
+/// levels go up (as in Atari's Tempest).
+fn tempest_wave(level: u8) -> Vec<ShipType> {
+    let n = (2 + level as usize).min(8);
+    (0..n)
+        .map(|k| match k % 6 {
+            1 if level >= 2 => ShipType::Tanker,
+            3 if level >= 3 => ShipType::Pulsar,
+            5 if level >= 4 => ShipType::Fuseball,
+            4 if level >= 5 => ShipType::Tanker,
+            _ => ShipType::Flipper,
+        })
+        .collect()
+}
+
+/// Bring a climber out of the core onto a lane.
+fn launch_climber(world: &mut World, e: &mut Event, kind: ShipType, lane: i32, prog: f64) -> bool {
+    let Some(web) = world.tempest.clone() else { return false };
+    let (x, y) = web.lane_point(lane, prog);
+    let bounty = if kind == ShipType::Tanker { -5.0 } else { -8.0 };
+    let name = kind.stats().name;
+    let Some(id) = world.spawn_alien(name, Faction::Tempest, kind, x, y, bounty) else { return false };
+    let dir = if rand::thread_rng().gen_bool(0.5) { 1 } else { -1 };
+    e.climbers.insert(id, Climber { kind, lane, prog, dir, flip: None });
+    e.ships.push(id);
+    true
+}
+
+/// Shortest step (-1, 0 or 1) from lane `a` toward lane `b`.
+fn lane_step(a: i32, b: i32, lanes: i32) -> i32 {
+    let d = (b - a).rem_euclid(lanes);
+    if d == 0 {
+        0
+    } else if d <= lanes / 2 {
+        1
+    } else {
+        -1
+    }
+}
+
+/// The Tempest: waves climb its web from the core. Flippers flip lane to
+/// lane along the rim and drag trapped ships into the core; tankers split
+/// into two flippers; pulsars electrify their lane; fuseballs roll around
+/// the rim. The core is only exposed, briefly, when a wave has been cleared.
+fn tempest(world: &mut World, e: &mut Event, tick: u32) {
+    let mut rng = rand::thread_rng();
+    let Some(web) = world.tempest.clone() else { return };
+    let Some(core) = e.ships.iter().copied().find(|&s| world.players[s as usize].ship == ShipType::TempestCore) else { return };
+    let lanes = web.lanes as i32;
+    {
+        let c = &mut world.players[core as usize];
+        (c.x, c.y, c.speed, c.desired_speed) = (web.x, web.y, 0, 0);
+        c.dir = (c.dir + 1.5).rem_euclid(256.0);
+        // Shielded, the core knits itself back together.
+        if !web.exposed {
+            c.damage = (c.damage - 1.0).max(0.0);
+        }
+    }
+
+    // Climbers that died: tankers split into two flippers (unless zapped).
+    let dead: Vec<u8> = e.climbers.keys().copied().filter(|&id| !world.players[id as usize].alive()).collect();
+    for id in dead {
+        let c = e.climbers.remove(&id).unwrap();
+        e.grabs.remove(&id);
+        if c.kind == ShipType::Tanker && world.players[id as usize].state == PState::Exploding && world.players[id as usize].state_timer >= 9 {
+            let zapped = tick.saturating_sub(web.zapped_at) <= 2 && web.zapped_at > 0;
+            if !zapped {
+                launch_climber(world, e, ShipType::Flipper, c.lane - 1, c.prog);
+                launch_climber(world, e, ShipType::Flipper, c.lane + 1, c.prog);
+            }
+        }
+    }
+
+    // Waves.
+    if web.exposed {
+        if tick >= e.next_at {
+            e.level += 1;
+            e.queue = tempest_wave(e.level);
+            // As in the arcade, each level brings a new shape of web.
+            let t = world.tempest.as_mut().unwrap();
+            t.exposed = false;
+            t.level = e.level;
+            t.shape = t.shape.next();
+            t.lanes = t.shape.lanes();
+            let shape = t.shape.name();
+            announce(world, format!("Tempest level {}: the web reshapes into a {} and fills again!", e.level, shape));
+        }
+    } else if e.queue.is_empty() && e.climbers.is_empty() {
+        if e.level == 0 {
+            if tick >= e.next_at {
+                e.level = 1;
+                e.queue = tempest_wave(1);
+            }
+        } else {
+            world.tempest.as_mut().unwrap().exposed = true;
+            e.next_at = tick + 20 * UPS as u32;
+            announce(world, "The web is clear: the Tempest core is exposed for 20 seconds! Fire everything (ships on the rim hit hardest)!");
+        }
+    } else if !e.queue.is_empty() && tick >= e.next_at {
+        let kind = e.queue[0];
+        if launch_climber(world, e, kind, rng.gen_range(0..lanes), 0.0) {
+            e.queue.remove(0);
+        }
+        e.next_at = tick + 12;
+    }
+
+    // Who is trapped, and on which lane.
+    let trapped: Vec<(usize, i32)> = (0..MAXPLAYER)
+        .filter(|&j| world.players[j].alive() && world.players[j].trapped)
+        .map(|j| (j, web.lane_of(world.players[j].x, world.players[j].y)))
+        .collect();
+    let climb = 0.004 + 0.0015 * e.level as f64;
+
+    let ids: Vec<u8> = e.climbers.keys().copied().collect();
+    // A flip takes half a second, a little quicker at higher levels.
+    let flip_step = (0.2 + 0.02 * e.level as f64).min(0.4);
+    let nearest_lane = |from: i32| {
+        trapped
+            .iter()
+            .map(|&(_, l)| l)
+            .min_by_key(|&l| (l - from).rem_euclid(lanes).min((from - l).rem_euclid(lanes)))
+    };
+    for id in ids {
+        let i = id as usize;
+        let mut c = e.climbers[&id];
+        let grabbing = e.grabs.contains_key(&id);
+        // Finish (or advance) a flip in progress.
+        if let Some((to, t)) = c.flip {
+            let t = t + flip_step;
+            if t >= 1.0 {
+                c.lane = to.rem_euclid(lanes);
+                c.flip = None;
+            } else {
+                c.flip = Some((to, t));
+            }
+        }
+        let flipping = c.flip.is_some();
+        // Start a flip into the next lane, toward the nearest trapped ship
+        // most of the time, otherwise at random.
+        let start_flip = |c: &mut Climber, rng: &mut rand::rngs::ThreadRng| {
+            let step = match nearest_lane(c.lane) {
+                Some(l) if l != c.lane && rng.gen_bool(0.7) => lane_step(c.lane, l, lanes),
+                _ => if rng.gen_bool(0.5) { 1 } else { -1 },
+            };
+            c.flip = Some((c.lane + step, 0.0));
+        };
+        match c.kind {
+            ShipType::Flipper => {
+                if c.prog < 1.0 {
+                    if !flipping {
+                        c.prog = (c.prog + climb).min(1.0);
+                        if rng.gen_bool(0.02) {
+                            start_flip(&mut c, &mut rng);
+                        }
+                    }
+                } else if !grabbing && !flipping {
+                    // On the rim: flip toward the nearest trapped ship.
+                    match nearest_lane(c.lane) {
+                        Some(l) if l != c.lane => c.flip = Some((c.lane + lane_step(c.lane, l, lanes), 0.0)),
+                        _ => {}
+                    }
+                }
+                // At the top of a lane it grabs whatever is on the rim in that
+                // lane (as in the arcade, however wide the lane is).
+                if c.prog >= 1.0 && !grabbing && c.flip.is_none() {
+                    let victim = trapped.iter().find(|&&(_, l)| l == c.lane);
+                    if let Some(&(j, _)) = victim {
+                        e.grabs.insert(id, (j as u8, 0));
+                        world.warn(j as u8, "A FLIPPER HAS YOU! Shoot it before it drags you into the core!");
+                    }
+                }
+            }
+            ShipType::Tanker => {
+                // Tankers climb dead straight.
+                c.prog += climb * 0.6;
+                if c.prog >= 1.0 {
+                    // At the rim a tanker bursts into two flippers.
+                    world.remove_player(id);
+                    e.climbers.remove(&id);
+                    launch_climber(world, e, ShipType::Flipper, c.lane - 1, 1.0);
+                    launch_climber(world, e, ShipType::Flipper, c.lane + 1, 1.0);
+                    continue;
+                }
+            }
+            ShipType::Pulsar => {
+                if !flipping {
+                    c.prog = (c.prog + climb * 0.7).min(0.85);
+                    if rng.gen_bool(0.01) {
+                        start_flip(&mut c, &mut rng);
+                    }
+                }
+                // High on the web it electrifies its whole lane now and then.
+                if c.prog > 0.5 && !flipping && tick % 25 == (id as u32 % 25) {
+                    let (x1, y1) = web.lane_point(c.lane, c.prog);
+                    let (x2, y2) = web.lane_point(c.lane, 1.0);
+                    world.phasers.push(PhaserShot {
+                        info: PhaserInfo { owner: id, x1: x1 as i32, y1: y1 as i32, x2: x2 as i32, y2: y2 as i32, hit: true },
+                        ticks: 8,
+                    });
+                    for &(j, l) in &trapped {
+                        if l == c.lane {
+                            world.inflict(j, 25.0, Some(id), "was electrocuted by a pulsar".into());
+                        }
+                    }
+                }
+            }
+            ShipType::Fuseball => {
+                // Fuseballs ride the spokes (lane edges), drifting in and out,
+                // and now and then dart across a lane to the next spoke.
+                if !flipping {
+                    c.prog = (c.prog + c.dir as f64 * climb * 1.4).clamp(0.05, 1.0);
+                    if c.prog >= 1.0 {
+                        // Lingers on the rim, then now and then dives back in.
+                        if rng.gen_bool(0.03) {
+                            c.dir = -1;
+                        }
+                    } else if c.prog <= 0.05 {
+                        c.dir = 1;
+                    } else if rng.gen_bool(0.02) {
+                        c.dir = -c.dir;
+                    }
+                    if rng.gen_bool(if c.prog >= 1.0 { 0.06 } else { 0.025 }) {
+                        start_flip(&mut c, &mut rng);
+                    }
+                }
+            }
+            _ => {}
+        }
+        // Where it is on the web: lanes are measured to their centres, so a
+        // fuseball on a spoke sits half a lane over.
+        let edge = if c.kind == ShipType::Fuseball { 0.5 } else { 0.0 };
+        let (lane_f, turn) = match c.flip {
+            Some((to, t)) => (c.lane as f64 + (to - c.lane) as f64 * t, t),
+            None => (c.lane as f64, 0.0),
+        };
+        let (x, y) = web.web_point(lane_f + edge, c.prog);
+        let p = &mut world.players[i];
+        (p.x, p.y, p.speed, p.desired_speed) = (x, y, 0, 0);
+        // Facing out of the tube; a flip turns the sprite over end to end.
+        p.dir = (dir_to(web.x, web.y, x, y) + turn * 128.0).rem_euclid(256.0);
+        // A fuseball can only be hit while it's crossing a lane.
+        if c.kind == ShipType::Fuseball && c.flip.is_none() {
+            p.phased_until = tick + 2;
+        }
+        e.climbers.insert(id, c);
+        if c.kind == ShipType::Fuseball && c.prog > 0.9 {
+            for &(j, _) in &trapped {
+                if dist(world.players[j].x, world.players[j].y, x, y) < 800.0 {
+                    world.inflict(j, 3.0, Some(id), "was fried by a fuseball".into());
+                }
+            }
+        }
+    }
+
+    // Grabbed ships are held, then dragged into the core.
+    let grabs: Vec<(u8, (u8, i32))> = e.grabs.iter().map(|(&k, &v)| (k, v)).collect();
+    for (f, (v, held)) in grabs {
+        let (fi, vi) = (f as usize, v as usize);
+        if !world.players[fi].alive() || !world.players[vi].alive() || !world.players[vi].trapped {
+            e.grabs.remove(&f);
+            continue;
+        }
+        let q = &mut world.players[vi];
+        (q.speed, q.desired_speed) = (0, 0);
+        if held + 1 >= DRAG_TICKS {
+            e.grabs.remove(&f);
+            let who = world.players[vi].label();
+            world.kill(vi, Some(f), "was dragged into the Tempest".into());
+            announce(world, format!("{} is dragged down into the Tempest!", who));
+            if let Some(c) = e.climbers.get_mut(&f) {
+                c.prog = 0.3;
+            }
+        } else {
+            e.grabs.insert(f, (v, held + 1));
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1697,7 +2053,7 @@ mod tests {
                 .filter(|m| {
                     ["Khan", "Gorn", "Tholian", "Fesarius", "Balok", "Terran", "planet killer", "amoeba", "Borg", "V'Ger",
                         "Crystalline", "probe", "8472", "Jem'Hadar", "wormhole", "ribble", "Chang", "Hirogen", "Q", "Ferengi",
-                        "warm"]
+                        "warm", "TEMPEST", "Tempest"]
                         .iter()
                         .any(|k| m.contains(k))
                 })
@@ -1713,8 +2069,7 @@ mod tests {
     }
 
     /// Incursions never overlap with themselves, never exceed two at once,
-    /// and each arrival is followed by a defeat or withdrawal before the
-    /// same kind arrives again.
+    /// and an incursion that's under way is never restarted.
     #[test]
     fn incursions_do_not_repeat_while_active() {
         for _ in 0..6 {
@@ -1726,44 +2081,28 @@ mod tests {
                 }
             }
             let mut director = Director::new(AlienConfig { kinds: Faction::ALL.to_vec(), interval: 20 });
-            let mut active: Vec<Faction> = Vec::new();
+            let mut previous: HashMap<Faction, u32> = HashMap::new();
+            let mut arrivals = 0;
             for _ in 0..(UPS as u32 * 60 * 15) {
                 director.tick(&mut world);
                 for b in bots.iter_mut() {
                     b.think(&mut world);
                 }
                 world.tick();
-                let kinds: Vec<Faction> = director.events.iter().map(|e| e.kind).collect();
-                for k in &kinds {
-                    assert_eq!(kinds.iter().filter(|x| *x == k).count(), 1, "{:?} active twice", k);
-                }
-                for o in world.outbox.drain(..) {
-                    if o.msg.from != "ALERT" {
-                        continue;
-                    }
-                    for f in Faction::ALL {
-                        if o.msg.text == defeat_text(f) || o.msg.text == withdraw_text(f) {
-                            active.retain(|x| *x != f);
-                        }
-                    }
-                    if let Some(f) = Faction::ALL.into_iter().find(|&f| {
-                        let e = director.events.iter().find(|e| e.kind == f);
-                        e.map_or(false, |e| e.started == world.tick - 1 || e.started == world.tick)
-                    }) {
-                        if o.msg.text.contains("entered") || o.msg.text.contains("appeared") || o.msg.text.contains("seized")
-                            || o.msg.text.contains("rift") || o.msg.text.contains("drifting") || o.msg.text.contains("We are the Borg")
-                            || o.msg.text.contains("attacking the colonies")
-                        {
-                            assert!(!active.contains(&f), "{:?} announced again while still active", f);
-                            active.push(f);
-                        }
+                assert!(director.events.len() <= MAX_ACTIVE);
+                let now: HashMap<Faction, u32> = director.events.iter().map(|e| (e.kind, e.started)).collect();
+                assert_eq!(now.len(), director.events.len(), "an incursion is active twice");
+                for (kind, started) in &now {
+                    match previous.get(kind) {
+                        Some(before) => assert_eq!(before, started, "{:?} restarted while still active", kind),
+                        None => arrivals += 1,
                     }
                 }
+                previous = now;
+                world.outbox.clear();
                 world.warnings.clear();
-                if world.reset_timer > 0 {
-                    active.clear();
-                }
             }
+            assert!(arrivals > 3, "only {} incursions arrived", arrivals);
         }
     }
 
@@ -2037,6 +2376,143 @@ mod tests {
             prey: None,
             latched: HashMap::new(),
             trial: None,
+            climbers: HashMap::new(),
+            grabs: HashMap::new(),
+            level: 0,
+            queue: Vec::new(),
+            next_at: 0,
         }
+    }
+
+    /// A Tempest with a Federation cruiser flying into it.
+    fn tempest_world() -> (World, Director, usize) {
+        let (mut w, kirk) = with_cruiser(0.0, 0.0);
+        let mut d = Director::new(AlienConfig { kinds: vec![Faction::Tempest], interval: 30 });
+        d.spawn_kind(&mut w, Faction::Tempest, None);
+        let web = w.tempest.clone().expect("the web formed");
+        let k = kirk as usize;
+        // Halfway out to the rim, whatever shape the web is.
+        let (rx, ry) = web.rim_toward(web.x + 1.0, web.y);
+        (w.players[k].x, w.players[k].y) = ((web.x + rx) / 2.0, (web.y + ry) / 2.0);
+        (w, d, k)
+    }
+
+    #[test]
+    fn tempest_traps_ships_on_its_rim() {
+        let (mut w, mut d, k) = tempest_world();
+        w.tick();
+        let web = w.tempest.clone().unwrap();
+        assert!(w.players[k].trapped);
+        let on_rim = |w: &World| {
+            let (x, y) = (w.players[k].x, w.players[k].y);
+            let (rx, ry) = web.rim_toward(x, y);
+            dist(x, y, rx, ry) < 1.0
+        };
+        assert!(on_rim(&w), "pinned to the rim");
+        // Trying to fly away just slides it along the rim.
+        (w.players[k].dir, w.players[k].desired_dir, w.players[k].speed, w.players[k].desired_speed) = (64.0, 64.0, 9, 9);
+        for _ in 0..50 {
+            d.tick(&mut w);
+            w.tick();
+        }
+        assert!(w.players[k].trapped && on_rim(&w));
+    }
+
+    #[test]
+    fn tempest_core_is_only_exposed_when_the_web_is_clear() {
+        let (mut w, mut d, k) = tempest_world();
+        // Let the first wave climb out.
+        for _ in 0..(UPS as u32 * 12) {
+            d.tick(&mut w);
+            w.tick();
+            if !w.players[k].alive() {
+                break;
+            }
+        }
+        let core = w.players.iter().position(|p| p.in_use && p.ship == ShipType::TempestCore).unwrap();
+        assert!(w.players.iter().any(|p| p.alive() && is_tempest_minion(p.ship)), "climbers on the web");
+        w.inflict(core, 500.0, None, "test".into());
+        assert_eq!(w.players[core].damage, 0.0, "shielded by its web");
+        // The Superzapper clears the web, once.
+        if !w.players[k].alive() {
+            w.players[k].state = PState::Outfit;
+            w.join(k as u8, Team::Fed, ShipType::Cruiser).unwrap();
+            let web = w.tempest.clone().unwrap();
+            let (rx, ry) = web.rim_toward(web.x + 1.0, web.y);
+            (w.players[k].x, w.players[k].y) = ((web.x + rx) / 2.0, (web.y + ry) / 2.0);
+            w.tick();
+        }
+        assert!(w.players[k].trapped);
+        // No more climbers queued, so the zap clears the web for good.
+        d.events[0].queue.clear();
+        w.handle(k as u8, ClientMsg::DetEnemy);
+        assert!(w.players[k].zapped);
+        w.tick();
+        d.tick(&mut w);
+        assert!(!w.players.iter().any(|p| p.alive() && is_tempest_minion(p.ship)), "all zapped");
+        for _ in 0..3 {
+            d.tick(&mut w);
+            w.tick();
+        }
+        assert!(w.tempest.as_ref().unwrap().exposed, "the core is exposed");
+        let outsider = w.add_player("Outsider", false).unwrap();
+        w.join(outsider, Team::Rom, ShipType::Cruiser).unwrap();
+        w.inflict(core, 400.0, Some(outsider), "test".into());
+        assert!((w.players[core].damage - 200.0).abs() < 1e-9, "ships off the web hit at half strength");
+        w.inflict(core, 400.0, Some(k as u8), "test".into());
+        assert!((w.players[core].damage - 600.0).abs() < 1e-9, "ships on the rim hit full on");
+        // Only one Superzapper per ship.
+        w.players[k].fuel = 5000.0;
+        w.handle(k as u8, ClientMsg::DetEnemy);
+        assert_eq!(w.outbox.iter().filter(|o| o.msg.text.contains("fires the SUPERZAPPER")).count(), 1, "only once");
+    }
+
+    #[test]
+    fn flippers_drag_ships_into_the_core() {
+        let (mut w, mut d, k) = tempest_world();
+        w.tick();
+        let web = w.tempest.clone().unwrap();
+        let lane = web.lane_of(w.players[k].x, w.players[k].y);
+        // Put a flipper right on the rim beside the ship.
+        d.events[0].queue.clear();
+        d.events[0].level = 1;
+        assert!(launch_climber(&mut w, &mut d.events[0], ShipType::Flipper, lane, 1.0));
+        w.players[k].shields_up = true;
+        for _ in 0..(DRAG_TICKS + 5) {
+            d.tick(&mut w);
+            w.tick();
+        }
+        assert!(!w.players[k].alive(), "dragged down");
+    }
+
+    /// All three web shapes: lanes line up with the rim, the lane under a
+    /// point is found again, and ships are pinned to that shape's rim.
+    #[test]
+    fn tempest_shapes() {
+        for shape in TempestShape::ALL {
+            let web = TempestWeb { x: 50_000.0, y: 50_000.0, r_in: TEMPEST_CORE, r_out: TEMPEST_RIM, shape, lanes: shape.lanes(), exposed: false, level: 1, zapped_at: 0 };
+            for lane in 0..shape.lanes() as i32 {
+                // The rim point of each lane is found in that lane again.
+                let (x, y) = web.lane_point(lane, 1.0);
+                assert_eq!(web.lane_of(x, y), lane, "{:?} lane {}", shape, lane);
+                // Climbing moves outward toward the rim.
+                let (x0, y0) = web.lane_point(lane, 0.0);
+                assert!(dist(x0, y0, 50_000.0, 50_000.0) < dist(x, y, 50_000.0, 50_000.0));
+            }
+            // A ship flying in from any direction lands on this shape's rim.
+            let (mut w, kirk) = with_cruiser(0.0, 0.0);
+            w.tempest = Some(web.clone());
+            for a in 0..24 {
+                let ang = a as f64 / 24.0 * std::f64::consts::TAU;
+                let k = kirk as usize;
+                w.players[k].trapped = false;
+                (w.players[k].x, w.players[k].y) = (50_000.0 + ang.cos() * 3000.0, 50_000.0 + ang.sin() * 3000.0);
+                w.tick();
+                let (x, y) = (w.players[k].x, w.players[k].y);
+                let (rx, ry) = web.rim_toward(x, y);
+                assert!(w.players[k].trapped && dist(x, y, rx, ry) < 1.0, "{:?} at angle {}", shape, a);
+            }
+        }
+        assert_eq!(TempestShape::Circle.next().next().next(), TempestShape::Circle);
     }
 }

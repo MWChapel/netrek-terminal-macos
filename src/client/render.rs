@@ -43,6 +43,11 @@ fn ship_shape(s: ShipType) -> &'static [(f64, f64)] {
             (0.0, -1.0), (0.6, -0.55), (0.25, 0.0), (0.8, 0.95), (0.3, 0.6), (-0.3, 0.6), (-0.8, 0.95), (-0.25, 0.0), (-0.6, -0.55),
         ],
         ShipType::PreserverObelisk => &[(0.0, -1.0), (0.3, 0.0), (0.0, 1.0), (-0.3, 0.0)],
+        ShipType::Flipper => &[(-0.9, -0.5), (0.0, 0.0), (-0.9, 0.5), (0.9, -0.5), (0.0, 0.0), (0.9, 0.5)],
+        ShipType::Tanker | ShipType::Pulsar | ShipType::Fuseball => &[(0.0, -0.8), (0.7, 0.0), (0.0, 0.8), (-0.7, 0.0)],
+        ShipType::TempestCore => &[
+            (0.0, -1.0), (0.3, -0.3), (1.0, 0.0), (0.3, 0.3), (0.0, 1.0), (-0.3, 0.3), (-1.0, 0.0), (-0.3, -0.3),
+        ],
         ShipType::VothCityShip | ShipType::SheliakShip => &[
             (0.0, -1.0), (0.7, -0.7), (1.0, 0.0), (0.7, 0.7), (0.0, 1.0), (-0.7, 0.7), (-1.0, 0.0), (-0.7, -0.7),
         ],
@@ -360,8 +365,9 @@ impl App {
             }
         }
 
-        // Bottom right: warning line, talk line, message log.
-        let right_end = if side_col { maps_right } else { w };
+        // Bottom right: warning line, talk line, message log. It runs the
+        // full width under the galaxy map and the player list.
+        let right_end = w;
         scr.frame(gx, by, right_end - gx, bh, "", Color::White);
         let rx = gx + 1;
         let rw = right_end - gx - 2;
@@ -370,8 +376,8 @@ impl App {
             self.images.push(super::Image { x: rx, y: by + 1, slot: 3, data: super::sixel::encode_canvas(&img) });
             scr.masks.push((rx, by + 1, rw, bh - 2));
             if side_col {
-                scr.frame(maps_right, 0, w - maps_right, h, "", Color::White);
-                let (lw, lh) = (w - maps_right - 2, h - 2);
+                scr.frame(maps_right, 0, w - maps_right, sr + 2, "", Color::White);
+                let (lw, lh) = (w - maps_right - 2, sr);
                 let img = self.draw_players_vec((lw as f64 * cw) as i32, (lh as f64 * ch) as i32);
                 self.images.push(super::Image { x: maps_right + 1, y: 1, slot: 4, data: super::sixel::encode_canvas(&img) });
                 scr.masks.push((maps_right + 1, 1, lw, lh));
@@ -384,21 +390,23 @@ impl App {
             }
         }
         self.draw_input_line(scr, rx, by + 2, rx + rw - 1);
-        let status = self.status_lines();
-        for (k, (text, col)) in status.iter().enumerate() {
-            let c = super::palette::to_color(*col, self.truecolor);
-            scr.text_clip(rx, by + 3 + k as i32, text, c, false, rx + rw - 1);
+        let mut sep = by + 3;
+        for (text, col) in self.status_lines() {
+            let c = super::palette::to_color(col, self.truecolor);
+            for line in wrap_chars(&text, rw.max(1) as usize) {
+                scr.text_clip(rx, sep, &line, c, false, rx + rw - 1);
+                sep += 1;
+            }
         }
-        let sep = by + 3 + status.len() as i32;
         for x in rx..rx + rw {
             scr.put(x, sep, '─', DIM, false);
         }
         self.draw_messages(scr, Rect { x: rx, y: sep + 1, w: rw, h: (by + bh - 1 - sep - 1).max(0) });
 
-        // Side column: the player list, full height.
+        // Side column: the player list, beside the maps.
         if side_col {
-            scr.frame(maps_right, 0, w - maps_right, h, "", Color::White);
-            self.draw_player_list(scr, Rect { x: maps_right + 1, y: 1, w: w - maps_right - 2, h: h - 2 }, true);
+            scr.frame(maps_right, 0, w - maps_right, sr + 2, "", Color::White);
+            self.draw_player_list(scr, Rect { x: maps_right + 1, y: 1, w: w - maps_right - 2, h: sr }, true);
         }
     }
 
@@ -437,6 +445,7 @@ impl App {
 
         // Space terrain (with the server's --terrain option).
         super::render_terrain::draw_braille(&mut b, f, &to_dot, upd, true, &mut labels);
+        super::render_terrain::draw_tempest_braille(&mut b, f, &to_dot, upd);
 
         // Edge of the galaxy.
         for (ax, ay, bx, by) in [
@@ -574,6 +583,11 @@ impl App {
             }
             let col = if is_me { Color::White } else { self.player_color(p) };
             let cloaked = p.flags & (pf::CLOAK | pf::PHASED) != 0;
+            // Tempest perspective: climbers grow as they near the rim.
+            let sr = match super::render_vec::web_lane_width(f, p) {
+                Some(w) => (w * 0.36 / upd).clamp(1.0, 9.0),
+                None => sr,
+            };
             if p.flags & pf::CHARGING != 0 {
                 b.circle(x, y, sr * 2.0, Color::Cyan, 3);
             }
@@ -648,6 +662,7 @@ impl App {
 
         let mut labels: Vec<(i32, i32, String, Color, bool)> = Vec::new();
         super::render_terrain::draw_braille(&mut b, f, &to_dot, 1.0 / sx, false, &mut labels);
+        super::render_terrain::draw_tempest_braille(&mut b, f, &to_dot, 1.0 / sx);
         for (k, def) in PLANETS.iter().enumerate() {
             let info = &f.planets[k];
             let col = if info.known { self.planet_color(info) } else { DIM };
@@ -741,6 +756,8 @@ impl App {
             (pf::BEAMDOWN, "BEAM-DOWN"),
             (pf::TRACTOR, "TRACTOR"),
             (pf::PRESSOR, "PRESSOR"),
+            (pf::TRAPPED, "TRAPPED"),
+            (pf::ZAPPER, "SUPERZAPPER(d)"),
             (pf::OVERWATCH, "OVERWATCH"),
             (pf::HUNTED, "HUNTED"),
             (pf::TRIBBLES, "TRIBBLES"),
@@ -836,9 +853,11 @@ impl App {
 
     fn draw_messages(&self, scr: &mut Screen, r: Rect) {
         let my_team = self.me().map(|p| p.team).unwrap_or(Team::Ind);
-        let n = r.h as usize;
-        let start = self.msgs.len().saturating_sub(n);
-        for (k, m) in self.msgs.iter().skip(start).enumerate() {
+        let rows = r.h.max(0) as usize;
+        // Newest at the bottom; long messages wrap under the sender's name.
+        let indent = 9usize;
+        let mut lines: Vec<(String, Color, bool)> = Vec::new();
+        for m in self.msgs.iter().rev() {
             let col = match m.kind {
                 MsgKind::System if m.from == "ALERT" => Color::Magenta,
                 MsgKind::System => Color::Grey,
@@ -846,8 +865,18 @@ impl App {
                 MsgKind::Team => team_color(my_team),
                 MsgKind::Indiv => Color::Cyan,
             };
-            let line = format!("{:<8} {}", m.from, m.text);
-            scr.text_clip(r.x, r.y + k as i32, &line, col, m.kind != MsgKind::System || m.from == "ALERT", r.x + r.w - 1);
+            let bold = m.kind != MsgKind::System || m.from == "ALERT";
+            let parts = wrap_chars(&m.text, (r.w as usize).saturating_sub(indent).max(10));
+            for (k, part) in parts.iter().enumerate().rev() {
+                let head = if k == 0 { format!("{:<8} ", m.from) } else { " ".repeat(indent) };
+                lines.push((format!("{}{}", head, part), col, bold));
+            }
+            if lines.len() >= rows {
+                break;
+            }
+        }
+        for (k, (line, col, bold)) in lines.into_iter().take(rows).collect::<Vec<_>>().into_iter().rev().enumerate() {
+            scr.text_clip(r.x, r.y + k as i32, &line, col, bold, r.x + r.w - 1);
         }
     }
 
@@ -891,10 +920,19 @@ impl App {
                     MsgTarget::Team(t) => t.abbr().to_string(),
                     MsgTarget::Player(p) => format!("player {}", slot_char(*p)),
                 };
-                scr.text_clip(x, y, &format!("To {}> {}█", to, text), Color::White, true, maxx);
+                // Keep the end of a long message (where you're typing) in view.
+                let prompt = format!("To {}> ", to);
+                let room = ((maxx - x + 1) as usize).saturating_sub(prompt.chars().count() + 2).max(8);
+                let n = text.chars().count();
+                let shown: String = if n > room {
+                    format!("…{}", text.chars().skip(n - room + 1).collect::<String>())
+                } else {
+                    text.clone()
+                };
+                scr.text_clip(x, y, &format!("{}{}█", prompt, shown), Color::White, true, maxx);
             }
             Mode::Refit => {
-                scr.text_clip(x, y, "Refit to: [s]cout [d]estroyer [c]ruiser [b]attleship [a]ssault [x] starbase", Color::Yellow, true, maxx);
+                scr.text_clip(x, y, "Refit to: [s]cout [d]estroyer [c]ruiser [b]attleship [a]ssault [x] starbase [e] special [u] relic", Color::Yellow, true, maxx);
             }
             Mode::ConfirmQuit => {
                 scr.text_clip(x, y, "Really quit Netrek? (y/n)", Color::Red, true, maxx);
@@ -1131,6 +1169,37 @@ impl App {
             Popup::None => {}
         }
     }
+}
+
+/// Break `text` into lines of at most `width` characters, at spaces where
+/// possible.
+pub(super) fn wrap_chars(text: &str, width: usize) -> Vec<String> {
+    let width = width.max(1);
+    let mut lines = Vec::new();
+    let mut cur = String::new();
+    for word in text.split(' ') {
+        let len = |s: &str| s.chars().count();
+        if !cur.is_empty() && len(&cur) + 1 + len(word) > width {
+            lines.push(std::mem::take(&mut cur));
+        }
+        let mut word = word.to_string();
+        while len(&word) > width {
+            let head: String = word.chars().take(width).collect();
+            word = word.chars().skip(width).collect();
+            if !cur.is_empty() {
+                lines.push(std::mem::take(&mut cur));
+            }
+            lines.push(head);
+        }
+        if !cur.is_empty() {
+            cur.push(' ');
+        }
+        cur.push_str(&word);
+    }
+    if !cur.is_empty() || lines.is_empty() {
+        lines.push(cur);
+    }
+    lines
 }
 
 pub(super) const HELP: &[(&str, &str)] = &[

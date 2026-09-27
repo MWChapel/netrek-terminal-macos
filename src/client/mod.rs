@@ -1135,7 +1135,7 @@ impl App {
                 self.mode = Mode::Compose { target: Some(t), text };
             }
             (Some(t), KeyCode::Char(c)) => {
-                if text.chars().count() < 79 {
+                if text.chars().count() < MAX_MESSAGE {
                     text.push(c);
                 }
                 self.mode = Mode::Compose { target: Some(t), text };

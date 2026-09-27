@@ -4,13 +4,15 @@
 use serde::{Deserialize, Serialize};
 
 pub const DEFAULT_PORT: u16 = 2592; // the traditional Netrek port
-pub const PROTOCOL_VERSION: u32 = 11;
+pub const PROTOCOL_VERSION: u32 = 13;
 
 pub const UPS: u64 = 10; // server updates per second, like the original
 pub const GWIDTH: f64 = 100_000.0;
 pub const WARP1: f64 = 20.0; // units moved per update at warp 1
 pub const MAXPLAYER: usize = 32;
 pub const MAXTORP: usize = 8;
+/// Longest chat message (classic Netrek allowed 80; the wider panel wraps).
+pub const MAX_MESSAGE: usize = 160;
 
 pub const EXPDIST: f64 = 350.0; // torp explodes at this range
 pub const DAMDIST: f64 = 2000.0; // torp does damage within this range
@@ -133,10 +135,11 @@ pub enum Faction {
     Q,
     Ferengi,
     Swarm,
+    Tempest,
 }
 
 impl Faction {
-    pub const ALL: [Faction; 19] = [
+    pub const ALL: [Faction; 20] = [
         Faction::Khan,
         Faction::Gorn,
         Faction::Tholian,
@@ -156,6 +159,7 @@ impl Faction {
         Faction::Q,
         Faction::Ferengi,
         Faction::Swarm,
+        Faction::Tempest,
     ];
 
     /// Name used on the command line.
@@ -180,6 +184,7 @@ impl Faction {
             Faction::Q => "q",
             Faction::Ferengi => "ferengi",
             Faction::Swarm => "swarm",
+            Faction::Tempest => "tempest",
         }
     }
 
@@ -204,6 +209,7 @@ impl Faction {
             Faction::Q => "Q",
             Faction::Ferengi => "the Ferengi",
             Faction::Swarm => "the Swarm",
+            Faction::Tempest => "the Tempest",
         }
     }
 
@@ -229,6 +235,7 @@ impl Faction {
             Faction::Q => "Q",
             Faction::Ferengi => "Ferengi",
             Faction::Swarm => "Swarm",
+            Faction::Tempest => "Tempest",
         }
     }
 
@@ -254,6 +261,7 @@ impl Faction {
             Faction::Q => "QQ",
             Faction::Ferengi => "FE",
             Faction::Swarm => "SW",
+            Faction::Tempest => "TP",
         }
     }
 
@@ -316,6 +324,12 @@ pub enum ShipType {
     HusnockWarship,
     SulibanCell,
     ExcalbianShip,
+    // The Tempest (alien incursion): its core and the things that climb its web.
+    TempestCore,
+    Flipper,
+    Tanker,
+    Pulsar,
+    Fuseball,
 }
 
 impl ShipType {
@@ -449,6 +463,7 @@ impl ShipType {
             ShipType::CrystalEntity => 1500.0,
             ShipType::WhaleProbe => 1200.0,
             ShipType::QEntity => 600.0,
+            ShipType::TempestCore => 1200.0,
             _ => EXPDIST,
         }
     }
@@ -493,7 +508,7 @@ pub struct ShipStats {
     pub tract_str: f64,
 }
 
-pub static SHIPS: [ShipStats; 42] = [
+pub static SHIPS: [ShipStats; 47] = [
     ShipStats {
         name: "Scout", abbr: "SC", max_speed: 12, max_shield: 75.0, max_damage: 75.0,
         max_fuel: 5000.0, max_armies: 2, torp_damage: 25.0, torp_speed: 16.0, torp_fuse: 16,
@@ -872,6 +887,51 @@ pub static SHIPS: [ShipStats; 42] = [
         recharge: 14.0, repair: 115.0, warp_cost: 4.0, cloak_cost: 24.0, shield_cost: 3.0,
         turns: 200000.0, acc: 150, dec: 250, wpn_cool: 2.5, egn_cool: 7.0,
         max_etemp: 1200.0, max_wtemp: 1100.0, mass: 2000.0, tract_range: 1.0, tract_str: 3000.0,
+    },
+    ShipStats {
+        name: "Tempest core", abbr: "TC", max_speed: 12, max_shield: 0.0, max_damage: 1600.0,
+        max_fuel: 1_000_000.0, max_armies: 0, torp_damage: 0.0, torp_speed: 10.0, torp_fuse: 30,
+        torp_cost: 0.0, phaser_damage: 0.0, phaser_cost: 0.0,
+        plasma_damage: 0.0, plasma_speed: 0.0, plasma_fuse: 0, plasma_cost: 0.0,
+        recharge: 500.0, repair: 0.0, warp_cost: 0.0, cloak_cost: 0.0, shield_cost: 0.0,
+        turns: 600_000.0, acc: 400, dec: 400, wpn_cool: 50.0, egn_cool: 50.0,
+        max_etemp: 100_000.0, max_wtemp: 100_000.0, mass: 200000.0, tract_range: 1.0, tract_str: 1.0,
+    },
+    ShipStats {
+        name: "Flipper", abbr: "FL", max_speed: 12, max_shield: 0.0, max_damage: 30.0,
+        max_fuel: 1_000_000.0, max_armies: 0, torp_damage: 0.0, torp_speed: 10.0, torp_fuse: 30,
+        torp_cost: 0.0, phaser_damage: 0.0, phaser_cost: 0.0,
+        plasma_damage: 0.0, plasma_speed: 0.0, plasma_fuse: 0, plasma_cost: 0.0,
+        recharge: 500.0, repair: 0.0, warp_cost: 0.0, cloak_cost: 0.0, shield_cost: 0.0,
+        turns: 600_000.0, acc: 400, dec: 400, wpn_cool: 50.0, egn_cool: 50.0,
+        max_etemp: 100_000.0, max_wtemp: 100_000.0, mass: 800.0, tract_range: 1.0, tract_str: 1.0,
+    },
+    ShipStats {
+        name: "Tanker", abbr: "TK", max_speed: 12, max_shield: 0.0, max_damage: 60.0,
+        max_fuel: 1_000_000.0, max_armies: 0, torp_damage: 0.0, torp_speed: 10.0, torp_fuse: 30,
+        torp_cost: 0.0, phaser_damage: 0.0, phaser_cost: 0.0,
+        plasma_damage: 0.0, plasma_speed: 0.0, plasma_fuse: 0, plasma_cost: 0.0,
+        recharge: 500.0, repair: 0.0, warp_cost: 0.0, cloak_cost: 0.0, shield_cost: 0.0,
+        turns: 600_000.0, acc: 400, dec: 400, wpn_cool: 50.0, egn_cool: 50.0,
+        max_etemp: 100_000.0, max_wtemp: 100_000.0, mass: 800.0, tract_range: 1.0, tract_str: 1.0,
+    },
+    ShipStats {
+        name: "Pulsar", abbr: "PU", max_speed: 12, max_shield: 0.0, max_damage: 40.0,
+        max_fuel: 1_000_000.0, max_armies: 0, torp_damage: 0.0, torp_speed: 10.0, torp_fuse: 30,
+        torp_cost: 0.0, phaser_damage: 0.0, phaser_cost: 0.0,
+        plasma_damage: 0.0, plasma_speed: 0.0, plasma_fuse: 0, plasma_cost: 0.0,
+        recharge: 500.0, repair: 0.0, warp_cost: 0.0, cloak_cost: 0.0, shield_cost: 0.0,
+        turns: 600_000.0, acc: 400, dec: 400, wpn_cool: 50.0, egn_cool: 50.0,
+        max_etemp: 100_000.0, max_wtemp: 100_000.0, mass: 800.0, tract_range: 1.0, tract_str: 1.0,
+    },
+    ShipStats {
+        name: "Fuseball", abbr: "FB", max_speed: 12, max_shield: 0.0, max_damage: 45.0,
+        max_fuel: 1_000_000.0, max_armies: 0, torp_damage: 0.0, torp_speed: 10.0, torp_fuse: 30,
+        torp_cost: 0.0, phaser_damage: 0.0, phaser_cost: 0.0,
+        plasma_damage: 0.0, plasma_speed: 0.0, plasma_fuse: 0, plasma_cost: 0.0,
+        recharge: 500.0, repair: 0.0, warp_cost: 0.0, cloak_cost: 0.0, shield_cost: 0.0,
+        turns: 600_000.0, acc: 400, dec: 400, wpn_cool: 50.0, egn_cool: 50.0,
+        max_etemp: 100_000.0, max_wtemp: 100_000.0, mass: 800.0, tract_range: 1.0, tract_str: 1.0,
     },
 ];
 
