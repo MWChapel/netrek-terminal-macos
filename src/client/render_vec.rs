@@ -80,6 +80,59 @@ fn draw_phaser(px: &mut Canvas, a: (f32, f32), b: (f32, f32), col: Rgb, hit: boo
     }
 }
 
+/// The little pictures inside a planet, as in the classic Netrek client.
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum PlanetIcon {
+    Armies,
+    Repair,
+    Fuel,
+    Farm,
+}
+
+/// Draw one planet icon of height `s` centred on (cx, cy); `bg` is the
+/// planet's fill, used to cut notches and windows.
+fn draw_planet_icon(px: &mut Canvas, icon: PlanetIcon, cx: f32, cy: f32, s: f32, col: Rgb, bg: Rgb) {
+    let w = (s * 0.13).max(1.0);
+    match icon {
+        PlanetIcon::Armies => {
+            // A trooper: head, body, arms, legs.
+            px.disc(cx, cy - s * 0.32, s * 0.15, col, 1.0);
+            px.line(cx, cy - s * 0.16, cx, cy + s * 0.14, w * 1.3, col, 1.0, 0.0);
+            px.line(cx - s * 0.28, cy - s * 0.06, cx + s * 0.28, cy - s * 0.06, w, col, 1.0, 0.0);
+            px.line(cx, cy + s * 0.14, cx - s * 0.2, cy + s * 0.45, w, col, 1.0, 0.0);
+            px.line(cx, cy + s * 0.14, cx + s * 0.2, cy + s * 0.45, w, col, 1.0, 0.0);
+        }
+        PlanetIcon::Repair => {
+            // An open-ended wrench, handle down-left.
+            px.line(cx - s * 0.3, cy + s * 0.38, cx + s * 0.08, cy - s * 0.02, w * 1.6, col, 1.0, 0.0);
+            let (hx, hy) = (cx + s * 0.16, cy - s * 0.16);
+            px.disc(hx, hy, s * 0.24, col, 1.0);
+            px.disc(hx, hy, s * 0.1, bg, 1.0);
+            // The jaw opening.
+            px.fill_poly(&[(hx, hy), (hx + s * 0.34, hy - s * 0.08), (hx + s * 0.08, hy - s * 0.34)], bg, 1.0);
+        }
+        PlanetIcon::Fuel => {
+            // A fuel pump with a window and a hose.
+            let (l, r, t, b) = (cx - s * 0.32, cx + s * 0.1, cy - s * 0.42, cy + s * 0.45);
+            px.round_rect(l, t, r - l, b - t, s * 0.06, col, 1.0, None);
+            px.fill_rect(l + s * 0.08, t + s * 0.1, r - l - s * 0.16, s * 0.24, bg, 1.0);
+            px.polyline(&[(r, cy - s * 0.12), (cx + s * 0.32, cy - s * 0.02), (cx + s * 0.32, cy + s * 0.28)], false, w, col, 1.0, 0.0);
+            px.line(cx + s * 0.32, cy - s * 0.02, cx + s * 0.32, cy - s * 0.3, w, col, 1.0, 0.0);
+        }
+        PlanetIcon::Farm => {
+            // A stalk of wheat.
+            px.line(cx, cy + s * 0.46, cx, cy - s * 0.3, w, col, 1.0, 0.0);
+            for k in 0..3 {
+                let gy = cy - s * 0.22 + k as f32 * s * 0.2;
+                for side in [-1.0, 1.0] {
+                    px.line(cx, gy + s * 0.1, cx + side * s * 0.2, gy - s * 0.04, w * 1.2, col, 1.0, 0.0);
+                }
+            }
+            px.line(cx, cy - s * 0.3, cx, cy - s * 0.46, w * 1.4, col, 1.0, 0.0);
+        }
+    }
+}
+
 fn hash(x: i64, y: i64) -> u64 {
     let mut h = (x as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ (y as u64).wrapping_mul(0xC2B2_AE3D_27D4_EB4F);
     h ^= h >> 29;
@@ -137,7 +190,8 @@ impl App {
         }
 
         // Planets: outlined circles with names underneath.
-        let pr = u(ORBDIST * 0.75).clamp(5.0, 60.0);
+        // Just inside the orbit, so orbiting ships circle the edge.
+        let pr = u(ORBDIST * 0.9).clamp(5.0, 60.0);
         for (k, def) in PLANETS.iter().enumerate() {
             if !visible(def.x, def.y, 4000.0) {
                 continue;
@@ -151,24 +205,59 @@ impl App {
                 px.ring(x, y, pr - 3.0, 1.0, col, 0.7);
             }
             if info.known {
-                let mut tags = String::new();
-                for (flag, ch) in [(PL_REPAIR, 'R'), (PL_FUEL, 'F'), (PL_AGRI, 'A')] {
-                    if info.flags & flag != 0 {
-                        tags.push(ch);
-                    }
-                }
                 if info.tribbles {
-                    tags.push('T');
                     px.ring_dashed(x, y, pr + 4.0, 1.5, faction_rgb(Faction::Tribbles), 0.9, 3.0);
                 }
-                px.text_centered(tr, x, y + fs * 0.35, &info.armies.to_string(), fs * 0.9, col);
-                if !tags.is_empty() && pr > fs {
-                    px.text_centered(tr, x, y + fs * 1.2, &tags, fs * 0.7, scale(col, 0.8));
+                // Classic Netrek planet icons: armies, repair, fuel, farming,
+                // with the army count underneath (letters when too small).
+                let mut icons = Vec::new();
+                if info.armies > 0 {
+                    icons.push(PlanetIcon::Armies);
+                }
+                for (flag, icon) in [(PL_REPAIR, PlanetIcon::Repair), (PL_FUEL, PlanetIcon::Fuel), (PL_AGRI, PlanetIcon::Farm)] {
+                    if info.flags & flag != 0 {
+                        icons.push(icon);
+                    }
+                }
+                let count_inside = pr >= fs * 1.4;
+                if pr >= 12.0 && !icons.is_empty() {
+                    let n = icons.len() as f32;
+                    let size = (pr * 0.62).min(pr * 1.55 / n);
+                    let gap = size * 0.12;
+                    let row = n * size + (n - 1.0) * gap;
+                    let iy = y - pr * 0.18;
+                    for (j, icon) in icons.iter().enumerate() {
+                        let ix = x - row / 2.0 + size / 2.0 + j as f32 * (size + gap);
+                        draw_planet_icon(&mut px, *icon, ix, iy, size, col, scale(col, 0.12));
+                    }
+                    if count_inside {
+                        px.text_centered(tr, x, y + pr * 0.62, &info.armies.to_string(), (fs * 0.85).min(pr * 0.5), col);
+                    }
+                } else {
+                    let mut tags = String::new();
+                    for (flag, ch) in [(PL_REPAIR, 'R'), (PL_FUEL, 'F'), (PL_AGRI, 'A')] {
+                        if info.flags & flag != 0 {
+                            tags.push(ch);
+                        }
+                    }
+                    if info.tribbles {
+                        tags.push('T');
+                    }
+                    px.text_centered(tr, x, y + fs * 0.35, &info.armies.to_string(), fs * 0.9, col);
+                    if !tags.is_empty() && pr > fs {
+                        px.text_centered(tr, x, y + fs * 1.2, &tags, fs * 0.7, scale(col, 0.8));
+                    }
                 }
             } else {
                 px.text_centered(tr, x, y + fs * 0.35, "?", fs, col);
             }
-            px.text_centered(tr, x, y + pr + fs * 1.1, def.name, fs, col);
+            // Army count beside the name when the planet is too small to hold it.
+            let label = if info.known && pr >= 12.0 && pr < fs * 1.4 && info.armies > 0 {
+                format!("{} {}", def.name, info.armies)
+            } else {
+                def.name.to_string()
+            };
+            px.text_centered(tr, x, y + pr + fs * 1.1, &label, fs, col);
         }
 
         // Tholian webs: glowing crystalline strands.
@@ -795,6 +884,43 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Renders planets with every combination of icons at a few sizes into
+    /// $TMPDIR/netrek-planets.ppm for eyeballing.
+    #[test]
+    fn planet_icon_gallery() {
+        let sets: [&[PlanetIcon]; 4] = [
+            &[PlanetIcon::Armies, PlanetIcon::Repair, PlanetIcon::Fuel],
+            &[PlanetIcon::Armies, PlanetIcon::Repair, PlanetIcon::Fuel, PlanetIcon::Farm],
+            &[PlanetIcon::Armies, PlanetIcon::Farm],
+            &[PlanetIcon::Armies],
+        ];
+        let col = rgb(0xf2c94c);
+        let mut c = Canvas::new(520, 330, [0.0, 0.0, 0.0]);
+        for (row, pr) in [18.0f32, 26.0, 40.0].into_iter().enumerate() {
+            for (k, icons) in sets.iter().enumerate() {
+                let (x, y) = (70.0 + k as f32 * 125.0, 55.0 + row as f32 * 100.0);
+                c.disc(x, y, pr, scale(col, 0.12), 1.0);
+                c.ring(x, y, pr, 1.3, col, 1.0);
+                let n = icons.len() as f32;
+                let size = (pr * 0.62).min(pr * 1.55 / n);
+                let gap = size * 0.12;
+                let rw = n * size + (n - 1.0) * gap;
+                for (j, icon) in icons.iter().enumerate() {
+                    let ix = x - rw / 2.0 + size / 2.0 + j as f32 * (size + gap);
+                    draw_planet_icon(&mut c, *icon, ix, y - pr * 0.18, size, col, scale(col, 0.12));
+                }
+            }
+        }
+        let mut out = format!("P6 {} {} 255\n", c.w, c.h).into_bytes();
+        for y in 0..c.h {
+            for x in 0..c.w {
+                let p = c.get(x, y);
+                out.extend([p[0] as u8, p[1] as u8, p[2] as u8]);
+            }
+        }
+        std::fs::write(std::env::temp_dir().join("netrek-planets.ppm"), out).unwrap();
+    }
 
     /// Renders a phaser hit and a miss at every age of their animation into
     /// $TMPDIR/netrek-phasers.ppm for eyeballing.
