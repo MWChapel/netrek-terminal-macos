@@ -193,6 +193,26 @@ pub enum TerrainKind {
     Comet,
     /// Reveals cloaked ships inside it.
     TachyonGrid,
+    /// Hidden mines: touch one and it blows (a new one is laid elsewhere).
+    Minefield,
+    /// Time runs slow: ships and torpedoes inside move at half speed.
+    ChronitonField,
+    /// A whirlpool that sweeps ships around its centre.
+    GravitonEddy,
+    /// Tractors fail and torpedoes curve; the core crushes.
+    Magnetar,
+    /// Volatile gas: firing a weapon inside ignites it.
+    MetreonCloud,
+    /// Strips shields and stops them recharging.
+    TetryonField,
+    /// Solid: ships can't pass through it, and it stops torpedoes.
+    Planetoid,
+    /// A wall from (x, y) to (x2, y2): crossing costs fuel and hull.
+    GalacticBarrier,
+    /// Flings ships to a random spot in the galaxy.
+    FluidicRift,
+    /// A neutral outpost that repairs and refuels anyone holding beside it.
+    AbandonedStation,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

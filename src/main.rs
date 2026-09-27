@@ -86,8 +86,8 @@ struct Extras {
     /// Treaties between empires (/treaty, /break, /treaties)
     #[arg(long)]
     diplomacy: bool,
-    /// Space terrain: nebulae, ion storm, asteroids, black hole, pulsar, wormhole,
-    /// derelicts, slipstreams, a star, a comet and a tachyon grid
+    /// Space terrain: 10 of 21 kinds per galaxy, picked at random (nebulae, black hole,
+    /// wormhole, minefields, magnetar, galactic barrier, fluidic rift and more)
     #[arg(long)]
     terrain: bool,
     /// Supply convoys that carry supplies home to buy empire upgrades

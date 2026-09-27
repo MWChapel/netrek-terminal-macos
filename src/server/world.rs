@@ -988,6 +988,9 @@ impl World {
         p.repair_mode = false;
         self.torps.push(t);
         self.torps.extend(extra);
+        if self.features.terrain {
+            super::terrain::metreon_ignite(self, i);
+        }
     }
 
     fn fire_phaser(&mut self, i: usize, dir: f64) {
@@ -1092,6 +1095,9 @@ impl World {
             info: PhaserInfo { owner: id, x1: x as i32, y1: y as i32, x2: x2 as i32, y2: y2 as i32, hit },
             ticks: 6,
         });
+        if self.features.terrain {
+            super::terrain::metreon_ignite(self, i);
+        }
     }
 
     /// A phaser hit on the Crystalline Entity. Phasers from three or more

@@ -227,7 +227,23 @@ fn issue(world: &World, logistics: &Logistics, i: usize) -> Option<Order> {
         let sights: Vec<&super::terrain::Terrain> = world
             .terrain
             .iter()
-            .filter(|t| matches!(t.kind, TerrainKind::Nebula | TerrainKind::Pulsar | TerrainKind::BlackHole | TerrainKind::Star | TerrainKind::TachyonGrid | TerrainKind::Asteroids))
+            .filter(|t| {
+                matches!(
+                    t.kind,
+                    TerrainKind::Nebula
+                        | TerrainKind::Pulsar
+                        | TerrainKind::BlackHole
+                        | TerrainKind::Star
+                        | TerrainKind::TachyonGrid
+                        | TerrainKind::Asteroids
+                        | TerrainKind::ChronitonField
+                        | TerrainKind::GravitonEddy
+                        | TerrainKind::Magnetar
+                        | TerrainKind::TetryonField
+                        | TerrainKind::Planetoid
+                        | TerrainKind::AbandonedStation
+                )
+            })
             .collect();
         if let Some(t) = sights.choose(&mut rng) {
             options.push(order(Kind::Survey(t.name.clone()), format!("Survey the {}", t.name), 1, 150));

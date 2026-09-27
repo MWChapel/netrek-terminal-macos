@@ -22,6 +22,16 @@ const SLIPSTREAM: Rgb = rgb(0x40e0c0);
 const STAR: Rgb = rgb(0xffc040);
 const COMET: Rgb = rgb(0xc8e8ff);
 const TACHYON: Rgb = rgb(0x50d8e8);
+const MINES: Rgb = rgb(0xff4d4d);
+const CHRONITON: Rgb = rgb(0x40e0b0);
+const EDDY: Rgb = rgb(0x7fa8ff);
+const MAGNETAR: Rgb = rgb(0xff50e0);
+const METREON: Rgb = rgb(0xffa040);
+const TETRYON: Rgb = rgb(0xd8ff60);
+const PLANETOID: Rgb = rgb(0x9a9088);
+const BARRIER: Rgb = rgb(0xb070ff);
+const RIFT: Rgb = rgb(0xff90d0);
+const STATION: Rgb = rgb(0xc0c8d8);
 
 /// Pulsar cycle length in ticks (matches the server).
 const PULSAR_PERIOD: f32 = 100.0;
@@ -61,7 +71,7 @@ pub fn draw_vec(
         let (x2, y2) = to(t.x2 as f64, t.y2 as f64);
         let r = u(t.r as f64).max(1.0);
         let sd = seed(t);
-        let segment = matches!(t.kind, TerrainKind::Corridor | TerrainKind::Comet | TerrainKind::Wormhole);
+        let segment = matches!(t.kind, TerrainKind::Corridor | TerrainKind::Comet | TerrainKind::Wormhole | TerrainKind::GalacticBarrier);
         if !segment && !on_screen(x, y, r * 1.2) {
             continue;
         }
@@ -294,6 +304,157 @@ pub fn draw_vec(
                     label(px, x, y - r * 0.9, TACHYON);
                 }
             }
+            TerrainKind::Minefield => {
+                px.ring_dashed(x, y, r, 1.2, MINES, 0.55, 5.0);
+                if detail {
+                    // Warning markers (the mines themselves can't be seen).
+                    for k in 0..8 {
+                        let a = k as f32 / 8.0 * TAU + rnd(sd, 1);
+                        let (mx, my) = (x + a.cos() * r * 0.97, y + a.sin() * r * 0.97);
+                        px.line(mx - 3.0, my - 3.0, mx + 3.0, my + 3.0, 1.2, MINES, 0.8, 0.0);
+                        px.line(mx - 3.0, my + 3.0, mx + 3.0, my - 3.0, 1.2, MINES, 0.8, 0.0);
+                    }
+                    label(px, x, y - r * 0.85, MINES);
+                }
+            }
+            TerrainKind::ChronitonField => {
+                px.glow(x, y, r, CHRONITON, 0.12);
+                for k in [1.0f32, 0.66, 0.33] {
+                    px.ring_dashed(x, y, r * k, 1.0, CHRONITON, 0.35, 6.0);
+                }
+                if detail {
+                    // Clock marks, and one slowly turning hand of arc.
+                    for k in 0..12 {
+                        let a = k as f32 / 12.0 * TAU;
+                        px.line(x + a.cos() * r * 0.9, y + a.sin() * r * 0.9, x + a.cos() * r, y + a.sin() * r, 1.2, CHRONITON, 0.6, 0.0);
+                    }
+                    let a0 = tick * 0.01;
+                    let arc: Vec<(f32, f32)> = (0..16).map(|k| { let a = a0 + k as f32 * 0.06; (x + a.cos() * r * 0.8, y + a.sin() * r * 0.8) }).collect();
+                    px.polyline(&arc, false, 2.0, CHRONITON, 0.7, 0.0);
+                    label(px, x, y - r * 0.85, CHRONITON);
+                }
+            }
+            TerrainKind::GravitonEddy => {
+                px.glow(x, y, r, EDDY, 0.12);
+                for arm in 0..4 {
+                    let pts: Vec<(f32, f32)> = (0..30)
+                        .map(|k| {
+                            let s = k as f32 / 29.0;
+                            let a = tick * 0.04 + arm as f32 * TAU / 4.0 + s * 3.0;
+                            (x + a.cos() * r * s, y + a.sin() * r * s)
+                        })
+                        .collect();
+                    px.polyline(&pts, false, if detail { 1.5 } else { 1.0 }, EDDY, 0.55, 0.0);
+                }
+                if detail {
+                    label(px, x, y - r * 0.9, EDDY);
+                }
+            }
+            TerrainKind::Magnetar => {
+                px.ring_dashed(x, y, r, 1.0, MAGNETAR, 0.3, 5.0);
+                if detail {
+                    // Magnetic field loops above and below the poles.
+                    for k in 1..4 {
+                        let ry = r * 0.28 * k as f32;
+                        let rx = ry * 0.55;
+                        for side in [-1.0f32, 1.0] {
+                            let pts: Vec<(f32, f32)> = (0..24).map(|j| { let a = j as f32 / 23.0 * std::f32::consts::PI; (x + side * a.sin() * rx, y - a.cos() * ry) }).collect();
+                            px.polyline(&pts, false, 1.0, MAGNETAR, 0.35, 0.0);
+                        }
+                    }
+                    label(px, x, y - r * 0.9, MAGNETAR);
+                }
+                px.glow(x, y, u(1500.0).max(3.0), MAGNETAR, 0.6);
+                px.disc(x, y, u(350.0).max(1.5), rgb(0xffd0f8), 1.0);
+            }
+            TerrainKind::MetreonCloud => {
+                px.glow(x, y, r * 1.1, METREON, 0.28);
+                if detail {
+                    for k in 0..5 {
+                        let a = rnd(sd, k) * TAU;
+                        let d = rnd(sd, k + 50) * r * 0.5;
+                        px.glow(x + a.cos() * d, y + a.sin() * d, r * 0.45, mix(METREON, rgb(0xff5020), rnd(sd, k + 9)), 0.2);
+                    }
+                    label(px, x, y - r * 0.8, METREON);
+                }
+            }
+            TerrainKind::TetryonField => {
+                px.ring_dashed(x, y, r, 1.0, TETRYON, 0.4, 2.0);
+                let n = if detail { 40 } else { 8 };
+                let flicker = (tick / 3.0) as u64;
+                for k in 0..n {
+                    let a = rnd(sd ^ flicker, k) * TAU;
+                    let d = rnd(sd ^ flicker, k + 100).sqrt() * r;
+                    px.dot(x + a.cos() * d, y + a.sin() * d, TETRYON, 0.8);
+                }
+                if detail {
+                    label(px, x, y - r * 0.9, TETRYON);
+                }
+            }
+            TerrainKind::Planetoid => {
+                px.disc(x, y, r, scale(PLANETOID, 0.45), 1.0);
+                px.ring(x, y, r, 1.2, PLANETOID, 1.0);
+                if detail {
+                    for k in 0..6 {
+                        let a = rnd(sd, k) * TAU;
+                        let d = rnd(sd, k + 30) * r * 0.65;
+                        px.ring(x + a.cos() * d, y + a.sin() * d, r * (0.08 + 0.1 * rnd(sd, k + 60)), 1.0, scale(PLANETOID, 0.8), 0.9);
+                    }
+                    label(px, x, y - r - 6.0, PLANETOID);
+                }
+            }
+            TerrainKind::GalacticBarrier => {
+                let (dx, dy) = (x2 - x, y2 - y);
+                let len = (dx * dx + dy * dy).sqrt().max(1.0);
+                let (nx, ny) = (-dy / len, dx / len);
+                px.line(x, y, x2, y2, u(700.0).max(4.0), BARRIER, 0.15, 0.0);
+                px.line(x, y, x2, y2, 1.5, mix(BARRIER, WHITE, 0.4), 0.9, 0.0);
+                if detail {
+                    // A shimmering, wavering edge.
+                    let steps = (len / 6.0).max(8.0) as usize;
+                    let pts: Vec<(f32, f32)> = (0..=steps)
+                        .map(|k| {
+                            let s = k as f32 / steps as f32;
+                            let off = (s * 60.0 + tick * 0.3).sin() * u(180.0);
+                            (x + dx * s + nx * off, y + dy * s + ny * off)
+                        })
+                        .collect();
+                    px.polyline(&pts, false, 1.0, BARRIER, 0.6, 0.0);
+                    label(px, (x + x2) / 2.0 + nx * 14.0, (y + y2) / 2.0 + ny * 14.0, BARRIER);
+                }
+            }
+            TerrainKind::FluidicRift => {
+                let rr = u(900.0).max(4.0);
+                px.glow(x, y, rr * 2.2, RIFT, 0.4);
+                let pts: Vec<(f32, f32)> = (0..20)
+                    .map(|k| {
+                        let a = k as f32 / 20.0 * TAU + tick * 0.08;
+                        let jag = if k % 2 == 0 { 1.0 } else { 0.55 };
+                        (x + a.cos() * rr * jag, y + a.sin() * rr * jag * 0.6)
+                    })
+                    .collect();
+                px.polyline(&pts, true, 1.3, mix(RIFT, WHITE, 0.3), 0.9, 0.0);
+                if detail {
+                    label(px, x, y - rr * 1.8, RIFT);
+                }
+            }
+            TerrainKind::AbandonedStation => {
+                let s = u(500.0).max(3.0);
+                if detail {
+                    // A K-7 style station: a hub and three spokes to pods.
+                    px.ring_dashed(x, y, r, 1.0, STATION, 0.3, 4.0);
+                    for k in 0..3 {
+                        let a = k as f32 / 3.0 * TAU - std::f32::consts::FRAC_PI_2;
+                        let (px2, py2) = (x + a.cos() * s * 1.6, y + a.sin() * s * 1.6);
+                        px.line(x, y, px2, py2, 1.5, STATION, 0.9, 0.0);
+                        px.disc(px2, py2, s * 0.35, scale(STATION, 0.4), 1.0);
+                        px.ring(px2, py2, s * 0.35, 1.0, STATION, 1.0);
+                    }
+                    label(px, x, y - s * 2.6, STATION);
+                }
+                px.disc(x, y, s * 0.55, scale(STATION, 0.5), 1.0);
+                px.ring(x, y, s * 0.55, 1.2, STATION, 1.0);
+            }
         }
     }
 }
@@ -483,6 +644,72 @@ pub fn draw_braille(
                 b.arc(x, y, r, Color::DarkCyan, 0, 2);
                 name(x, y - r * 0.9, t, Color::Cyan);
             }
+            TerrainKind::Minefield => {
+                b.arc(x, y, r, Color::Red, 0, 3);
+                name(x, y - r * 0.85, t, Color::Red);
+            }
+            TerrainKind::ChronitonField => {
+                b.arc(x, y, r, Color::DarkGreen, 0, 2);
+                b.arc(x, y, r * 0.5, Color::DarkGreen, 0, 3);
+                name(x, y - r * 0.85, t, Color::Green);
+            }
+            TerrainKind::GravitonEddy => {
+                for arm in 0..3 {
+                    let a0 = tick * 0.04 + arm as f64 * std::f64::consts::TAU / 3.0;
+                    let mut prev = (x, y);
+                    for k in 1..12 {
+                        let s = k as f64 / 11.0;
+                        let a = a0 + s * 3.0;
+                        let p = (x + a.cos() * r * s, y + a.sin() * r * s);
+                        b.line(prev.0, prev.1, p.0, p.1, Color::Blue, 0);
+                        prev = p;
+                    }
+                }
+                name(x, y - r * 0.9, t, Color::Blue);
+            }
+            TerrainKind::Magnetar => {
+                b.disc(x, y, (350.0 / per_dot).max(0.8), Color::Magenta, 2);
+                b.arc(x, y, r, Color::DarkMagenta, 0, 4);
+                name(x, y - r * 0.9, t, Color::Magenta);
+            }
+            TerrainKind::MetreonCloud => {
+                b.arc(x, y, r, Color::DarkYellow, 0, 2);
+                if detail {
+                    for k in 0..40 {
+                        let a = rnd(sd, k) as f64 * std::f64::consts::TAU;
+                        let d = (rnd(sd, k + 300) as f64).sqrt() * r;
+                        b.dotf(x + a.cos() * d, y + a.sin() * d, Color::DarkYellow, 0);
+                    }
+                }
+                name(x, y - r * 0.8, t, Color::Yellow);
+            }
+            TerrainKind::TetryonField => {
+                b.arc(x, y, r, Color::Yellow, 0, 4);
+                name(x, y - r * 0.9, t, Color::Yellow);
+            }
+            TerrainKind::Planetoid => {
+                b.disc(x, y, r, Color::DarkGrey, 1);
+                b.circle(x, y, r, Color::Grey, 1);
+                name(x, y - r - 2.0, t, Color::Grey);
+            }
+            TerrainKind::GalacticBarrier => {
+                b.line(x, y, x2, y2, Color::Magenta, 1);
+                if detail {
+                    name((x + x2) / 2.0, (y + y2) / 2.0 - 3.0, t, Color::Magenta);
+                }
+            }
+            TerrainKind::FluidicRift => {
+                let rr = (900.0 / per_dot).max(1.5);
+                b.circle(x, y, rr, Color::Magenta, 1);
+                b.line(x - rr, y, x + rr, y, Color::White, 1);
+                name(x, y - rr * 2.0, t, Color::Magenta);
+            }
+            TerrainKind::AbandonedStation => {
+                let s = (500.0 / per_dot).max(1.0);
+                b.circle(x, y, s, Color::Grey, 1);
+                b.line(x, y - s * 1.8, x, y + s * 1.8, Color::Grey, 1);
+                name(x, y - s * 3.0, t, Color::Grey);
+            }
         }
     }
 }
@@ -496,26 +723,18 @@ mod tests {
     /// $TMPDIR/netrek-terrain.ppm for eyeballing.
     #[test]
     fn terrain_gallery() {
-        let kinds = [
-            TerrainKind::Nebula,
-            TerrainKind::IonStorm,
-            TerrainKind::Asteroids,
-            TerrainKind::BlackHole,
-            TerrainKind::Pulsar,
-            TerrainKind::Wormhole,
-            TerrainKind::Derelict,
-            TerrainKind::Corridor,
-            TerrainKind::Star,
-            TerrainKind::Comet,
-            TerrainKind::TachyonGrid,
-        ];
+        let kinds = crate::server::terrain::ALL_KINDS;
         let cell = 16_000.0;
         let terrain: Vec<TerrainInfo> = kinds
             .iter()
             .enumerate()
             .map(|(k, &kind)| {
-                let (cx, cy) = ((k % 4) as f64 * cell + cell / 2.0, (k / 4) as f64 * cell + cell / 2.0);
+                let (cx, cy) = ((k % 6) as f64 * cell + cell / 2.0, (k / 6) as f64 * cell + cell / 2.0);
                 let r = match kind {
+                    TerrainKind::Planetoid => 1500.0,
+                    TerrainKind::AbandonedStation => 1500.0,
+                    TerrainKind::FluidicRift => 700.0,
+                    TerrainKind::GalacticBarrier => 350.0,
                     TerrainKind::Derelict => 900.0,
                     TerrainKind::Wormhole => 600.0,
                     TerrainKind::Corridor => 700.0,
@@ -526,10 +745,12 @@ mod tests {
                     TerrainKind::Wormhole => (cx + 4000.0, cy + 3000.0),
                     TerrainKind::Corridor => (cx + 6000.0, cy - 4000.0),
                     TerrainKind::Comet => (cx + 6000.0, cy + 4000.0),
+                    TerrainKind::GalacticBarrier => (cx + 5000.0, cy + 5000.0),
                     _ => (cx, cy),
                 };
                 let (x, y) = match kind {
                     TerrainKind::Wormhole | TerrainKind::Corridor | TerrainKind::Comet => (cx - 5000.0, cy),
+                    TerrainKind::GalacticBarrier => (cx - 5000.0, cy - 5000.0),
                     _ => (cx, cy),
                 };
                 TerrainInfo { kind, x: x as i32, y: y as i32, r: r as i32, x2: x2 as i32, y2: y2 as i32, phase: 95, name: format!("{:?}", kind) }
@@ -555,7 +776,7 @@ mod tests {
             banner: None,
         };
         let upd = 40.0;
-        let mut c = Canvas::new((4.0 * cell / upd) as i32, (3.0 * cell / upd) as i32, [0.0, 0.0, 0.0]);
+        let mut c = Canvas::new((6.0 * cell / upd) as i32, (4.0 * cell / upd) as i32, [0.0, 0.0, 0.0]);
         let tr = TextRenderer::load();
         let to = |x: f64, y: f64| ((x / upd) as f32, (y / upd) as f32);
         let u = |d: f64| (d / upd) as f32;

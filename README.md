@@ -21,7 +21,8 @@ that runs entirely inside a terminal window on macOS.
   planet killer to V'Ger, Species 8472, the Jem'Hadar, General Chang, Q and a plague of
   tribbles, drop into the game.
 - **Extras** (optional, each its own server option): career ranks and service records,
-  personal orders from command, treaties between empires, eleven kinds of space terrain,
+  personal orders from command, treaties between empires, 21 kinds of space terrain (10
+  in any one galaxy),
   and supply convoys that buy upgrades for your empire.
 - **Sound:** synthesized retro sound effects, with no audio libraries required.
 - **Mouse and keyboard:** aim and steer with the mouse, with the classic Netrek key bindings.
@@ -142,7 +143,7 @@ netrek <COMMAND>
 | `--ranks [FILE]` | off | Career ranks, service records and a leaderboard, saved to `FILE` (default `~/.netrek/service-records.tsv`). See [Extras](#extras) |
 | `--orders` | off | Personal orders from command, with rewards |
 | `--diplomacy` | off | Treaties between empires |
-| `--terrain` | off | Space terrain: nebulae, a black hole, a wormhole, a comet and more |
+| `--terrain` | off | Space terrain: 10 of 21 kinds per galaxy (nebulae, a black hole, minefields, a galactic barrier...) |
 | `--supply` | off | Supply convoys and empire upgrades |
 | `--extras` | off | All five of the above |
 | `--no-rank-tech` | off | With ranks: don't give Captains and above their [advanced tech](#advanced-tech) |
@@ -896,8 +897,10 @@ With `--diplomacy`, empires can sign **treaties of alliance**.
 ### Space terrain
 
 With `--terrain`, every galaxy gets a fresh set of terrain, placed clear of the planets.
-There are eleven kinds (17 features in all), charted for everyone and drawn on both maps.
-Terrain affects the empires' ships. Aliens ignore it, except the tachyon grid.
+There are **21 kinds**, and each galaxy uses **10 of them, picked at random**, so every game
+(and every galaxy after a reset) has a different mix. Terrain is charted for everyone and
+drawn on both maps. It affects the empires' ships; aliens ignore it, except the tachyon
+grid, and anyone's weapons can set off a Metreon cloud.
 
 | Feature | Looks like | What it does |
 |---|---|---|
@@ -912,6 +915,16 @@ Terrain affects the empires' ships. Aliens ignore it, except the tachyon grid.
 | **Star** (Amargosa) | A blazing yellow sun | Its corona **refuels** you fast but heats your engines and weapons. The core burns. |
 | **Comet** | A bright head with a long tail | Crosses the galaxy, then another comes. Flying through the **tail refuels** you; the head hurts. |
 | **Tachyon grid** | A faint cyan grid | **Cloaked ships inside are revealed** to everyone, Chang's Bird-of-Prey included. |
+| **Minefield** ×2 | A red dashed boundary with warning markers | Hidden mines (14 per field). Come within 450 of one and it blows: 40 damage. Then a new mine is laid somewhere else in the field, so a safe path doesn't stay safe. |
+| **Chroniton field** | Teal rings and clock marks | Time runs slow: ships and torpedoes inside move at **half speed**. |
+| **Graviton eddy** | Turning spiral arms | A whirlpool that **sweeps ships around** its centre, hardest near the middle. |
+| **Magnetar** | A magenta core in magnetic field loops | **Tractor and pressor beams fail**, torpedoes **curve**, and the core crushes anything that gets too close. |
+| **Metreon cloud** ×2 | Amber gas | Volatile: **firing any weapon inside ignites it**, doing 30 damage to the shooter and every ship within 2,500. The gas takes a few seconds to gather again. |
+| **Tetryon field** | Flickering yellow-green sparks | Tetryon radiation **strips shields** and keeps them from recharging. |
+| **Rogue planetoid** ×2 | Grey cratered rock | **Solid**: ships can't pass through, and it stops torpedoes. It's cover in a fight. |
+| **Galactic barrier** | A long shimmering violet wall | **Crossing it** costs 2,000 fuel and 25 hull damage, straight through the shields, and it destroys torpedoes. |
+| **Fluidic rift** | A swirling pink-white tear | Fly in and you're **flung to a random spot** in the galaxy. |
+| **Abandoned station** | A K-7 style station | A neutral outpost: hold within 1,500 at warp 2 or less to be **repaired and refuelled**, whatever your empire. |
 
 Robots steer clear of the black hole, the star and the comet, and slow down among
 asteroids.
@@ -1111,8 +1124,8 @@ The tests include:
   `tempest_core_is_only_exposed_when_the_web_is_clear`,
   `flippers_drag_ships_into_the_core` and `tempest_shapes`.
 - **`retaking_alien_planets`:** liberated and resettled planets lose their alien mark.
-- **Extras:** `galaxy_has_ten_kinds_of_terrain_clear_of_planets` and a test for each
-  terrain effect; `treaties_between_players`, `one_ally_at_a_time_and_robots_decide`,
+- **Extras:** `galaxy_has_ten_kinds_of_terrain_clear_of_planets` (ten of the 21 kinds in
+  every galaxy, all of them turning up over many) and a test for each terrain effect; `treaties_between_players`, `one_ally_at_a_time_and_robots_decide`,
   `upgrades_boost_torpedoes`, `starbase_needs_rank`, `tech_comes_with_rank`,
   `captain_weapons`, `fleet_captain_defences`, `commodore_tricks`,
   `rear_admiral_weapons`, `admiral_tech`, `admiral_starbase_tech`,

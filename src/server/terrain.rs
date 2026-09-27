@@ -25,9 +25,19 @@ pub struct Terrain {
     pub timer: i32,
     /// Derelict: ticks until another wreck turns up (0 = here now).
     pub respawn: i32,
+    /// Minefield: where its (hidden) mines are.
+    pub mines: Vec<(f64, f64)>,
 }
 
 pub const NEBULA_SPEED: i32 = 6;
+pub const MINEFIELD_R: f64 = 4000.0;
+pub const MINES: usize = 14;
+/// How close a ship must come to a mine to set it off.
+pub const MINE_REACH: f64 = 450.0;
+pub const METREON_BLAST: f64 = 2500.0;
+/// Half the thickness of the galactic barrier.
+pub const BARRIER_REACH: f64 = 350.0;
+pub const STATION_REACH: f64 = 1500.0;
 pub const HORIZON: f64 = 600.0;
 pub const PULSAR_PERIOD: i32 = 100;
 pub const MOUTH: f64 = 600.0;
@@ -42,7 +52,7 @@ pub const SENSOR_RANGE: f64 = 3000.0;
 
 impl Terrain {
     fn new(kind: TerrainKind, name: &str, (x, y): (f64, f64), r: f64) -> Terrain {
-        Terrain { kind, name: name.into(), x, y, r, x2: x, y2: y, vx: 0.0, vy: 0.0, timer: 0, respawn: 0 }
+        Terrain { kind, name: name.into(), x, y, r, x2: x, y2: y, vx: 0.0, vy: 0.0, timer: 0, respawn: 0, mines: Vec::new() }
     }
 
     pub fn visible(&self) -> bool {
@@ -121,78 +131,239 @@ fn update_tail(t: &mut Terrain) {
     t.y2 = t.y - t.vy / v * COMET_TAIL;
 }
 
+/// Kinds of terrain each galaxy gets, drawn at random from all of them.
+pub const ACTIVE_KINDS: usize = 10;
+
+pub const ALL_KINDS: [TerrainKind; 21] = [
+    TerrainKind::Nebula,
+    TerrainKind::IonStorm,
+    TerrainKind::Asteroids,
+    TerrainKind::BlackHole,
+    TerrainKind::Pulsar,
+    TerrainKind::Wormhole,
+    TerrainKind::Derelict,
+    TerrainKind::Corridor,
+    TerrainKind::Star,
+    TerrainKind::Comet,
+    TerrainKind::TachyonGrid,
+    TerrainKind::Minefield,
+    TerrainKind::ChronitonField,
+    TerrainKind::GravitonEddy,
+    TerrainKind::Magnetar,
+    TerrainKind::MetreonCloud,
+    TerrainKind::TetryonField,
+    TerrainKind::Planetoid,
+    TerrainKind::GalacticBarrier,
+    TerrainKind::FluidicRift,
+    TerrainKind::AbandonedStation,
+];
+
+/// A fresh set of terrain: ten kinds, picked at random, each placed clear
+/// of the planets.
 pub fn generate(world: &mut World) {
     let mut rng = rand::thread_rng();
     world.terrain.clear();
+    let mut kinds = ALL_KINDS.to_vec();
+    kinds.shuffle(&mut rng);
+    let mut active = 0;
+    for kind in kinds {
+        if active >= ACTIVE_KINDS {
+            break;
+        }
+        if spawn_kind(world, kind) > 0 {
+            active += 1;
+        }
+    }
+}
+
+/// A random straight segment of about `len`, well inside the galaxy.
+fn segment(len: std::ops::Range<f64>) -> Option<((f64, f64), (f64, f64))> {
+    let mut rng = rand::thread_rng();
+    for _ in 0..100 {
+        let (x, y) = (rng.gen_range(8000.0..92_000.0), rng.gen_range(8000.0..92_000.0));
+        let a = rng.gen_range(0.0..std::f64::consts::TAU);
+        let l = rng.gen_range(len.clone());
+        let (x2, y2) = (x + a.cos() * l, y + a.sin() * l);
+        if (5000.0..GWIDTH - 5000.0).contains(&x2) && (5000.0..GWIDTH - 5000.0).contains(&y2) {
+            return Some(((x, y), (x2, y2)));
+        }
+    }
+    None
+}
+
+/// Random points inside a circle.
+fn scatter(x: f64, y: f64, r: f64, n: usize) -> Vec<(f64, f64)> {
+    let mut rng = rand::thread_rng();
+    (0..n)
+        .map(|_| {
+            let a = rng.gen_range(0.0..std::f64::consts::TAU);
+            let d = rng.gen_range(0.0f64..1.0).sqrt() * r * 0.95;
+            (x + a.cos() * d, y + a.sin() * d)
+        })
+        .collect()
+}
+
+/// Place the features of one kind; returns how many were placed.
+fn spawn_kind(world: &mut World, kind: TerrainKind) -> usize {
+    let mut rng = rand::thread_rng();
+    let before = world.terrain.len();
     let add = |world: &mut World, t: Option<Terrain>| {
         if let Some(t) = t {
             world.terrain.push(t);
         }
     };
-    let mut nebulae = vec!["Mutara Nebula", "Briar Patch", "Paulson Nebula", "Mar Oscura"];
-    nebulae.shuffle(&mut rng);
-    for name in nebulae.into_iter().take(3) {
-        let r = rng.gen_range(5000.0..7000.0);
-        let t = place(world, r, 1500.0).map(|p| Terrain::new(TerrainKind::Nebula, name, p, r));
-        add(world, t);
-    }
-    for name in ["Maluria asteroid belt", "Hanoran asteroid field"] {
-        let r = rng.gen_range(4000.0..5000.0);
-        let t = place(world, r, 1500.0).map(|p| Terrain::new(TerrainKind::Asteroids, name, p, r));
-        add(world, t);
-    }
-    let t = place(world, 7000.0, 3000.0).map(|p| Terrain::new(TerrainKind::BlackHole, "Tarsus singularity", p, 7000.0));
-    add(world, t);
-    let t = place(world, 6500.0, 1500.0).map(|p| Terrain::new(TerrainKind::Pulsar, "Zeta Lantis pulsar", p, 6500.0));
-    add(world, t);
-    let t = place(world, 5000.0, 2000.0).map(|p| Terrain::new(TerrainKind::Star, "Amargosa", p, 5000.0));
-    add(world, t);
-    let t = place(world, 6000.0, -3000.0).map(|p| Terrain::new(TerrainKind::TachyonGrid, "tachyon detection grid", p, 6000.0));
-    add(world, t);
-    // Wormhole: two mouths far apart.
-    if let Some(a) = place(world, MOUTH, 3000.0) {
-        for _ in 0..50 {
-            if let Some(b) = place(world, MOUTH, 3000.0) {
-                if dist(a.0, a.1, b.0, b.1) > 40_000.0 {
-                    let mut t = Terrain::new(TerrainKind::Wormhole, "Barzan wormhole", a, MOUTH);
-                    (t.x2, t.y2) = b;
-                    world.terrain.push(t);
-                    break;
+    let many = |world: &mut World, names: &[&str], take: usize, r: std::ops::Range<f64>, clear: f64| {
+        let mut names = names.to_vec();
+        names.shuffle(&mut rand::thread_rng());
+        for name in names.into_iter().take(take) {
+            let rr = rand::thread_rng().gen_range(r.clone());
+            if let Some(p) = place(world, rr, clear) {
+                world.terrain.push(Terrain::new(kind, name, p, rr));
+            }
+        }
+    };
+    match kind {
+        TerrainKind::Nebula => many(world, &["Mutara Nebula", "Briar Patch", "Paulson Nebula", "Mar Oscura"], 3, 5000.0..7000.0, 1500.0),
+        TerrainKind::Asteroids => many(world, &["Maluria asteroid belt", "Hanoran asteroid field"], 2, 4000.0..5000.0, 1500.0),
+        TerrainKind::BlackHole => {
+            let t = place(world, 7000.0, 3000.0).map(|p| Terrain::new(kind, "Tarsus singularity", p, 7000.0));
+            add(world, t);
+        }
+        TerrainKind::Pulsar => {
+            let t = place(world, 6500.0, 1500.0).map(|p| Terrain::new(kind, "Zeta Lantis pulsar", p, 6500.0));
+            add(world, t);
+        }
+        TerrainKind::Star => {
+            let t = place(world, 5000.0, 2000.0).map(|p| Terrain::new(kind, "Amargosa", p, 5000.0));
+            add(world, t);
+        }
+        TerrainKind::TachyonGrid => {
+            let t = place(world, 6000.0, -3000.0).map(|p| Terrain::new(kind, "tachyon detection grid", p, 6000.0));
+            add(world, t);
+        }
+        TerrainKind::Wormhole => {
+            // Two mouths far apart.
+            if let Some(a) = place(world, MOUTH, 3000.0) {
+                for _ in 0..50 {
+                    if let Some(b) = place(world, MOUTH, 3000.0) {
+                        if dist(a.0, a.1, b.0, b.1) > 40_000.0 {
+                            let mut t = Terrain::new(kind, "Barzan wormhole", a, MOUTH);
+                            (t.x2, t.y2) = b;
+                            world.terrain.push(t);
+                            break;
+                        }
+                    }
                 }
             }
         }
-    }
-    let mut wrecks = vec!["derelict freighter", "derelict USS Valiant", "derelict Klingon cruiser", "derelict Romulan scout"];
-    wrecks.shuffle(&mut rng);
-    for name in wrecks.into_iter().take(3) {
-        let t = place(world, SALVAGE_REACH, 3000.0).map(|p| Terrain::new(TerrainKind::Derelict, name, p, SALVAGE_REACH));
-        add(world, t);
-    }
-    // Slipstreams: long straight corridors.
-    for name in ["Delta slipstream", "Theta slipstream"] {
-        for _ in 0..100 {
-            let (x, y) = (rng.gen_range(8000.0..92_000.0), rng.gen_range(8000.0..92_000.0));
-            let a = rng.gen_range(0.0..std::f64::consts::TAU);
-            let len = rng.gen_range(22_000.0..32_000.0);
-            let (x2, y2) = (x + a.cos() * len, y + a.sin() * len);
-            if (5000.0..GWIDTH - 5000.0).contains(&x2) && (5000.0..GWIDTH - 5000.0).contains(&y2) {
-                let mut t = Terrain::new(TerrainKind::Corridor, name, (x, y), CORRIDOR_WIDTH / 2.0);
-                (t.x2, t.y2) = (x2, y2);
-                world.terrain.push(t);
-                break;
+        TerrainKind::Derelict => many(
+            world,
+            &["derelict freighter", "derelict USS Valiant", "derelict Klingon cruiser", "derelict Romulan scout"],
+            3,
+            SALVAGE_REACH..SALVAGE_REACH + 1.0,
+            3000.0,
+        ),
+        TerrainKind::Corridor => {
+            for name in ["Delta slipstream", "Theta slipstream"] {
+                if let Some((a, b)) = segment(22_000.0..32_000.0) {
+                    let mut t = Terrain::new(kind, name, a, CORRIDOR_WIDTH / 2.0);
+                    (t.x2, t.y2) = b;
+                    world.terrain.push(t);
+                }
             }
         }
+        TerrainKind::IonStorm => {
+            let storm = place(world, 4500.0, -10_000.0).map(|p| {
+                let mut t = Terrain::new(kind, "ion storm", p, 4500.0);
+                let a = rng.gen_range(0.0..std::f64::consts::TAU);
+                (t.vx, t.vy) = (a.cos() * 0.6 * WARP1, a.sin() * 0.6 * WARP1);
+                t
+            });
+            add(world, storm);
+        }
+        TerrainKind::Comet => {
+            let mut comet = Terrain::new(kind, "comet", (0.0, 0.0), COMET_HEAD);
+            launch_comet(&mut comet);
+            world.terrain.push(comet);
+        }
+        TerrainKind::Minefield => {
+            for name in ["Romulan minefield", "Cardassian minefield"] {
+                if let Some(p) = place(world, MINEFIELD_R, 1500.0) {
+                    let mut t = Terrain::new(kind, name, p, MINEFIELD_R);
+                    t.mines = scatter(p.0, p.1, MINEFIELD_R, MINES);
+                    world.terrain.push(t);
+                }
+            }
+        }
+        TerrainKind::ChronitonField => many(world, &["chroniton field"], 1, 4500.0..5500.0, 1500.0),
+        TerrainKind::GravitonEddy => many(world, &["graviton eddy"], 1, 5500.0..6500.0, 1500.0),
+        TerrainKind::Magnetar => many(world, &["magnetar Sigma Draconis"], 1, 5500.0..6500.0, 1500.0),
+        TerrainKind::MetreonCloud => many(world, &["Metreon cloud", "Metreon cloud"], 2, 4000.0..5000.0, 1500.0),
+        TerrainKind::TetryonField => many(world, &["tetryon field"], 1, 4500.0..5500.0, 1000.0),
+        TerrainKind::Planetoid => many(world, &["rogue planetoid Gamma", "rogue planetoid Delta"], 2, 1200.0..1600.0, 2500.0),
+        TerrainKind::GalacticBarrier => {
+            if let Some((a, b)) = segment(20_000.0..30_000.0) {
+                let mut t = Terrain::new(kind, "galactic barrier", a, BARRIER_REACH);
+                (t.x2, t.y2) = b;
+                world.terrain.push(t);
+            }
+        }
+        TerrainKind::FluidicRift => many(world, &["fluidic rift"], 1, 700.0..701.0, 3000.0),
+        TerrainKind::AbandonedStation => many(world, &["abandoned station K-7"], 1, STATION_REACH..STATION_REACH + 1.0, 3000.0),
     }
-    let storm = place(world, 4500.0, -10_000.0).map(|p| {
-        let mut t = Terrain::new(TerrainKind::IonStorm, "ion storm", p, 4500.0);
-        let a = rng.gen_range(0.0..std::f64::consts::TAU);
-        (t.vx, t.vy) = (a.cos() * 0.6 * WARP1, a.sin() * 0.6 * WARP1);
-        t
+    world.terrain.len() - before
+}
+
+/// Somewhere random and open, clear of the planets (fluidic rift exits).
+fn random_open_spot(world: &World) -> (f64, f64) {
+    let mut rng = rand::thread_rng();
+    for _ in 0..200 {
+        let (x, y) = (rng.gen_range(5000.0..95_000.0), rng.gen_range(5000.0..95_000.0));
+        if world.planets.iter().all(|pl| dist(x, y, pl.x, pl.y) > 3000.0) {
+            return (x, y);
+        }
+    }
+    (50_000.0, 50_000.0)
+}
+
+/// An explosion to look at (no damage of its own).
+fn flash(world: &mut World, x: f64, y: f64, owner: u8) {
+    world.torps.push(super::world::Torp {
+        owner,
+        team: Team::Ind,
+        kind: crate::proto::TorpKind::Photon,
+        x,
+        y,
+        dir: 0.0,
+        speed: 0.0,
+        fuse: 0,
+        damage: 0.0,
+        explode: 1,
+        quantum: false,
+        deflect_tried: false,
     });
-    add(world, storm);
-    let mut comet = Terrain::new(TerrainKind::Comet, "comet", (0.0, 0.0), COMET_HEAD);
-    launch_comet(&mut comet);
-    world.terrain.push(comet);
+}
+
+/// Firing a weapon inside a Metreon cloud ignites it: a blast hurts the
+/// shooter and everyone nearby. (The gas takes a few seconds to gather
+/// again before it can go off twice.)
+pub fn metreon_ignite(world: &mut World, i: usize) {
+    let (x, y) = (world.players[i].x, world.players[i].y);
+    let Some(k) = world
+        .terrain
+        .iter()
+        .position(|t| t.kind == TerrainKind::MetreonCloud && t.timer == 0 && dist(x, y, t.x, t.y) < t.r)
+    else {
+        return;
+    };
+    world.terrain[k].timer = 3 * UPS as i32;
+    flash(world, x, y, i as u8);
+    let caught: Vec<usize> = (0..MAXPLAYER).filter(|&j| world.players[j].alive() && dist(world.players[j].x, world.players[j].y, x, y) < METREON_BLAST).collect();
+    let who = world.players[i].label();
+    world.god(format!("{} ignites the Metreon gas!", who));
+    for j in caught {
+        world.inflict(j, 30.0, Some(i as u8), "was caught in a Metreon gas explosion".into());
+    }
 }
 
 /// A terrain feature, for tests elsewhere.
@@ -251,6 +422,7 @@ pub fn tick(world: &mut World) {
                 }
             }
             TerrainKind::Pulsar => t.timer = (t.timer + 1) % PULSAR_PERIOD,
+            TerrainKind::MetreonCloud if t.timer > 0 => t.timer -= 1,
             _ => {}
         }
     }
@@ -281,6 +453,9 @@ pub fn tick(world: &mut World) {
     let mut warns: Vec<(u8, String)> = Vec::new();
     let mut salvaged: Vec<(usize, usize)> = Vec::new();
     let mut near_wreck = [false; MAXPLAYER];
+    let mut mine_hits: Vec<(usize, usize, usize)> = Vec::new();
+    let mut barrier_hits: Vec<usize> = Vec::new();
+    let mut rifts: Vec<usize> = Vec::new();
     let terrain = &world.terrain;
     let players = &mut world.players;
     for (ti, t) in terrain.iter().enumerate() {
@@ -410,6 +585,59 @@ pub fn tick(world: &mut World) {
                         p.fuel = (p.fuel + 8.0 * s.recharge).min(s.max_fuel);
                     }
                 }
+                TerrainKind::Minefield if d < t.r + MINE_REACH => {
+                    if let Some(m) = t.mines.iter().position(|&(mx, my)| dist(p.x, p.y, mx, my) < MINE_REACH) {
+                        if !mine_hits.iter().any(|h| h.0 == ti && h.1 == m) {
+                            mine_hits.push((ti, m, j));
+                        }
+                    }
+                }
+                TerrainKind::ChronitonField if d < t.r && p.orbiting.is_none() && p.speed > 0 => {
+                    // Time runs at half speed: undo half of this tick's move.
+                    let (hx, hy) = dir_vec(p.dir);
+                    p.x -= hx * p.speed as f64 * WARP1 * 0.5;
+                    p.y -= hy * p.speed as f64 * WARP1 * 0.5;
+                }
+                TerrainKind::GravitonEddy if d < t.r && d > 1.0 && p.orbiting.is_none() => {
+                    // Swept around the centre, hardest near the middle.
+                    let push = 10.0 + 25.0 * (1.0 - d / t.r);
+                    let (rx, ry) = ((p.x - t.x) / d, (p.y - t.y) / d);
+                    p.x = (p.x - ry * push).clamp(0.0, GWIDTH);
+                    p.y = (p.y + rx * push).clamp(0.0, GWIDTH);
+                }
+                TerrainKind::Magnetar if d < t.r => {
+                    if p.tractor.is_some() {
+                        p.tractor = None;
+                        warns.push((id, "The magnetar's field breaks your tractor beam".into()));
+                    }
+                    if d < 500.0 {
+                        hurt.push((j, 5.0, format!("was crushed by the {}", t.name)));
+                    }
+                }
+                TerrainKind::TetryonField if d < t.r => {
+                    p.shield = (p.shield - 1.5).max(0.0);
+                }
+                TerrainKind::Planetoid if d < t.r && d > 1.0 => {
+                    // Solid rock: pushed back out to the surface.
+                    p.x = t.x + (p.x - t.x) / d * t.r;
+                    p.y = t.y + (p.y - t.y) / d * t.r;
+                    p.leave_orbit_pub();
+                }
+                TerrainKind::GalacticBarrier if tick >= p.wormhole_until => {
+                    if seg_dist(p.x, p.y, t.x, t.y, t.x2, t.y2) < BARRIER_REACH {
+                        p.wormhole_until = tick + 3 * UPS as u32;
+                        barrier_hits.push(j);
+                    }
+                }
+                TerrainKind::FluidicRift if d < t.r && tick >= p.wormhole_until => {
+                    p.wormhole_until = tick + 5 * UPS as u32;
+                    rifts.push(j);
+                }
+                TerrainKind::AbandonedStation if d < t.r && p.speed <= 2 => {
+                    p.damage = (p.damage - s.repair * 2.0 / 1000.0).max(0.0);
+                    p.shield = (p.shield + s.repair * 2.0 / 1000.0).min(s.max_shield);
+                    p.fuel = (p.fuel + 6.0 * s.recharge).min(s.max_fuel);
+                }
                 _ => {}
             }
         }
@@ -424,12 +652,22 @@ pub fn tick(world: &mut World) {
         }
     }
 
-    // Torpedoes: soaked up by asteroids, dragged into the black hole.
+    // Torpedoes: soaked up by asteroids, dragged into the black hole,
+    // slowed by chronitons, bent by the magnetar, stopped by rock and the
+    // barrier.
     for t in world.torps.iter_mut().filter(|t| t.explode == 0) {
         for f in world.terrain.iter() {
             let d = dist(t.x, t.y, f.x, f.y);
             match f.kind {
                 TerrainKind::Asteroids if d < f.r && rng.gen_bool(0.06) => t.fuse = 0,
+                TerrainKind::ChronitonField if d < f.r => {
+                    let (vx, vy) = dir_vec(t.dir);
+                    t.x -= vx * t.speed * 0.5;
+                    t.y -= vy * t.speed * 0.5;
+                }
+                TerrainKind::Magnetar if d < f.r => t.dir = (t.dir + 1.5).rem_euclid(256.0),
+                TerrainKind::Planetoid if d < f.r => t.fuse = 0,
+                TerrainKind::GalacticBarrier if seg_dist(t.x, t.y, f.x, f.y, f.x2, f.y2) < BARRIER_REACH => t.fuse = 0,
                 TerrainKind::BlackHole if d < f.r => {
                     if d < HORIZON {
                         t.fuse = 0;
@@ -457,6 +695,32 @@ pub fn tick(world: &mut World) {
     }
     for (j, ti) in salvaged {
         salvage(world, j, ti);
+    }
+    // Mines: each goes off once, and a new one is laid elsewhere in the field.
+    for (ti, m, j) in mine_hits {
+        let (mx, my) = world.terrain[ti].mines[m];
+        flash(world, mx, my, j as u8);
+        let (tx, ty, r) = (world.terrain[ti].x, world.terrain[ti].y, world.terrain[ti].r);
+        world.terrain[ti].mines[m] = scatter(tx, ty, r, 1)[0];
+        let name = world.terrain[ti].name.clone();
+        world.warn(j as u8, format!("Mine! You've strayed into the {}", name));
+        world.inflict(j, 40.0, None, format!("hit a mine in the {}", name));
+    }
+    for j in barrier_hits {
+        let p = &mut world.players[j];
+        p.fuel = (p.fuel - 2000.0).max(0.0);
+        world.warn(j as u8, "Crossing the galactic barrier: power drained, hull damaged");
+        world.hit_kind = super::world::HitKind::Polaron;
+        world.inflict(j, 25.0, None, "was torn apart crossing the galactic barrier".into());
+    }
+    for j in rifts {
+        let (x, y) = random_open_spot(world);
+        let p = &mut world.players[j];
+        (p.x, p.y) = (x, y);
+        p.leave_orbit_pub();
+        p.lock = super::world::Lock::None;
+        p.tractor = None;
+        world.warn(j as u8, "The fluidic rift flings you across the galaxy!");
     }
 }
 
@@ -515,20 +779,25 @@ mod tests {
         w.terrain.len() - 1
     }
 
+    /// Every galaxy gets exactly ten kinds of terrain, a different mix each
+    /// time (all 21 turn up over enough galaxies), placed clear of planets.
     #[test]
     fn galaxy_has_ten_kinds_of_terrain_clear_of_planets() {
-        for _ in 0..20 {
+        let mut seen = std::collections::HashSet::new();
+        for _ in 0..80 {
             let w = World::with_features(Features { terrain: true, ..Features::default() });
             let mut kinds: Vec<TerrainKind> = w.terrain.iter().map(|t| t.kind).collect();
             kinds.sort_by_key(|k| *k as u8);
             kinds.dedup();
-            assert!(kinds.len() >= 10, "only {} kinds: {:?}", kinds.len(), kinds);
-            for t in w.terrain.iter().filter(|t| matches!(t.kind, TerrainKind::Nebula | TerrainKind::BlackHole | TerrainKind::Star | TerrainKind::Pulsar)) {
+            assert_eq!(kinds.len(), ACTIVE_KINDS, "{:?}", kinds);
+            seen.extend(kinds);
+            for t in w.terrain.iter().filter(|t| matches!(t.kind, TerrainKind::Nebula | TerrainKind::BlackHole | TerrainKind::Star | TerrainKind::Pulsar | TerrainKind::Planetoid | TerrainKind::Minefield)) {
                 for pl in &w.planets {
                     assert!(dist(t.x, t.y, pl.x, pl.y) > t.r, "{} sits on {}", t.name, pl.name);
                 }
             }
         }
+        assert_eq!(seen.len(), ALL_KINDS.len(), "every kind turns up sometimes");
     }
 
     #[test]
@@ -664,5 +933,107 @@ mod tests {
         let r = w.add_player("Tal", false).unwrap();
         w.join(r, Team::Rom, ShipType::Cruiser).unwrap();
         assert!(!w.frame_for(r).players.iter().find(|q| q.id == k as u8).unwrap().fuzzy);
+    }
+
+    #[test]
+    fn minefield_mines_go_off_and_are_relaid() {
+        let (mut w, k) = setup(50_000.0, 50_000.0);
+        let t = put(&mut w, TerrainKind::Minefield, 50_000.0, 50_000.0, MINEFIELD_R);
+        w.terrain[t].mines = vec![(50_100.0, 50_000.0)];
+        w.players[k].shields_up = false;
+        tick(&mut w);
+        assert_eq!(w.players[k].damage, 40.0);
+        assert_ne!(w.terrain[t].mines[0], (50_100.0, 50_000.0), "a new mine was laid");
+    }
+
+    #[test]
+    fn chroniton_field_halves_speed() {
+        let (mut w, k) = setup(50_000.0, 50_000.0);
+        put(&mut w, TerrainKind::ChronitonField, 50_000.0, 50_000.0, 5000.0);
+        (w.players[k].speed, w.players[k].dir) = (8, 64.0);
+        tick(&mut w);
+        assert!((w.players[k].x - (50_000.0 - 4.0 * WARP1)).abs() < 1e-6, "half of this tick's move undone");
+    }
+
+    #[test]
+    fn graviton_eddy_sweeps_ships_round() {
+        let (mut w, k) = setup(53_000.0, 50_000.0);
+        put(&mut w, TerrainKind::GravitonEddy, 50_000.0, 50_000.0, 6000.0);
+        tick(&mut w);
+        assert!(w.players[k].y > 50_000.0, "pushed sideways around the centre");
+    }
+
+    #[test]
+    fn magnetar_breaks_tractors_and_bends_torps() {
+        let (mut w, k) = setup(52_000.0, 50_000.0);
+        put(&mut w, TerrainKind::Magnetar, 50_000.0, 50_000.0, 6000.0);
+        w.players[k].tractor = Some((5, false));
+        w.handle(k as u8, ClientMsg::Torp(0));
+        let dir = w.torps[0].dir;
+        tick(&mut w);
+        assert!(w.players[k].tractor.is_none());
+        assert_ne!(w.torps[0].dir, dir, "the torpedo curves");
+    }
+
+    #[test]
+    fn metreon_gas_ignites_when_you_fire() {
+        let (mut w, k) = setup(50_000.0, 50_000.0);
+        put(&mut w, TerrainKind::MetreonCloud, 50_000.0, 50_000.0, 4500.0);
+        w.players[k].shields_up = false;
+        w.handle(k as u8, ClientMsg::Torp(0));
+        assert_eq!(w.players[k].damage, 30.0, "the shooter is caught in it");
+    }
+
+    #[test]
+    fn tetryons_strip_shields() {
+        let (mut w, k) = setup(50_000.0, 50_000.0);
+        put(&mut w, TerrainKind::TetryonField, 50_000.0, 50_000.0, 5000.0);
+        let before = w.players[k].shield;
+        for _ in 0..20 {
+            w.tick();
+        }
+        assert!(w.players[k].shield < before - 20.0);
+    }
+
+    #[test]
+    fn planetoids_are_solid() {
+        let (mut w, k) = setup(50_200.0, 50_000.0);
+        put(&mut w, TerrainKind::Planetoid, 50_000.0, 50_000.0, 1500.0);
+        tick(&mut w);
+        assert!((dist(w.players[k].x, w.players[k].y, 50_000.0, 50_000.0) - 1500.0).abs() < 1.0);
+        let (mut w, k) = setup(47_000.0, 50_000.0);
+        put(&mut w, TerrainKind::Planetoid, 50_000.0, 50_000.0, 1500.0);
+        w.handle(k as u8, ClientMsg::Torp(64));
+        for _ in 0..10 {
+            w.tick();
+        }
+        assert!(w.torps.iter().all(|t| t.x < 49_000.0 || t.explode > 0), "stopped by the rock");
+    }
+
+    #[test]
+    fn galactic_barrier_costs_to_cross() {
+        let (mut w, k) = setup(50_000.0, 50_000.0);
+        let t = put(&mut w, TerrainKind::GalacticBarrier, 50_000.0, 40_000.0, BARRIER_REACH);
+        (w.terrain[t].x2, w.terrain[t].y2) = (50_000.0, 60_000.0);
+        let fuel = w.players[k].fuel;
+        tick(&mut w);
+        assert!(w.players[k].fuel <= fuel - 2000.0 && w.players[k].damage >= 25.0);
+    }
+
+    #[test]
+    fn fluidic_rift_flings_you_away() {
+        let (mut w, k) = setup(50_000.0, 50_000.0);
+        put(&mut w, TerrainKind::FluidicRift, 50_000.0, 50_000.0, 700.0);
+        tick(&mut w);
+        assert!(dist(w.players[k].x, w.players[k].y, 50_000.0, 50_000.0) > 1000.0);
+    }
+
+    #[test]
+    fn abandoned_station_repairs_anyone() {
+        let (mut w, k) = setup(50_500.0, 50_000.0);
+        put(&mut w, TerrainKind::AbandonedStation, 50_000.0, 50_000.0, STATION_REACH);
+        (w.players[k].damage, w.players[k].fuel) = (50.0, 100.0);
+        tick(&mut w);
+        assert!(w.players[k].damage < 50.0 && w.players[k].fuel > 100.0);
     }
 }
