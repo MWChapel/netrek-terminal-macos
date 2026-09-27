@@ -1,6 +1,6 @@
 //! Wire protocol: length-prefixed bincode frames over TCP.
 
-use crate::consts::{Faction, ShipType, Team};
+use crate::consts::{Faction, ShipType, Team, Tech};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::io::{self, Read, Write};
 
@@ -35,6 +35,8 @@ pub enum ClientMsg {
     DetOwn,
     /// Toggle overwatch: fire automatically at enemies that come into range.
     Overwatch,
+    /// Use the advanced tech in slot 0 (v), 1 (e) or 2 (j), aimed at `dir`.
+    Tech { slot: u8, dir: u8 },
     LockPlanet(u8),
     LockPlayer(u8),
     Refit(ShipType),
@@ -66,26 +68,30 @@ pub enum PState {
 }
 
 pub mod pf {
-    pub const SHIELD: u16 = 1;
-    pub const CLOAK: u16 = 2;
-    pub const ORBIT: u16 = 4;
-    pub const BOMB: u16 = 8;
-    pub const BEAMUP: u16 = 16;
-    pub const BEAMDOWN: u16 = 32;
-    pub const REPAIR: u16 = 64;
-    pub const TRACTOR: u16 = 128;
-    pub const PRESSOR: u16 = 256;
-    pub const ROBOT: u16 = 512;
-    pub const WEAPON_HOT: u16 = 1024;
-    pub const ENGINE_HOT: u16 = 2048;
+    pub const SHIELD: u32 = 1;
+    pub const CLOAK: u32 = 2;
+    pub const ORBIT: u32 = 4;
+    pub const BOMB: u32 = 8;
+    pub const BEAMUP: u32 = 16;
+    pub const BEAMDOWN: u32 = 32;
+    pub const REPAIR: u32 = 64;
+    pub const TRACTOR: u32 = 128;
+    pub const PRESSOR: u32 = 256;
+    pub const ROBOT: u32 = 512;
+    pub const WEAPON_HOT: u32 = 1024;
+    pub const ENGINE_HOT: u32 = 2048;
     /// Marked as prey by the Hirogen.
-    pub const HUNTED: u16 = 4096;
+    pub const HUNTED: u32 = 4096;
     /// Carrying tribbles.
-    pub const TRIBBLES: u16 = 8192;
+    pub const TRIBBLES: u32 = 8192;
     /// Hidden from sensors (nebula or ion storm) — only set on your own ship.
-    pub const HIDDEN: u16 = 16384;
+    pub const HIDDEN: u32 = 16384;
     /// Overwatch is on: firing automatically at enemies in range.
-    pub const OVERWATCH: u16 = 32768;
+    pub const OVERWATCH: u32 = 32768;
+    /// Charging a transwarp jump.
+    pub const CHARGING: u32 = 65536;
+    /// Out of phase (phase cloak): untouchable, can't fire.
+    pub const PHASED: u32 = 131072;
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -99,7 +105,7 @@ pub struct PlayerInfo {
     pub y: i32,
     pub dir: u8,
     pub speed: u8,
-    pub flags: u16,
+    pub flags: u32,
     pub kills: f32,
     /// Armies carried (only revealed to teammates; 0 otherwise).
     pub armies: u8,
@@ -117,6 +123,8 @@ pub struct PlayerInfo {
 pub enum TorpKind {
     Photon,
     Plasma,
+    /// The Rear Admiral's tricobalt device: slow, huge blast.
+    Tricobalt,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -128,6 +136,8 @@ pub struct TorpInfo {
     pub y: i32,
     /// 0 = in flight, >0 = explosion animation frame.
     pub explode: u8,
+    /// A quantum torpedo (Captain's tech).
+    pub quantum: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -245,6 +255,10 @@ pub struct SelfInfo {
     pub supply: Option<(u32, [u8; 5])>,
     /// One-line service record (with --ranks).
     pub service: Option<String>,
+    /// Advanced tech aboard, with seconds until each active one is ready.
+    pub techs: Vec<(Tech, u16)>,
+    /// Ablative armor left (with that tech).
+    pub armor: u16,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

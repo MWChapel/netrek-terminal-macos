@@ -195,6 +195,12 @@ pub fn generate(world: &mut World) {
     world.terrain.push(comet);
 }
 
+/// A terrain feature, for tests elsewhere.
+#[cfg(test)]
+pub fn tests_make(kind: TerrainKind, x: f64, y: f64, r: f64) -> Terrain {
+    Terrain::new(kind, "test", (x, y), r)
+}
+
 /// Which way to steer (Netrek direction) to get clear of a deadly spot,
 /// for robots.
 pub fn escape(world: &World, x: f64, y: f64) -> Option<f64> {
@@ -324,7 +330,7 @@ pub fn tick(world: &mut World) {
                         doomed.push((j, format!("fell into the {}", t.name)));
                         continue;
                     }
-                    if p.orbiting.is_none() {
+                    if p.orbiting.is_none() && !p.techs.contains(&Tech::MetaphasicShields) {
                         let pull = 8.0 + 70.0 * (1.0 - d / t.r).powi(2);
                         p.x += (t.x - p.x) / d * pull;
                         p.y += (t.y - p.y) / d * pull;
@@ -392,8 +398,10 @@ pub fn tick(world: &mut World) {
                         hurt.push((j, 6.0, format!("burned up in {}", t.name)));
                     }
                     p.fuel = (p.fuel + 4.0 * s.recharge).min(s.max_fuel);
-                    p.etemp += 8.0;
-                    p.wtemp += 4.0;
+                    if !p.techs.contains(&Tech::MetaphasicShields) {
+                        p.etemp += 8.0;
+                        p.wtemp += 4.0;
+                    }
                 }
                 TerrainKind::Comet => {
                     if d < COMET_HEAD {
@@ -406,6 +414,10 @@ pub fn tick(world: &mut World) {
             }
         }
     }
+    // Metaphasic shields shrug off every hazard.
+    let meta = |j: usize| players[j].techs.contains(&Tech::MetaphasicShields);
+    hurt.retain(|h| !meta(h.0));
+    doomed.retain(|h| !meta(h.0));
     for (j, near) in near_wreck.iter().enumerate() {
         if !near {
             players[j].salvage = 0;

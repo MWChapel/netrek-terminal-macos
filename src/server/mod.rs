@@ -434,7 +434,7 @@ mod tests {
     /// robots standing in for human players so they get orders and careers.
     #[test]
     fn extras_game() {
-        let features = Features { ranks: true, orders: true, diplomacy: true, terrain: true, supply: true };
+        let features = Features { ranks: true, orders: true, diplomacy: true, terrain: true, supply: true, rank_tech: true };
         let mut world = World::with_features(features);
         let mut bots = Vec::new();
         let all = Team::PLAYABLE;
@@ -500,7 +500,7 @@ mod tests {
             empires: vec![Team::Fed, Team::Rom],
             aliens: Vec::new(),
             alien_interval: 150,
-            features: Features { ranks: true, orders: true, diplomacy: true, terrain: true, supply: true },
+            features: Features { ranks: true, orders: true, diplomacy: true, terrain: true, supply: true, rank_tech: true },
             records: Some(records.clone()),
             quiet: true,
         };

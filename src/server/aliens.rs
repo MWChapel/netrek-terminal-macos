@@ -1015,7 +1015,9 @@ fn vger(world: &mut World, e: &mut Event, i: usize, tick: u32) {
     // Everything inside the cloud crawls.
     for j in empire_ships_near(world, x, y, VGER_CLOUD) {
         let q = &mut world.players[j];
-        q.desired_speed = q.desired_speed.min(3);
+        if !q.techs.contains(&Tech::MetaphasicShields) {
+            q.desired_speed = q.desired_speed.min(3);
+        }
     }
     // Merging: hold position at the core.
     let at_core = empire_ships_near(world, x, y, VGER_CORE);
@@ -1137,7 +1139,9 @@ fn probe(world: &mut World, e: &mut Event, i: usize, tick: u32) {
     }
     let drained = empire_ships_near(world, x, y, PROBE_DRAIN);
     for &j in &drained {
-        world.players[j].powerless_until = tick + 3;
+        if !world.players[j].techs.contains(&Tech::MetaphasicShields) {
+            world.players[j].powerless_until = tick + 3;
+        }
     }
     // Answering the call: any ship carrying two armies close by.
     if let Some(&j) = empire_ships_near(world, x, y, 4000.0).iter().find(|&&j| world.players[j].armies >= 2) {

@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 pub const DEFAULT_PORT: u16 = 2592; // the traditional Netrek port
-pub const PROTOCOL_VERSION: u32 = 6;
+pub const PROTOCOL_VERSION: u32 = 11;
 
 pub const UPS: u64 = 10; // server updates per second, like the original
 pub const GWIDTH: f64 = 100_000.0;
@@ -297,6 +297,25 @@ pub enum ShipType {
     SwarmShip,
     /// Supply convoy freighter (the --supply option); flown by the server.
     Freighter,
+    // Empire special ships (Captain and up, with --ranks).
+    Defiant,
+    Warbird,
+    NeghVar,
+    Corsair,
+    // Relic ships of alien make (Commodore and up, with --ranks).
+    IconianShip,
+    BreenWarship,
+    VidiianHarvester,
+    XindiWarship,
+    PreserverObelisk,
+    TalosianShip,
+    VothCityShip,
+    KazonRaider,
+    SheliakShip,
+    KelvanShip,
+    HusnockWarship,
+    SulibanCell,
+    ExcalbianShip,
 }
 
 impl ShipType {
@@ -322,6 +341,92 @@ impl ShipType {
     }
     pub fn from_key(c: char) -> Option<ShipType> {
         ShipType::ALL.into_iter().find(|s| s.key() == c.to_ascii_lowercase())
+    }
+
+    /// Each empire's special ship, for Captains and up.
+    pub const SPECIALS: [ShipType; 4] = [ShipType::Defiant, ShipType::Warbird, ShipType::NeghVar, ShipType::Corsair];
+
+    /// Relic ships of alien make, for Commodores and up (one drawn at random).
+    pub const RELICS: [ShipType; 13] = [
+        ShipType::IconianShip,
+        ShipType::BreenWarship,
+        ShipType::VidiianHarvester,
+        ShipType::XindiWarship,
+        ShipType::PreserverObelisk,
+        ShipType::TalosianShip,
+        ShipType::VothCityShip,
+        ShipType::KazonRaider,
+        ShipType::SheliakShip,
+        ShipType::KelvanShip,
+        ShipType::HusnockWarship,
+        ShipType::SulibanCell,
+        ShipType::ExcalbianShip,
+    ];
+
+    pub fn special_for(team: Team) -> Option<ShipType> {
+        match team {
+            Team::Fed => Some(ShipType::Defiant),
+            Team::Rom => Some(ShipType::Warbird),
+            Team::Kli => Some(ShipType::NeghVar),
+            Team::Ori => Some(ShipType::Corsair),
+            Team::Ind => None,
+        }
+    }
+
+    pub fn is_special(self) -> bool {
+        ShipType::SPECIALS.contains(&self)
+    }
+
+    pub fn is_relic(self) -> bool {
+        ShipType::RELICS.contains(&self)
+    }
+
+    /// Ships players may fly: the six classics, the specials and the relics.
+    pub fn playable(self) -> bool {
+        ShipType::ALL.contains(&self) || self.is_special() || self.is_relic()
+    }
+
+    /// A ship choice from a key: the classics, `e` for your empire's special
+    /// ship, `u` for a relic (the server picks which).
+    pub fn from_key_for(c: char, team: Team) -> Option<ShipType> {
+        match c.to_ascii_lowercase() {
+            'e' => ShipType::special_for(team),
+            'u' => Some(ShipType::RELICS[0]),
+            c => ShipType::from_key(c),
+        }
+    }
+
+    /// Torpedoes a ship may have in flight at once.
+    pub fn max_torps(self) -> usize {
+        if self == ShipType::NeghVar {
+            12
+        } else {
+            MAXTORP
+        }
+    }
+
+    /// What makes a special or relic ship special.
+    pub fn trait_text(self) -> &'static str {
+        match self {
+            ShipType::Defiant => "pulse phasers recharge twice as fast",
+            ShipType::Warbird => "cheap cloak; big plasma after just 1 kill",
+            ShipType::NeghVar => "12 torpedoes in flight instead of 8",
+            ShipType::Corsair => "warp 12; carries 3 armies per kill",
+            ShipType::IconianShip => "in orbit at one of your worlds, lock onto another of your worlds to step through a gateway to it",
+            ShipType::BreenWarship => "energy-dampening torpedoes: a hit jams shields for 3 s and drains 500 fuel",
+            ShipType::VidiianHarvester => "harvests its victims: 40% of the damage it deals repairs its hull",
+            ShipType::XindiWarship => "particle-beam phasers pierce every enemy along the beam",
+            ShipType::PreserverObelisk => "its deflector turns enemy torpedoes aside, often back at the shooter",
+            ShipType::TalosianShip => "to distant enemy pilots it appears where it isn't",
+            ShipType::VothCityShip => "a hauler: 4 armies per kill (up to 24), beams armies twice as fast",
+            ShipType::KazonRaider => "rams enemies it touches at warp 6 or more (70 damage to them, 20 to itself)",
+            ShipType::SheliakShip => "while it orbits one of your worlds, that world can't be bombed",
+            ShipType::KelvanShip => "neural field: enemy ships within 2,500 can't fire torpedoes",
+            ShipType::HusnockWarship => "planet cracker: bombs 3 armies at a time, down to 1 army",
+            ShipType::SulibanCell => "enhanced reflexes: 35% of hits against it miss",
+            ShipType::ExcalbianShip => "to distant enemy pilots it looks like one of their own cruisers",
+            _ => "",
+        }
     }
     pub fn from_abbr(s: &str) -> Option<ShipType> {
         let s = s.to_ascii_uppercase();
@@ -388,7 +493,7 @@ pub struct ShipStats {
     pub tract_str: f64,
 }
 
-pub static SHIPS: [ShipStats; 25] = [
+pub static SHIPS: [ShipStats; 42] = [
     ShipStats {
         name: "Scout", abbr: "SC", max_speed: 12, max_shield: 75.0, max_damage: 75.0,
         max_fuel: 5000.0, max_armies: 2, torp_damage: 25.0, torp_speed: 16.0, torp_fuse: 16,
@@ -615,6 +720,159 @@ pub static SHIPS: [ShipStats; 25] = [
         turns: 150_000.0, acc: 150, dec: 200, wpn_cool: 4.0, egn_cool: 20.0,
         max_etemp: 3000.0, max_wtemp: 1000.0, mass: 5000.0, tract_range: 0.5, tract_str: 1000.0,
     },
+    ShipStats {
+        name: "Defiant", abbr: "DF", max_speed: 10, max_shield: 120.0, max_damage: 110.0,
+        max_fuel: 9000.0, max_armies: 6, torp_damage: 40.0, torp_speed: 14.0, torp_fuse: 35,
+        torp_cost: 7.0 * 40.0, phaser_damage: 90.0, phaser_cost: 7.0 * 90.0,
+        plasma_damage: 0.0, plasma_speed: 0.0, plasma_fuse: 0, plasma_cost: 0.0,
+        recharge: 13.0, repair: 120.0, warp_cost: 4.0, cloak_cost: 24.0, shield_cost: 3.0,
+        turns: 260000.0, acc: 200, dec: 250, wpn_cool: 2.5, egn_cool: 7.0,
+        max_etemp: 1200.0, max_wtemp: 1100.0, mass: 1900.0, tract_range: 1.0, tract_str: 3000.0,
+    },
+    ShipStats {
+        name: "D'deridex Warbird", abbr: "WB", max_speed: 8, max_shield: 170.0, max_damage: 170.0,
+        max_fuel: 16000.0, max_armies: 8, torp_damage: 40.0, torp_speed: 12.0, torp_fuse: 40,
+        torp_cost: 7.0 * 40.0, phaser_damage: 100.0, phaser_cost: 7.0 * 100.0,
+        plasma_damage: 150.0, plasma_speed: 15.0, plasma_fuse: 35, plasma_cost: 30.0 * 150.0,
+        recharge: 16.0, repair: 130.0, warp_cost: 4.0, cloak_cost: 12.0, shield_cost: 3.0,
+        turns: 90000.0, acc: 90, dec: 250, wpn_cool: 2.5, egn_cool: 7.0,
+        max_etemp: 1200.0, max_wtemp: 1100.0, mass: 2500.0, tract_range: 1.0, tract_str: 3000.0,
+    },
+    ShipStats {
+        name: "Negh'Var", abbr: "NV", max_speed: 9, max_shield: 140.0, max_damage: 160.0,
+        max_fuel: 13000.0, max_armies: 8, torp_damage: 50.0, torp_speed: 12.0, torp_fuse: 40,
+        torp_cost: 7.0 * 50.0, phaser_damage: 110.0, phaser_cost: 7.0 * 110.0,
+        plasma_damage: 0.0, plasma_speed: 0.0, plasma_fuse: 0, plasma_cost: 0.0,
+        recharge: 14.0, repair: 125.0, warp_cost: 4.0, cloak_cost: 26.0, shield_cost: 3.0,
+        turns: 150000.0, acc: 130, dec: 250, wpn_cool: 2.5, egn_cool: 7.0,
+        max_etemp: 1200.0, max_wtemp: 1100.0, mass: 2400.0, tract_range: 1.0, tract_str: 3000.0,
+    },
+    ShipStats {
+        name: "Orion Corsair", abbr: "OC", max_speed: 12, max_shield: 80.0, max_damage: 90.0,
+        max_fuel: 9000.0, max_armies: 12, torp_damage: 30.0, torp_speed: 16.0, torp_fuse: 30,
+        torp_cost: 7.0 * 30.0, phaser_damage: 80.0, phaser_cost: 7.0 * 80.0,
+        plasma_damage: 0.0, plasma_speed: 0.0, plasma_fuse: 0, plasma_cost: 0.0,
+        recharge: 12.0, repair: 110.0, warp_cost: 4.0, cloak_cost: 15.0, shield_cost: 3.0,
+        turns: 420000.0, acc: 300, dec: 250, wpn_cool: 2.5, egn_cool: 7.0,
+        max_etemp: 1200.0, max_wtemp: 1100.0, mass: 1400.0, tract_range: 1.0, tract_str: 3000.0,
+    },
+    ShipStats {
+        name: "Iconian gateway ship", abbr: "IG", max_speed: 9, max_shield: 120.0, max_damage: 120.0,
+        max_fuel: 12000.0, max_armies: 8, torp_damage: 40.0, torp_speed: 13.0, torp_fuse: 40,
+        torp_cost: 7.0 * 40.0, phaser_damage: 100.0, phaser_cost: 7.0 * 100.0,
+        plasma_damage: 0.0, plasma_speed: 0.0, plasma_fuse: 0, plasma_cost: 0.0,
+        recharge: 14.0, repair: 120.0, warp_cost: 4.0, cloak_cost: 24.0, shield_cost: 3.0,
+        turns: 200000.0, acc: 150, dec: 250, wpn_cool: 2.5, egn_cool: 7.0,
+        max_etemp: 1200.0, max_wtemp: 1100.0, mass: 2000.0, tract_range: 1.0, tract_str: 3000.0,
+    },
+    ShipStats {
+        name: "Breen warship", abbr: "BR", max_speed: 9, max_shield: 130.0, max_damage: 130.0,
+        max_fuel: 12000.0, max_armies: 6, torp_damage: 40.0, torp_speed: 12.0, torp_fuse: 40,
+        torp_cost: 7.0 * 40.0, phaser_damage: 90.0, phaser_cost: 7.0 * 90.0,
+        plasma_damage: 0.0, plasma_speed: 0.0, plasma_fuse: 0, plasma_cost: 0.0,
+        recharge: 14.0, repair: 120.0, warp_cost: 4.0, cloak_cost: 26.0, shield_cost: 3.0,
+        turns: 180000.0, acc: 140, dec: 250, wpn_cool: 2.5, egn_cool: 7.0,
+        max_etemp: 1200.0, max_wtemp: 1100.0, mass: 2100.0, tract_range: 1.0, tract_str: 3000.0,
+    },
+    ShipStats {
+        name: "Vidiian harvester", abbr: "VH", max_speed: 10, max_shield: 100.0, max_damage: 120.0,
+        max_fuel: 11000.0, max_armies: 6, torp_damage: 35.0, torp_speed: 14.0, torp_fuse: 35,
+        torp_cost: 7.0 * 35.0, phaser_damage: 100.0, phaser_cost: 7.0 * 100.0,
+        plasma_damage: 0.0, plasma_speed: 0.0, plasma_fuse: 0, plasma_cost: 0.0,
+        recharge: 13.0, repair: 110.0, warp_cost: 4.0, cloak_cost: 22.0, shield_cost: 3.0,
+        turns: 260000.0, acc: 200, dec: 250, wpn_cool: 2.5, egn_cool: 7.0,
+        max_etemp: 1200.0, max_wtemp: 1100.0, mass: 1800.0, tract_range: 1.0, tract_str: 3000.0,
+    },
+    ShipStats {
+        name: "Xindi-Reptilian warship", abbr: "XR", max_speed: 8, max_shield: 140.0, max_damage: 150.0,
+        max_fuel: 13000.0, max_armies: 8, torp_damage: 45.0, torp_speed: 12.0, torp_fuse: 40,
+        torp_cost: 7.0 * 45.0, phaser_damage: 110.0, phaser_cost: 7.0 * 110.0,
+        plasma_damage: 0.0, plasma_speed: 0.0, plasma_fuse: 0, plasma_cost: 0.0,
+        recharge: 15.0, repair: 125.0, warp_cost: 4.0, cloak_cost: 28.0, shield_cost: 3.0,
+        turns: 140000.0, acc: 120, dec: 250, wpn_cool: 2.5, egn_cool: 7.0,
+        max_etemp: 1200.0, max_wtemp: 1100.0, mass: 2400.0, tract_range: 1.0, tract_str: 3000.0,
+    },
+    ShipStats {
+        name: "Preserver obelisk", abbr: "PO", max_speed: 7, max_shield: 200.0, max_damage: 160.0,
+        max_fuel: 15000.0, max_armies: 6, torp_damage: 35.0, torp_speed: 12.0, torp_fuse: 40,
+        torp_cost: 7.0 * 35.0, phaser_damage: 90.0, phaser_cost: 7.0 * 90.0,
+        plasma_damage: 0.0, plasma_speed: 0.0, plasma_fuse: 0, plasma_cost: 0.0,
+        recharge: 16.0, repair: 130.0, warp_cost: 4.0, cloak_cost: 30.0, shield_cost: 3.0,
+        turns: 110000.0, acc: 100, dec: 250, wpn_cool: 2.5, egn_cool: 7.0,
+        max_etemp: 1200.0, max_wtemp: 1100.0, mass: 2800.0, tract_range: 1.0, tract_str: 3000.0,
+    },
+    ShipStats {
+        name: "Talosian illusion ship", abbr: "TI", max_speed: 10, max_shield: 90.0, max_damage: 90.0,
+        max_fuel: 10000.0, max_armies: 6, torp_damage: 40.0, torp_speed: 14.0, torp_fuse: 35,
+        torp_cost: 7.0 * 40.0, phaser_damage: 90.0, phaser_cost: 7.0 * 90.0,
+        plasma_damage: 0.0, plasma_speed: 0.0, plasma_fuse: 0, plasma_cost: 0.0,
+        recharge: 13.0, repair: 110.0, warp_cost: 4.0, cloak_cost: 20.0, shield_cost: 3.0,
+        turns: 300000.0, acc: 220, dec: 250, wpn_cool: 2.5, egn_cool: 7.0,
+        max_etemp: 1200.0, max_wtemp: 1100.0, mass: 1500.0, tract_range: 1.0, tract_str: 3000.0,
+    },
+    ShipStats {
+        name: "Voth city ship", abbr: "VC", max_speed: 7, max_shield: 150.0, max_damage: 200.0,
+        max_fuel: 16000.0, max_armies: 24, torp_damage: 35.0, torp_speed: 12.0, torp_fuse: 40,
+        torp_cost: 7.0 * 35.0, phaser_damage: 90.0, phaser_cost: 7.0 * 90.0,
+        plasma_damage: 0.0, plasma_speed: 0.0, plasma_fuse: 0, plasma_cost: 0.0,
+        recharge: 16.0, repair: 130.0, warp_cost: 4.0, cloak_cost: 30.0, shield_cost: 3.0,
+        turns: 90000.0, acc: 90, dec: 250, wpn_cool: 2.5, egn_cool: 7.0,
+        max_etemp: 1200.0, max_wtemp: 1100.0, mass: 3200.0, tract_range: 1.0, tract_str: 3000.0,
+    },
+    ShipStats {
+        name: "Kazon raider", abbr: "KZ", max_speed: 10, max_shield: 90.0, max_damage: 140.0,
+        max_fuel: 10000.0, max_armies: 6, torp_damage: 35.0, torp_speed: 14.0, torp_fuse: 30,
+        torp_cost: 7.0 * 35.0, phaser_damage: 85.0, phaser_cost: 7.0 * 85.0,
+        plasma_damage: 0.0, plasma_speed: 0.0, plasma_fuse: 0, plasma_cost: 0.0,
+        recharge: 12.0, repair: 120.0, warp_cost: 4.0, cloak_cost: 22.0, shield_cost: 3.0,
+        turns: 280000.0, acc: 250, dec: 250, wpn_cool: 2.5, egn_cool: 7.0,
+        max_etemp: 1200.0, max_wtemp: 1100.0, mass: 2000.0, tract_range: 1.0, tract_str: 3000.0,
+    },
+    ShipStats {
+        name: "Sheliak colony ship", abbr: "SH", max_speed: 8, max_shield: 160.0, max_damage: 150.0,
+        max_fuel: 14000.0, max_armies: 10, torp_damage: 35.0, torp_speed: 12.0, torp_fuse: 40,
+        torp_cost: 7.0 * 35.0, phaser_damage: 95.0, phaser_cost: 7.0 * 95.0,
+        plasma_damage: 0.0, plasma_speed: 0.0, plasma_fuse: 0, plasma_cost: 0.0,
+        recharge: 15.0, repair: 125.0, warp_cost: 4.0, cloak_cost: 28.0, shield_cost: 3.0,
+        turns: 150000.0, acc: 130, dec: 250, wpn_cool: 2.5, egn_cool: 7.0,
+        max_etemp: 1200.0, max_wtemp: 1100.0, mass: 2600.0, tract_range: 1.0, tract_str: 3000.0,
+    },
+    ShipStats {
+        name: "Kelvan ship", abbr: "KV", max_speed: 9, max_shield: 120.0, max_damage: 120.0,
+        max_fuel: 12000.0, max_armies: 6, torp_damage: 40.0, torp_speed: 13.0, torp_fuse: 40,
+        torp_cost: 7.0 * 40.0, phaser_damage: 100.0, phaser_cost: 7.0 * 100.0,
+        plasma_damage: 0.0, plasma_speed: 0.0, plasma_fuse: 0, plasma_cost: 0.0,
+        recharge: 14.0, repair: 120.0, warp_cost: 4.0, cloak_cost: 24.0, shield_cost: 3.0,
+        turns: 220000.0, acc: 170, dec: 250, wpn_cool: 2.5, egn_cool: 7.0,
+        max_etemp: 1200.0, max_wtemp: 1100.0, mass: 1900.0, tract_range: 1.0, tract_str: 3000.0,
+    },
+    ShipStats {
+        name: "Husnock warship", abbr: "HN", max_speed: 8, max_shield: 140.0, max_damage: 150.0,
+        max_fuel: 13000.0, max_armies: 8, torp_damage: 45.0, torp_speed: 12.0, torp_fuse: 40,
+        torp_cost: 7.0 * 45.0, phaser_damage: 105.0, phaser_cost: 7.0 * 105.0,
+        plasma_damage: 0.0, plasma_speed: 0.0, plasma_fuse: 0, plasma_cost: 0.0,
+        recharge: 15.0, repair: 120.0, warp_cost: 4.0, cloak_cost: 28.0, shield_cost: 3.0,
+        turns: 140000.0, acc: 120, dec: 250, wpn_cool: 2.5, egn_cool: 7.0,
+        max_etemp: 1200.0, max_wtemp: 1100.0, mass: 2500.0, tract_range: 1.0, tract_str: 3000.0,
+    },
+    ShipStats {
+        name: "Suliban cell ship", abbr: "SC", max_speed: 11, max_shield: 70.0, max_damage: 80.0,
+        max_fuel: 9000.0, max_armies: 4, torp_damage: 30.0, torp_speed: 15.0, torp_fuse: 30,
+        torp_cost: 7.0 * 30.0, phaser_damage: 80.0, phaser_cost: 7.0 * 80.0,
+        plasma_damage: 0.0, plasma_speed: 0.0, plasma_fuse: 0, plasma_cost: 0.0,
+        recharge: 12.0, repair: 110.0, warp_cost: 4.0, cloak_cost: 18.0, shield_cost: 3.0,
+        turns: 400000.0, acc: 300, dec: 250, wpn_cool: 2.5, egn_cool: 7.0,
+        max_etemp: 1200.0, max_wtemp: 1100.0, mass: 1200.0, tract_range: 1.0, tract_str: 3000.0,
+    },
+    ShipStats {
+        name: "Excalbian shapeshifter", abbr: "EX", max_speed: 9, max_shield: 110.0, max_damage: 120.0,
+        max_fuel: 12000.0, max_armies: 6, torp_damage: 40.0, torp_speed: 13.0, torp_fuse: 40,
+        torp_cost: 7.0 * 40.0, phaser_damage: 95.0, phaser_cost: 7.0 * 95.0,
+        plasma_damage: 0.0, plasma_speed: 0.0, plasma_fuse: 0, plasma_cost: 0.0,
+        recharge: 14.0, repair: 115.0, warp_cost: 4.0, cloak_cost: 24.0, shield_cost: 3.0,
+        turns: 200000.0, acc: 150, dec: 250, wpn_cool: 2.5, egn_cool: 7.0,
+        max_etemp: 1200.0, max_wtemp: 1100.0, mass: 2000.0, tract_range: 1.0, tract_str: 3000.0,
+    },
 ];
 
 /// Career ranks (the --ranks option), from Netrek's classic ladder.
@@ -632,6 +890,156 @@ pub const RANKS: [(&str, &str, f64); 9] = [
 
 /// Rank needed to fly a starbase when ranks are on (Commander).
 pub const STARBASE_RANK: u8 = 3;
+
+/// First rank to get advanced tech (Captain); each rank above adds a tier.
+pub const TECH_RANK: u8 = 4;
+/// Rank for an empire's special ship (Captain) and for relics (Commodore).
+pub const SPECIAL_RANK: u8 = 4;
+pub const RELIC_RANK: u8 = 6;
+
+/// Advanced tech for senior officers (with --ranks). Each rank from Captain
+/// up has three; a ship gets one of them, drawn at random each launch.
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug, Hash)]
+pub enum Tech {
+    // Captain: weapons (passive)
+    QuantumTorps,
+    PhotonSpread,
+    PhaserOvercharge,
+    // Fleet Captain: defence (passive)
+    AblativeArmor,
+    RegenShields,
+    MetaphasicShields,
+    // Commodore: sensors and tricks (key v)
+    TachyonSweep,
+    Decoy,
+    GravitonPulse,
+    // Rear Admiral: heavy weapons (key e)
+    Tricobalt,
+    Isokinetic,
+    Antiproton,
+    // Admiral: escape and power (key j)
+    Transwarp,
+    PhaseCloak,
+    EmergencyReserve,
+    // Admiral in a starbase: passive
+    PointDefense,
+    ShieldProjector,
+    MobileDrydock,
+    // Admiral in a starbase: active (key j)
+    FighterWing,
+    TractorNet,
+    GalacticScan,
+}
+
+impl Tech {
+    /// The three techs of each tier, Captain first.
+    pub const TIERS: [[Tech; 3]; 5] = [
+        [Tech::QuantumTorps, Tech::PhotonSpread, Tech::PhaserOvercharge],
+        [Tech::AblativeArmor, Tech::RegenShields, Tech::MetaphasicShields],
+        [Tech::TachyonSweep, Tech::Decoy, Tech::GravitonPulse],
+        [Tech::Tricobalt, Tech::Isokinetic, Tech::Antiproton],
+        [Tech::Transwarp, Tech::PhaseCloak, Tech::EmergencyReserve],
+    ];
+
+    /// Starbase-only tech for an Admiral who launches in a starbase: one
+    /// passive and one active (key j), each drawn from three.
+    pub const STARBASE: [[Tech; 3]; 2] = [
+        [Tech::PointDefense, Tech::ShieldProjector, Tech::MobileDrydock],
+        [Tech::FighterWing, Tech::TractorNet, Tech::GalacticScan],
+    ];
+
+    /// 0 = Captain ... 4 = Admiral; 5 and 6 are the starbase passive and
+    /// active sets.
+    pub fn tier(self) -> usize {
+        Tech::TIERS
+            .iter()
+            .chain(Tech::STARBASE.iter())
+            .position(|t| t.contains(&self))
+            .unwrap_or(0)
+    }
+
+    pub fn starbase_only(self) -> bool {
+        self.tier() >= 5
+    }
+
+    /// Active techs are used with a key: v, e or j (slot 0, 1, 2).
+    pub fn slot(self) -> Option<usize> {
+        match self.tier() {
+            5 => None,
+            6 => Some(2),
+            t => t.checked_sub(2),
+        }
+    }
+
+    pub fn key(self) -> Option<char> {
+        self.slot().map(|s| ['v', 'e', 'j'][s])
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Tech::QuantumTorps => "Quantum torpedoes",
+            Tech::PhotonSpread => "Photon spread",
+            Tech::PhaserOvercharge => "Phaser overcharge",
+            Tech::AblativeArmor => "Ablative armor",
+            Tech::RegenShields => "Regenerative shields",
+            Tech::MetaphasicShields => "Metaphasic shields",
+            Tech::TachyonSweep => "Tachyon sweep",
+            Tech::Decoy => "Holographic decoy",
+            Tech::GravitonPulse => "Graviton pulse",
+            Tech::Tricobalt => "Tricobalt device",
+            Tech::Isokinetic => "Isokinetic cannon",
+            Tech::Antiproton => "Antiproton burst",
+            Tech::Transwarp => "Transwarp jump",
+            Tech::PhaseCloak => "Phase cloak",
+            Tech::EmergencyReserve => "Emergency reserve",
+            Tech::PointDefense => "Point-defense grid",
+            Tech::ShieldProjector => "Shield projector",
+            Tech::MobileDrydock => "Mobile drydock",
+            Tech::FighterWing => "Fighter wing",
+            Tech::TractorNet => "Tractor net",
+            Tech::GalacticScan => "Galactic scan",
+        }
+    }
+
+    pub fn blurb(self) -> &'static str {
+        match self {
+            Tech::QuantumTorps => "torpedoes hit 20% harder and fly 15% faster",
+            Tech::PhotonSpread => "every torpedo shot is a fan of three",
+            Tech::PhaserOvercharge => "phasers reach 25% farther; a quarter of the damage goes through shields",
+            Tech::AblativeArmor => "40 points of armor soak up hull damage; repairs restore it",
+            Tech::RegenShields => "shields recharge 3x faster after 5 seconds without a hit",
+            Tech::MetaphasicShields => "immune to terrain hazards, V'Ger's cloud and the whale probe's drain",
+            Tech::TachyonSweep => "reveal cloaked and hidden ships within 12,000 to your team for 10 s",
+            Tech::Decoy => "launch a hologram of your ship that flies on for 15 s",
+            Tech::GravitonPulse => "shove enemies within 4,000 away and knock their shields down for 3 s",
+            Tech::Tricobalt => "a slow, heavy warhead: 150 damage, 3,500 blast radius (hurts everyone)",
+            Tech::Isokinetic => "a long beam that goes through shields: 120 damage out to 9,000",
+            Tech::Antiproton => "strike every enemy within 4,500 at once",
+            Tech::Transwarp => "charge 2 s, then jump 15,000 the way you're heading",
+            Tech::PhaseCloak => "6 s out of phase: nothing can touch you, and you can't fire",
+            Tech::EmergencyReserve => "instantly refill shields and fuel and vent all heat",
+            Tech::PointDefense => "shoots down enemy torpedoes and plasma within 3,000",
+            Tech::ShieldProjector => "friendly ships within 6,000 recharge shields as if in repair mode",
+            Tech::MobileDrydock => "friendly ships holding within 4,000 (warp 2 or less) are repaired and refuelled",
+            Tech::FighterWing => "launch 3 fighters that hunt enemies near the base for 30 s",
+            Tech::TractorNet => "hold every enemy within 6,000 almost dead in space for 6 s",
+            Tech::GalacticScan => "for 20 s your team sees every cloaked and hidden ship, and every planet is charted",
+        }
+    }
+
+    /// Seconds before an active tech can be used again.
+    pub fn cooldown(self) -> u32 {
+        match self {
+            Tech::TachyonSweep | Tech::Decoy => 60,
+            Tech::GravitonPulse | Tech::Isokinetic => 45,
+            Tech::Tricobalt => 90,
+            Tech::Antiproton => 60,
+            Tech::Transwarp | Tech::PhaseCloak | Tech::EmergencyReserve | Tech::FighterWing => 120,
+            Tech::TractorNet | Tech::GalacticScan => 90,
+            _ => 0,
+        }
+    }
+}
 
 /// Team upgrades bought with supplies (the --supply option).
 pub const UPGRADES: [(&str, &str); 5] = [

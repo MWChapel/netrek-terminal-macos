@@ -36,6 +36,20 @@ fn ship_shape(s: ShipType) -> &'static [(f64, f64)] {
         ],
         ShipType::BorgCube => &[(-0.75, -0.75), (0.75, -0.75), (0.75, 0.75), (-0.75, 0.75)],
         ShipType::Freighter => &[(0.0, -1.0), (0.4, -0.75), (0.45, 0.95), (-0.45, 0.95), (-0.4, -0.75)],
+        ShipType::Defiant | ShipType::Corsair | ShipType::VidiianHarvester | ShipType::TalosianShip | ShipType::SulibanCell | ShipType::KelvanShip => {
+            &[(0.0, -1.0), (0.55, 0.8), (0.0, 0.45), (-0.55, 0.8)]
+        }
+        ShipType::IconianShip | ShipType::BreenWarship | ShipType::XindiWarship | ShipType::KazonRaider | ShipType::HusnockWarship | ShipType::ExcalbianShip => &[
+            (0.0, -1.0), (0.6, -0.55), (0.25, 0.0), (0.8, 0.95), (0.3, 0.6), (-0.3, 0.6), (-0.8, 0.95), (-0.25, 0.0), (-0.6, -0.55),
+        ],
+        ShipType::PreserverObelisk => &[(0.0, -1.0), (0.3, 0.0), (0.0, 1.0), (-0.3, 0.0)],
+        ShipType::VothCityShip | ShipType::SheliakShip => &[
+            (0.0, -1.0), (0.7, -0.7), (1.0, 0.0), (0.7, 0.7), (0.0, 1.0), (-0.7, 0.7), (-1.0, 0.0), (-0.7, -0.7),
+        ],
+        ShipType::Warbird | ShipType::NeghVar => &[
+            (0.0, -1.0), (0.6, -0.55), (0.25, 0.0), (0.8, 0.95), (0.3, 0.6), (-0.3, 0.6), (-0.8, 0.95), (-0.25, 0.0), (-0.6, -0.55),
+        ],
+
         ShipType::PlanetKiller => &[(-0.5, -1.0), (0.5, -1.0), (0.26, 1.0), (-0.26, 1.0)],
         ShipType::TholianVessel
         | ShipType::Bioship
@@ -187,6 +201,19 @@ impl App {
         }
         if !info.is_empty() {
             out.push((info.join("  •  "), [140.0, 210.0, 255.0]));
+        }
+        if !mi.techs.is_empty() {
+            let v: Vec<String> = mi
+                .techs
+                .iter()
+                .map(|&(t, left)| match t.key() {
+                    Some(k) if left == 0 => format!("[{}] {} ready", k, t.name()),
+                    Some(k) => format!("[{}] {} {}s", k, t.name(), left),
+                    None if t == Tech::AblativeArmor => format!("{} {}", t.name(), mi.armor),
+                    None => t.name().to_string(),
+                })
+                .collect();
+            out.push((format!("Tech: {}", v.join(" • ")), [200.0, 170.0, 255.0]));
         }
         out
     }
@@ -503,7 +530,12 @@ impl App {
             let (x, y) = to_dot(t.x as f64, t.y as f64);
             let mine = t.owner == self.slot;
             let col = if mine { Color::White } else { f.players.iter().find(|p| p.id == t.owner).map_or(team_color(t.team), |p| self.player_color(p)) };
-            if t.explode > 0 {
+            if t.explode > 0 && t.kind == TorpKind::Tricobalt {
+                b.circle(x, y, (t.explode as f64 / 6.0) * 3500.0 / upd, Color::Yellow, 5);
+            } else if t.kind == TorpKind::Tricobalt {
+                b.disc(x, y, 2.0, Color::Yellow, 5);
+                b.circle(x, y, 4.0, Color::Red, 5);
+            } else if t.explode > 0 {
                 let r = t.explode as f64 * 0.9 * (DAMDIST / 2000.0) / (upd / 140.0).max(0.5);
                 b.arc(x, y, r.min(10.0), if t.explode % 2 == 0 { Color::Yellow } else { Color::Red }, 5, 2);
             } else if t.kind == TorpKind::Plasma {
@@ -541,7 +573,10 @@ impl App {
                 continue;
             }
             let col = if is_me { Color::White } else { self.player_color(p) };
-            let cloaked = p.flags & pf::CLOAK != 0;
+            let cloaked = p.flags & (pf::CLOAK | pf::PHASED) != 0;
+            if p.flags & pf::CHARGING != 0 {
+                b.circle(x, y, sr * 2.0, Color::Cyan, 3);
+            }
             let a = p.dir as f64 * std::f64::consts::TAU / 256.0;
             let (sa, ca) = (a.sin(), a.cos());
             let pts: Vec<(f64, f64)> = ship_shape(p.ship)
@@ -682,13 +717,14 @@ impl App {
         let shields = if me.flags & pf::SHIELD != 0 { "shields UP" } else { "shields down" };
         let wpn = if me.flags & pf::WEAPON_HOT != 0 { "Wpn: OVERHEATED".to_string() } else { format!("Wpn: {}/100", mi.wtemp) };
         let mut line = format!(
-            "{}  {}  kills {:.2}  armies {}/{}  torps {}/8  {}{}",
+            "{}  {}  kills {:.2}  armies {}/{}  torps {}/{}  {}{}",
             wpn,
             shields,
             mi.kills,
             mi.armies,
             mi.max_armies_now,
             mi.torps_out,
+            me.ship.max_torps(),
             s.abbr,
             if me.flags & pf::CLOAK != 0 { "  CLOAKED" } else { "" }
         );
@@ -837,7 +873,7 @@ impl App {
                 };
                 (format!("To {}> {}\u{2588}", to, text), white)
             }
-            Mode::Refit => ("Refit to: [s]cout [d]estroyer [c]ruiser [b]attleship [a]ssault [x] starbase".into(), yellow),
+            Mode::Refit => ("Refit to: [s]cout [d]estroyer [c]ruiser [b]attleship [a]ssault [x] starbase [e] special [u] relic".into(), yellow),
             Mode::ConfirmQuit => ("Really quit Netrek? (y/n)".into(), red),
             Mode::Play => ("Talk to everyone: press m, then A and type. Press ? for help.".into(), red),
         }
@@ -951,8 +987,54 @@ impl App {
             scr.text(tx, y, &line, col, chosen);
             y += 1;
         }
+        // Senior officers: the empire's special ship and alien relics.
+        let my_rank = f.players.iter().find(|p| p.id == self.slot).and_then(|p| p.rank);
+        let team_now = default_team.unwrap_or(Team::Fed);
+        if let Some(sp) = ShipType::special_for(team_now) {
+            let s = sp.stats();
+            let ok = my_rank.map_or(false, |r| r >= SPECIAL_RANK);
+            let chosen = self.outfit_ship.is_special();
+            let line = format!(
+                "{} e {:<10}{:>6}{:>9}{:>6}{:>7}{:>8}{:>7}{:>8}  {}",
+                if chosen { "▶" } else { " " },
+                s.name.chars().take(10).collect::<String>(),
+                s.max_speed,
+                s.max_shield,
+                s.max_damage,
+                s.max_fuel,
+                s.max_armies,
+                s.torp_damage,
+                s.phaser_damage,
+                if ok { "special" } else { "needs Captain + ranks" }
+            );
+            scr.text(tx, y, &line, if !ok { DIM } else if chosen { Color::White } else { Color::Grey }, chosen);
+            y += 1;
+        }
+        {
+            let ok = my_rank.map_or(false, |r| r >= RELIC_RANK);
+            let chosen = self.outfit_ship.is_relic();
+            let line = format!(
+                "{} u {:<10}{:>6}{:>9}{:>6}{:>7}{:>8}{:>7}{:>8}  {}",
+                if chosen { "▶" } else { " " },
+                "Relic", "?", "?", "?", "?", "?", "?", "?",
+                if ok { "one of 13 alien relics, at random" } else { "needs Commodore + ranks" }
+            );
+            scr.text(tx, y, &line, if !ok { DIM } else if chosen { Color::White } else { Color::Grey }, chosen);
+            y += 1;
+        }
+        let pick = if self.outfit_ship.is_special() { ShipType::special_for(team_now) } else { Some(self.outfit_ship) };
+        if let Some(t) = pick.filter(|t| t.is_special()) {
+            let line = format!("{}: {}", t.stats().name, t.trait_text());
+            scr.text((w - line.chars().count() as i32).max(0) / 2, y, &line, Color::Cyan, false);
+            y += 1;
+        } else if self.outfit_ship.is_relic() {
+            let names: Vec<&str> = ShipType::RELICS.iter().map(|r| r.stats().name).collect();
+            let line = format!("Relics: {}", names.join(", "));
+            scr.text((w - line.chars().count() as i32).max(0) / 2, y, &line, Color::Cyan, false);
+            y += 1;
+        }
         y += 1;
-        let help = "Choose a team (f r k o) and a ship (s d c b a x), then press Enter to launch.";
+        let help = "Choose a team (f r k o) and a ship (s d c b a x, e special, u relic), then press Enter.";
         scr.text((w - help.len() as i32).max(0) / 2, y, help, Color::White, true);
         y += 1;
         if let Some(sv) = &f.me_info.service {
@@ -1066,6 +1148,7 @@ pub(super) const HELP: &[(&str, &str)] = &[
     ("T / y", "tractor / pressor beam on the ship nearest the pointer"),
     ("d / D", "detonate nearby enemy torps / your own torps"),
     ("w", "overwatch: auto-fire at any enemy that comes into weapons range"),
+    ("v / e / j", "advanced tech (Commodore / Rear Admiral / Admiral, with ranks); /tech lists yours"),
     ("r", "refit to another ship (orbiting your home planet)"),
     ("i", "info on the thing nearest the pointer"),
     ("m", "send a message (then A, T, F/R/K/O or a player slot)"),

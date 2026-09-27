@@ -304,11 +304,26 @@ impl App {
             }
             let (x, y) = to(t.x as f64, t.y as f64);
             let col = if t.owner == self.slot { mix(team_rgb(t.team), WHITE, 0.5) } else { torp_rgb(f, t) };
-            if t.explode > 0 {
+            if t.explode > 0 && t.kind == TorpKind::Tricobalt {
+                // A tricobalt blast: a huge white-orange fireball.
+                let e = t.explode as f32 / 6.0;
+                let r = u(3500.0) * (0.3 + 0.7 * e);
+                px.glow(x, y, r, rgb(0xffb060), 0.8 * (1.0 - e));
+                px.ring(x, y, r, 2.5, rgb(0xfff0d0), 1.0 - e);
+            } else if t.explode > 0 {
                 let e = t.explode as f32;
                 let fade = 1.0 - e / 7.0;
                 px.ring(x, y, u(EXPDIST) + e * u(DAMDIST) * 0.12, 1.0, rgb(0xffd060), fade);
                 px.ring(x, y, (u(EXPDIST) + e * u(DAMDIST) * 0.12) * 0.6, 1.0, rgb(0xff6030), fade);
+            } else if t.kind == TorpKind::Tricobalt {
+                let pulse = 0.6 + 0.4 * ((f.tick as f32) * 0.8).sin();
+                px.glow(x, y, u(900.0).max(6.0), rgb(0xff9040), 0.7 * pulse);
+                px.disc(x, y, u(250.0).max(2.5), rgb(0xfff0c0), 1.0);
+            } else if t.quantum {
+                // Quantum torpedoes burn blue-white.
+                px.glow(x, y, 5.0, rgb(0x80c0ff), 0.8);
+                px.line(x - 2.5, y, x + 2.5, y, 1.2, rgb(0xe0f0ff), 1.0, 0.0);
+                px.line(x, y - 2.5, x, y + 2.5, 1.2, rgb(0xe0f0ff), 1.0, 0.0);
             } else if t.kind == TorpKind::Plasma {
                 px.ring(x, y, 4.0, 1.2, col, 1.0);
                 px.disc(x, y, 1.8, mix(col, WHITE, 0.5), 1.0);
@@ -343,8 +358,15 @@ impl App {
                 }
                 continue;
             }
-            let cloaked = p.flags & pf::CLOAK != 0;
+            // Phase-cloaked ships look like cloaked ones: a faint ghost.
+            let cloaked = p.flags & (pf::CLOAK | pf::PHASED) != 0;
             let col = if is_me { WHITE } else { team };
+            if p.flags & pf::CHARGING != 0 {
+                // Transwarp charging: a growing, flickering corona.
+                let k = 0.5 + 0.5 * ((f.tick as f32) * 1.3).sin();
+                px.glow(x, y, sr * (2.2 + k), rgb(0x60a0ff), 0.6);
+                px.ring(x, y, sr * (1.6 + k * 0.6), 1.5, rgb(0xc0e0ff), 0.8);
+            }
             let alpha = if cloaked { 0.35 } else { 1.0 };
             let dash = if cloaked { 2.0 } else { 0.0 };
             let a = p.dir as f32 * TAU / 256.0;

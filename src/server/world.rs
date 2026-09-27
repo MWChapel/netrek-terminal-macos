@@ -91,6 +91,32 @@ pub struct Player {
     pub wormhole_until: u32,
     /// Overwatch: fire automatically at enemies that come into range.
     pub overwatch: bool,
+    /// Advanced tech aboard (senior officers, with --ranks).
+    pub techs: Vec<Tech>,
+    /// Ablative armor left.
+    pub armor: f64,
+    /// Tick of the last hit taken (regenerative shields).
+    pub last_hit: u32,
+    /// Ticks when the v / e / j techs are ready again.
+    pub tech_ready: [u32; 3],
+    /// Tachyon sweep: cloaked and hidden ships near us show until this tick.
+    pub sweep_until: u32,
+    /// Phase cloak: untouchable (and unable to fire) until this tick.
+    pub phased_until: u32,
+    /// Transwarp: the jump happens at this tick.
+    pub jump_at: Option<u32>,
+    /// Graviton pulse: shields can't be raised until this tick.
+    pub jammed_until: u32,
+    /// Holographic decoy: vanishes at this tick.
+    pub decoy_until: Option<u32>,
+    /// Galactic scan (starbase): every contact shows for our team until this tick.
+    pub scan_until: u32,
+    /// Tractor net (starbase): held almost dead in space until this tick.
+    pub netted_until: u32,
+    /// Fighter (starbase): launched by this ship, returns at this tick.
+    pub fighter_of: Option<(u8, u32)>,
+    /// Relic ships: the Iconian gateway or the Kazon ram is ready at this tick.
+    pub relic_ready: u32,
 }
 
 impl Player {
@@ -154,6 +180,19 @@ impl Player {
             salvage: 0,
             wormhole_until: 0,
             overwatch: false,
+            techs: Vec::new(),
+            armor: 0.0,
+            last_hit: 0,
+            tech_ready: [0; 3],
+            sweep_until: 0,
+            phased_until: 0,
+            jump_at: None,
+            jammed_until: 0,
+            decoy_until: None,
+            scan_until: 0,
+            netted_until: 0,
+            fighter_of: None,
+            relic_ready: 0,
         }
     }
 
@@ -185,7 +224,11 @@ impl Player {
 
     pub fn max_armies_now(&self) -> u32 {
         let s = self.stats();
-        let per_kill = if self.ship == ShipType::Assault { 3.0 } else { 2.0 };
+        let per_kill = match self.ship {
+            ShipType::VothCityShip => 4.0,
+            ShipType::Assault | ShipType::Corsair => 3.0,
+            _ => 2.0,
+        };
         ((self.kills * per_kill) as u32).min(s.max_armies)
     }
 
@@ -201,6 +244,7 @@ impl Player {
     }
 }
 
+#[derive(Clone)]
 pub struct Torp {
     pub owner: u8,
     pub team: Team,
@@ -212,6 +256,10 @@ pub struct Torp {
     pub fuse: i32,
     pub damage: f64,
     pub explode: u8,
+    /// A quantum torpedo (Captain's tech).
+    pub quantum: bool,
+    /// Already met a Preserver deflector (it gets one chance per torpedo).
+    pub deflect_tried: bool,
 }
 
 pub struct Planet {
@@ -240,6 +288,8 @@ pub struct Features {
     pub diplomacy: bool,
     pub terrain: bool,
     pub supply: bool,
+    /// Senior officers (Captain and up) get advanced tech (with ranks).
+    pub rank_tech: bool,
 }
 
 /// Things that happened this tick, for the career and orders systems.
@@ -292,9 +342,16 @@ pub enum HitKind {
     Phaser,
     /// Jem'Hadar phased polaron beams go straight through shields.
     Polaron,
+    /// Overcharged phasers: a quarter of the damage goes through shields.
+    Overcharge,
 }
 
 pub const WEB_REACH: f64 = 300.0;
+pub const ABLATIVE_ARMOR: f64 = 40.0;
+pub const TRICOBALT_COST: f64 = 3000.0;
+pub const TRICOBALT_DAMAGE: f64 = 150.0;
+pub const TRICOBALT_BLAST: f64 = 3500.0;
+pub const SWEEP_RANGE: f64 = 12_000.0;
 pub const WEB_DAMAGE: f64 = 1.5;
 
 pub struct PhaserShot {
@@ -554,6 +611,7 @@ impl World {
         if !self.open_teams().contains(&team) {
             return Err(format!("The {} are not accepting new recruits", team.plural()));
         }
+        let ship = self.hull_for(i, team, ship)?;
         if ship == ShipType::Starbase && self.has_starbase(team, id) {
             return Err("Your team already has a starbase".into());
         }
@@ -602,6 +660,11 @@ impl World {
         p.just_exploded = false;
         p.tribbles = false;
         p.marked = false;
+        p.jump_at = None;
+        p.phased_until = 0;
+        p.adapt = 1.0;
+        self.fit_tech(i);
+        let p = &mut self.players[i];
         if !p.robot {
             let msg = format!("{} has joined the {} in a {}", p.label(), team.plural(), s.name);
             self.god(msg);
@@ -670,6 +733,9 @@ impl World {
             ClientMsg::Plasma(d) => self.fire_torp(i, d as f64, TorpKind::Plasma),
             ClientMsg::Phaser(d) => self.fire_phaser(i, d as f64),
             ClientMsg::Shields => {
+                if !self.players[i].shields_up && self.tick < self.players[i].jammed_until {
+                    return self.warn(id, "Shields jammed by a graviton pulse!");
+                }
                 let p = &mut self.players[i];
                 p.shields_up = !p.shields_up;
                 if p.shields_up {
@@ -693,6 +759,7 @@ impl World {
             ClientMsg::Tractor { target, pressor } => self.tractor(i, target, pressor),
             ClientMsg::DetEnemy => self.det_enemy(i),
             ClientMsg::Overwatch => self.toggle_overwatch(i),
+            ClientMsg::Tech { slot, dir } => self.use_tech(i, slot as usize, dir as f64),
             ClientMsg::DetOwn => {
                 for t in self.torps.iter_mut() {
                     if t.owner == id && t.explode == 0 && t.kind == TorpKind::Photon {
@@ -700,6 +767,7 @@ impl World {
                     }
                 }
             }
+            ClientMsg::LockPlanet(pl) if self.iconian_gateway(i, pl as usize) => {}
             ClientMsg::LockPlanet(pl) => {
                 if (pl as usize) < self.planets.len() {
                     let name = self.planets[pl as usize].name;
@@ -776,24 +844,44 @@ impl World {
         if p.cloaked && p.ship != ShipType::BirdOfPrey {
             return self.warn(id, "Weapons disabled while cloaked");
         }
+        if self.tick < p.phased_until {
+            return self.warn(id, "Out of phase: weapons can't fire");
+        }
         if p.w_overheat > 0 {
             return self.warn(id, "Weapons overheated!");
         }
+        if self.kelvan_field(i) {
+            return self.warn(id, "Kelvan neural field: your torpedo crews are paralysed");
+        }
+        let p = &self.players[i];
+        let quantum = kind == TorpKind::Photon && p.techs.contains(&Tech::QuantumTorps);
+        let max_torps = p.ship.max_torps();
         let (cost, damage, speed, fuse) = match kind {
             TorpKind::Photon => {
-                let out = self.torps.iter().filter(|t| t.owner == id && t.kind == TorpKind::Photon).count();
-                if out >= MAXTORP {
-                    return self.warn(id, "Torps limited to 8 at a time");
+                if s.torp_damage <= 0.0 {
+                    return self.warn(id, "This ship has no torpedoes");
                 }
-                let boost = 1.0 + 0.1 * self.upgrade(p.team, UPGRADE_TORPS);
-                (s.torp_cost, s.torp_damage * boost, s.torp_speed, s.torp_fuse)
+                let out = self.torps.iter().filter(|t| t.owner == id && t.kind == TorpKind::Photon).count();
+                if out >= max_torps {
+                    return self.warn(id, format!("Torps limited to {} at a time", max_torps));
+                }
+                let mut boost = 1.0 + 0.1 * self.upgrade(p.team, UPGRADE_TORPS);
+                let mut speed = s.torp_speed;
+                if quantum {
+                    boost *= 1.2;
+                    speed *= 1.15;
+                }
+                (s.torp_cost, s.torp_damage * boost, speed, s.torp_fuse)
             }
+            TorpKind::Tricobalt => (TRICOBALT_COST, TRICOBALT_DAMAGE, 6.0, 45),
             TorpKind::Plasma => {
                 if s.plasma_damage <= 0.0 {
                     return self.warn(id, "This ship has no plasma torpedoes");
                 }
-                if p.kills < 2.0 {
-                    return self.warn(id, "You need 2 kills to fire plasma");
+                // The Warbird's plasma is ready after a single kill.
+                let need = if p.ship == ShipType::Warbird { 1.0 } else { 2.0 };
+                if p.kills < need {
+                    return self.warn(id, format!("You need {} kills to fire plasma", need));
                 }
                 if self.torps.iter().any(|t| t.owner == id && t.kind == TorpKind::Plasma) {
                     return self.warn(id, "Plasma already in flight");
@@ -816,12 +904,26 @@ impl World {
             fuse: fuse + rng.gen_range(0..4),
             damage,
             explode: 0,
+            quantum,
+            deflect_tried: false,
         };
+        // Photon spread: two more torpedoes fanned out either side.
+        let spread = kind == TorpKind::Photon && p.techs.contains(&Tech::PhotonSpread);
+        let out = self.torps.iter().filter(|t| t.owner == id && t.kind == TorpKind::Photon).count();
+        let mut extra = Vec::new();
+        if spread {
+            for side in [-6.0, 6.0] {
+                if out + 1 + extra.len() < max_torps && p.fuel >= cost * (1.5 + 0.5 * extra.len() as f64) {
+                    extra.push(Torp { dir: (dir + side).rem_euclid(256.0), fuse: fuse + rng.gen_range(0..4), ..t.clone() });
+                }
+            }
+        }
         let p = &mut self.players[i];
-        p.fuel -= cost;
-        p.wtemp += cost / 10.0;
+        p.fuel -= cost * (1.0 + 0.5 * extra.len() as f64);
+        p.wtemp += cost / 10.0 * (1.0 + 0.5 * extra.len() as f64);
         p.repair_mode = false;
         self.torps.push(t);
+        self.torps.extend(extra);
     }
 
     fn fire_phaser(&mut self, i: usize, dir: f64) {
@@ -841,15 +943,19 @@ impl World {
         if p.in_storm {
             return self.warn(id, "Ion interference: phasers are offline in the storm");
         }
+        if self.tick < p.phased_until {
+            return self.warn(id, "Out of phase: weapons can't fire");
+        }
+        let overcharge = p.techs.contains(&Tech::PhaserOvercharge);
         if p.fuel < s.phaser_cost {
             return self.warn(id, "Not enough fuel for phaser");
         }
         let phaser_damage = s.phaser_damage * (1.0 + 0.1 * self.upgrade(p.team, UPGRADE_PHASERS));
-        let range = PHASEDIST * phaser_damage / 100.0;
+        let range = PHASEDIST * phaser_damage / 100.0 * if overcharge { 1.25 } else { 1.0 };
         let (vx, vy) = dir_vec(dir);
         let (x, y, team) = (p.x, p.y, p.team);
-        // Nearest enemy ship close to the beam line.
-        let mut best: Option<(usize, f64)> = None;
+        // Enemy ships close to the beam line, nearest first.
+        let mut along_beam: Vec<(usize, f64)> = Vec::new();
         for (j, q) in self.players.iter().enumerate() {
             if j == i || !q.alive() || !self.at_war(i, j) {
                 continue;
@@ -860,16 +966,37 @@ impl World {
                 continue;
             }
             let perp = (dx * vy - dy * vx).abs();
-            if perp < q.ship.hit_radius().max(800.0) && best.map_or(true, |(_, d)| along < d) {
-                best = Some((j, along));
+            if perp < q.ship.hit_radius().max(800.0) {
+                along_beam.push((j, along));
             }
         }
+        along_beam.sort_by(|a, b| a.1.total_cmp(&b.1));
+        // A Xindi particle beam pierces: everything beyond the first is hit too.
+        if self.players[i].ship == ShipType::XindiWarship {
+            for &(j, dist) in along_beam.iter().skip(1) {
+                let label = self.players[i].tag();
+                let (tx, ty) = (self.players[j].x, self.players[j].y);
+                self.phasers.push(PhaserShot {
+                    info: PhaserInfo { owner: id, x1: x as i32, y1: y as i32, x2: tx as i32, y2: ty as i32, hit: true },
+                    ticks: 6,
+                });
+                self.hit_kind = HitKind::Phaser;
+                self.inflict(j, phaser_damage * (1.0 - dist / range), Some(id), format!("particle beam from {}", label));
+            }
+        }
+        let best = along_beam.first().copied();
         let (x2, y2, hit) = match best {
             Some((j, dist)) => {
                 let dmg = phaser_damage * (1.0 - dist / range);
                 let (tx, ty) = (self.players[j].x, self.players[j].y);
                 let label = self.players[i].tag();
-                self.hit_kind = if self.players[i].faction == Some(Faction::JemHadar) { HitKind::Polaron } else { HitKind::Phaser };
+                self.hit_kind = if self.players[i].faction == Some(Faction::JemHadar) {
+                    HitKind::Polaron
+                } else if overcharge {
+                    HitKind::Overcharge
+                } else {
+                    HitKind::Phaser
+                };
                 if self.players[j].ship == ShipType::CrystalEntity {
                     self.resonate(j, id);
                 }
@@ -894,7 +1021,8 @@ impl World {
         let p = &mut self.players[i];
         p.fuel -= s.phaser_cost;
         p.wtemp += s.phaser_cost / 10.0;
-        p.phaser_timer = 10;
+        // The Defiant's pulse phasers recharge twice as fast.
+        p.phaser_timer = if p.ship == ShipType::Defiant { 5 } else { 10 };
         p.repair_mode = false;
         self.phasers.push(PhaserShot {
             info: PhaserInfo { owner: id, x1: x as i32, y1: y as i32, x2: x2 as i32, y2: y2 as i32, hit },
@@ -958,6 +1086,402 @@ impl World {
         self.planets[k].known[team.idx()] = true;
         let id = p.id;
         self.warn(id, format!("Helmsman: Entering orbit around {}", name));
+    }
+
+    /// Use the advanced tech on key v (slot 0), e (1) or j (2).
+    fn use_tech(&mut self, i: usize, slot: usize, dir: f64) {
+        let id = i as u8;
+        let tick = self.tick;
+        let p = &self.players[i];
+        let Some(tech) = p.techs.iter().copied().find(|t| t.slot() == Some(slot)) else {
+            let rank = RANKS[(TECH_RANK as usize + 2 + slot).min(RANKS.len() - 1)].0;
+            return self.warn(id, format!("No tech on that key yet (it comes with the rank of {})", rank));
+        };
+        if p.ship == ShipType::Starbase && !tech.starbase_only() {
+            return self.warn(id, "Starbases can't use that tech");
+        }
+        if tick < p.phased_until {
+            return self.warn(id, "Out of phase: systems offline");
+        }
+        if tick < p.tech_ready[slot] {
+            let secs = (p.tech_ready[slot] - tick).div_ceil(UPS as u32);
+            return self.warn(id, format!("{} ready in {} s", tech.name(), secs));
+        }
+        let used = match tech {
+            Tech::TachyonSweep => {
+                self.players[i].sweep_until = tick + 10 * UPS as u32;
+                true
+            }
+            Tech::Decoy => self.launch_decoy(i),
+            Tech::GravitonPulse => {
+                self.graviton_pulse(i);
+                true
+            }
+            Tech::Tricobalt => {
+                let before = self.torps.len();
+                self.fire_torp(i, dir, TorpKind::Tricobalt);
+                self.torps.len() > before
+            }
+            Tech::Isokinetic => self.isokinetic(i, dir),
+            Tech::Antiproton => self.antiproton(i),
+            Tech::Transwarp => {
+                self.players[i].jump_at = Some(tick + 2 * UPS as u32);
+                true
+            }
+            Tech::PhaseCloak => {
+                self.players[i].phased_until = tick + 6 * UPS as u32;
+                for q in self.players.iter_mut() {
+                    if matches!(q.tractor, Some((t, _)) if t == id) {
+                        q.tractor = None;
+                    }
+                }
+                true
+            }
+            Tech::FighterWing => self.launch_fighters(i),
+            Tech::TractorNet => {
+                for (j, _) in self.foes_near(i, 6000.0) {
+                    if self.players[j].stats().mass > 50_000.0 {
+                        continue;
+                    }
+                    self.players[j].netted_until = tick + 6 * UPS as u32;
+                    let (x1, y1, x2, y2) = (self.players[i].x, self.players[i].y, self.players[j].x, self.players[j].y);
+                    self.phasers.push(PhaserShot {
+                        info: PhaserInfo { owner: id, x1: x1 as i32, y1: y1 as i32, x2: x2 as i32, y2: y2 as i32, hit: false },
+                        ticks: 10,
+                    });
+                    self.warn(j as u8, "Caught in a starbase tractor net!");
+                }
+                true
+            }
+            Tech::GalacticScan => {
+                self.players[i].scan_until = tick + 20 * UPS as u32;
+                let team = self.players[i].team;
+                for pl in self.planets.iter_mut() {
+                    pl.known[team.idx()] = true;
+                }
+                let who = self.players[i].label();
+                self.team_msg(team, format!("{} runs a galactic scan: all contacts on screen for 20 seconds", who));
+                true
+            }
+            Tech::EmergencyReserve => {
+                let p = &mut self.players[i];
+                let s = p.stats();
+                p.shield = s.max_shield;
+                p.fuel = s.max_fuel;
+                (p.wtemp, p.etemp, p.w_overheat, p.e_overheat) = (0.0, 0.0, 0, 0);
+                true
+            }
+            _ => false,
+        };
+        if used {
+            self.players[i].tech_ready[slot] = tick + tech.cooldown() * UPS as u32;
+            self.warn(id, format!("{}!", tech.name()));
+        }
+    }
+
+    /// Enemy ships within `r` of ship `i` that tech can affect.
+    fn foes_near(&self, i: usize, r: f64) -> Vec<(usize, f64)> {
+        let (x, y) = (self.players[i].x, self.players[i].y);
+        (0..MAXPLAYER)
+            .filter(|&j| j != i && self.players[j].alive() && self.at_war(i, j))
+            .filter(|&j| !matches!(self.players[j].ship, ShipType::QEntity | ShipType::VgerCloud | ShipType::WhaleProbe))
+            .map(|j| (j, ((self.players[j].x - x).powi(2) + (self.players[j].y - y).powi(2)).sqrt()))
+            .filter(|&(_, d)| d < r)
+            .collect()
+    }
+
+    /// Starbase: launch three fighters that hunt enemies near the base.
+    fn launch_fighters(&mut self, i: usize) -> bool {
+        let tick = self.tick;
+        let (team, x, y) = (self.players[i].team, self.players[i].x, self.players[i].y);
+        let mut launched = 0;
+        for k in 0..3 {
+            let Some(f) = self.add_player("Fighter", true) else { break };
+            let s = ShipType::Scout.stats();
+            let a = k as f64 * 85.0;
+            let q = &mut self.players[f as usize];
+            q.team = team;
+            q.ship = ShipType::Scout;
+            q.state = PState::Alive;
+            let (vx, vy) = dir_vec(a);
+            (q.x, q.y, q.dir, q.desired_dir) = (x + vx * 1200.0, y + vy * 1200.0, a, a);
+            (q.fuel, q.shield, q.shields_up) = (s.max_fuel, s.max_shield, true);
+            q.overwatch = true;
+            q.bounty = -8.0;
+            q.fighter_of = Some((i as u8, tick + 30 * UPS as u32));
+            launched += 1;
+        }
+        if launched == 0 {
+            self.warn(i as u8, "No room to launch fighters");
+        }
+        launched > 0
+    }
+
+    /// A fighter: close on the nearest enemy near its base (overwatch does
+    /// the shooting), or fly back to the base; recalled after 30 seconds.
+    fn fly_fighter(&mut self, i: usize) {
+        let Some((base, until)) = self.players[i].fighter_of else { return };
+        let b = base as usize;
+        let base_ok = self.players[b].alive() && self.players[b].ship == ShipType::Starbase;
+        if self.tick >= until || !base_ok || !self.players[i].alive() {
+            if self.players[i].state != PState::Exploding {
+                self.remove_player(i as u8);
+            }
+            return;
+        }
+        let (bx, by) = (self.players[b].x, self.players[b].y);
+        let (x, y) = (self.players[i].x, self.players[i].y);
+        let target = self
+            .foes_near(b, 15_000.0)
+            .into_iter()
+            .filter(|&(j, _)| !(self.players[j].cloaked && !self.players[j].detected))
+            .map(|(j, _)| (j, (self.players[j].x - x).powi(2) + (self.players[j].y - y).powi(2)))
+            .min_by(|a, b| a.1.total_cmp(&b.1));
+        let (tx, ty, speed) = match target {
+            Some((j, d2)) => (self.players[j].x, self.players[j].y, if d2 < 3000.0f64.powi(2) { 6 } else { 12 }),
+            None => (bx, by, 8),
+        };
+        let p = &mut self.players[i];
+        p.desired_dir = dir_to(x, y, tx, ty);
+        p.desired_speed = speed.min(p.stats().max_speed);
+    }
+
+    /// Whether a Sheliak colony ship hostile to `bomber` is in orbit around
+    /// planet `k`, shielding it from bombing.
+    fn sheliak_shield(&self, k: usize, bomber: Team) -> bool {
+        self.players.iter().any(|p| p.alive() && p.ship == ShipType::SheliakShip && p.orbiting == Some(k) && self.hostile(p.team, bomber))
+    }
+
+    /// Whether ship `i` is inside a hostile Kelvan ship's neural field.
+    fn kelvan_field(&self, i: usize) -> bool {
+        let (x, y) = (self.players[i].x, self.players[i].y);
+        (0..MAXPLAYER).any(|j| {
+            let q = &self.players[j];
+            j != i && q.alive() && q.ship == ShipType::KelvanShip && self.at_war(i, j) && (q.x - x).powi(2) + (q.y - y).powi(2) < 2500.0f64.powi(2)
+        })
+    }
+
+    /// Kazon raider: at warp 6 or more, slam into an enemy it touches.
+    fn kazon_ram(&mut self, i: usize) {
+        let p = &self.players[i];
+        if !p.alive() || p.speed < 6 || self.tick < p.relic_ready {
+            return;
+        }
+        let Some((j, _)) = self.foes_near(i, 700.0).into_iter().min_by(|a, b| a.1.total_cmp(&b.1)) else { return };
+        self.players[i].relic_ready = self.tick + 5 * UPS as u32;
+        let (me, them) = (self.players[i].label(), self.players[j].label());
+        self.god(format!("{} rams {}!", me, them));
+        self.inflict(j, 70.0, Some(i as u8), format!("was rammed by {}", me));
+        self.inflict(i, 20.0, None, "broke up ramming an enemy".into());
+    }
+
+    /// Iconian gateway ship: orbiting one of our worlds and locking onto
+    /// another steps through a gateway straight into orbit there. Returns
+    /// whether it happened.
+    fn iconian_gateway(&mut self, i: usize, k: usize) -> bool {
+        let p = &self.players[i];
+        if p.ship != ShipType::IconianShip || k >= self.planets.len() {
+            return false;
+        }
+        let Some(from) = p.orbiting else { return false };
+        let team = p.team;
+        if from == k || self.planets[from].owner != team || self.planets[k].owner != team {
+            return false;
+        }
+        if self.tick < p.relic_ready {
+            let secs = (p.relic_ready - self.tick).div_ceil(UPS as u32);
+            self.warn(i as u8, format!("The gateway recharges in {} s", secs));
+            return false;
+        }
+        self.players[i].relic_ready = self.tick + 30 * UPS as u32;
+        self.players[i].tractor = None;
+        self.enter_orbit(i, k);
+        let name = self.planets[k].name;
+        self.warn(i as u8, format!("Through the Iconian gateway to {}!", name));
+        true
+    }
+
+    /// A starbase's passive tech, every few ticks.
+    fn starbase_passives(&mut self, i: usize) {
+        let tick = self.tick;
+        let (team, x, y) = (self.players[i].team, self.players[i].x, self.players[i].y);
+        let techs = self.players[i].techs.clone();
+        if techs.contains(&Tech::PointDefense) && tick % 3 == 0 {
+            let treaties = self.treaties.clone();
+            let foe = |t: Team| t != team && !treaties.iter().any(|&(a, b)| (a == t && b == team) || (a == team && b == t));
+            let shot = self
+                .torps
+                .iter_mut()
+                .filter(|t| t.explode == 0 && t.kind != TorpKind::Tricobalt && foe(t.team))
+                .map(|t| {
+                    let d2 = (t.x - x).powi(2) + (t.y - y).powi(2);
+                    (d2, t)
+                })
+                .filter(|(d2, _)| *d2 < 3000.0f64.powi(2))
+                .min_by(|a, b| a.0.total_cmp(&b.0));
+            if let Some((_, t)) = shot {
+                t.explode = 1;
+                t.damage = 0.0;
+                let (tx, ty) = (t.x, t.y);
+                self.phasers.push(PhaserShot {
+                    info: PhaserInfo { owner: i as u8, x1: x as i32, y1: y as i32, x2: tx as i32, y2: ty as i32, hit: true },
+                    ticks: 3,
+                });
+            }
+        }
+        let projector = techs.contains(&Tech::ShieldProjector);
+        let drydock = techs.contains(&Tech::MobileDrydock);
+        if !projector && !drydock {
+            return;
+        }
+        for j in 0..MAXPLAYER {
+            let q = &self.players[j];
+            if !q.alive() || !(q.team == team || self.allied(q.team, team)) || q.faction.is_some() {
+                continue;
+            }
+            let d2 = (q.x - x).powi(2) + (q.y - y).powi(2);
+            let s = q.stats();
+            let q = &mut self.players[j];
+            if projector && d2 < 6000.0f64.powi(2) && q.shield < s.max_shield {
+                q.shield = (q.shield + s.repair * 2.0 / 1000.0).min(s.max_shield);
+            }
+            if drydock && j != i && d2 < 4000.0f64.powi(2) && q.speed <= 2 {
+                q.damage = (q.damage - s.repair * 2.0 / 1000.0).max(0.0);
+                q.fuel = (q.fuel + 6.0 * s.recharge).min(s.max_fuel);
+            }
+        }
+    }
+
+    fn launch_decoy(&mut self, i: usize) -> bool {
+        let name = self.players[i].name.clone();
+        let Some(d) = self.add_player(&name, true) else {
+            self.warn(i as u8, "No room for a decoy");
+            return false;
+        };
+        let tick = self.tick;
+        let src = &self.players[i];
+        let (team, ship, x, y, dir, speed, shields) = (src.team, src.ship, src.x, src.y, src.dir, src.speed.max(4), src.shields_up);
+        let s = ship.stats();
+        let q = &mut self.players[d as usize];
+        q.team = team;
+        q.ship = ship;
+        q.state = PState::Alive;
+        (q.x, q.y, q.dir, q.desired_dir) = (x, y, dir, dir);
+        (q.speed, q.desired_speed) = (speed, speed);
+        q.fuel = s.max_fuel;
+        q.shields_up = shields;
+        // A hologram: the first hit dispels it.
+        q.damage = s.max_damage - 1.0;
+        q.bounty = -10.0;
+        q.decoy_until = Some(tick + 15 * UPS as u32);
+        true
+    }
+
+    fn graviton_pulse(&mut self, i: usize) {
+        let (x, y) = (self.players[i].x, self.players[i].y);
+        let tick = self.tick;
+        for (j, d) in self.foes_near(i, 4000.0) {
+            if self.players[j].stats().mass > 50_000.0 {
+                continue; // too massive to shove
+            }
+            let q = &mut self.players[j];
+            let (ux, uy) = if d > 1.0 { ((q.x - x) / d, (q.y - y) / d) } else { (1.0, 0.0) };
+            q.leave_orbit();
+            q.x = (q.x + ux * 2500.0).clamp(0.0, GWIDTH);
+            q.y = (q.y + uy * 2500.0).clamp(0.0, GWIDTH);
+            q.shields_up = false;
+            q.jammed_until = tick + 3 * UPS as u32;
+            let (qx, qy) = (q.x, q.y);
+            self.phasers.push(PhaserShot {
+                info: PhaserInfo { owner: i as u8, x1: x as i32, y1: y as i32, x2: qx as i32, y2: qy as i32, hit: false },
+                ticks: 6,
+            });
+            self.warn(j as u8, "Graviton pulse! Shields jammed");
+        }
+    }
+
+    /// A long, shield-piercing beam at the first enemy along `dir`.
+    fn isokinetic(&mut self, i: usize, dir: f64) -> bool {
+        const RANGE: f64 = 9000.0;
+        let id = i as u8;
+        if self.players[i].fuel < 1500.0 {
+            self.warn(id, "Not enough fuel for the isokinetic cannon");
+            return false;
+        }
+        self.players[i].fuel -= 1500.0;
+        let (x, y) = (self.players[i].x, self.players[i].y);
+        let (vx, vy) = dir_vec(dir);
+        let target = self
+            .foes_near(i, RANGE)
+            .into_iter()
+            .filter(|&(j, _)| {
+                let q = &self.players[j];
+                let (dx, dy) = (q.x - x, q.y - y);
+                dx * vx + dy * vy > 0.0 && (dx * vy - dy * vx).abs() < q.ship.hit_radius().max(800.0)
+            })
+            .min_by(|a, b| a.1.total_cmp(&b.1));
+        let (x2, y2, hit) = match target {
+            Some((j, _)) => {
+                let (tx, ty) = (self.players[j].x, self.players[j].y);
+                let label = self.players[i].tag();
+                self.hit_kind = HitKind::Polaron;
+                self.inflict(j, 120.0, Some(id), format!("isokinetic cannon from {}", label));
+                (tx, ty, true)
+            }
+            None => (x + vx * RANGE, y + vy * RANGE, false),
+        };
+        self.phasers.push(PhaserShot {
+            info: PhaserInfo { owner: id, x1: x as i32, y1: y as i32, x2: x2 as i32, y2: y2 as i32, hit },
+            ticks: 8,
+        });
+        true
+    }
+
+    /// Strike every enemy within 4,500 at once.
+    fn antiproton(&mut self, i: usize) -> bool {
+        const RANGE: f64 = 4500.0;
+        let id = i as u8;
+        if self.players[i].fuel < 2000.0 {
+            self.warn(id, "Not enough fuel for an antiproton burst");
+            return false;
+        }
+        self.players[i].fuel -= 2000.0;
+        let (x, y) = (self.players[i].x, self.players[i].y);
+        let label = self.players[i].tag();
+        for (j, d) in self.foes_near(i, RANGE) {
+            let q = &self.players[j];
+            if q.cloaked && !q.detected {
+                continue;
+            }
+            let (tx, ty) = (q.x, q.y);
+            self.phasers.push(PhaserShot {
+                info: PhaserInfo { owner: id, x1: x as i32, y1: y as i32, x2: tx as i32, y2: ty as i32, hit: true },
+                ticks: 6,
+            });
+            self.inflict(j, 60.0 * (1.0 - 0.5 * d / RANGE), Some(id), format!("antiproton burst from {}", label));
+        }
+        true
+    }
+
+    fn transwarp(&mut self, i: usize) {
+        let id = i as u8;
+        let p = &mut self.players[i];
+        p.jump_at = None;
+        if !p.alive() {
+            return;
+        }
+        let (vx, vy) = dir_vec(p.dir);
+        p.leave_orbit();
+        p.lock = Lock::None;
+        p.tractor = None;
+        p.x = (p.x + vx * 15_000.0).clamp(1000.0, GWIDTH - 1000.0);
+        p.y = (p.y + vy * 15_000.0).clamp(1000.0, GWIDTH - 1000.0);
+        for q in self.players.iter_mut() {
+            if matches!(q.tractor, Some((t, _)) if t == id) {
+                q.tractor = None;
+            }
+        }
+        self.warn(id, "Transwarp jump!");
     }
 
     fn toggle_overwatch(&mut self, i: usize) {
@@ -1031,7 +1555,7 @@ impl World {
             return;
         }
         let out = self.torps.iter().filter(|t| t.owner == i as u8 && t.kind == TorpKind::Photon).count();
-        if d < torp_range && s.torp_damage > 0.0 && out < MAXTORP && (tick + i as u32) % 5 == 0 {
+        if d < torp_range && s.torp_damage > 0.0 && out < self.players[i].ship.max_torps() && (tick + i as u32) % 5 == 0 {
             let spread = ((tick % 7) as f64 - 3.0) * 0.8;
             self.fire_torp(i, (aim + spread).rem_euclid(256.0), TorpKind::Photon);
         }
@@ -1053,8 +1577,12 @@ impl World {
         if self.allied(self.planets[k].owner, p.team) {
             return self.warn(id, "That planet belongs to your allies!");
         }
-        if self.planets[k].armies <= 4 {
+        let floor = if p.ship == ShipType::HusnockWarship { 1 } else { 4 };
+        if self.planets[k].armies <= floor {
             return self.warn(id, "Too few armies left to bomb");
+        }
+        if self.sheliak_shield(k, p.team) {
+            return self.warn(id, "A Sheliak shield protects this planet from bombing");
         }
         let p = &mut self.players[i];
         p.bombing = true;
@@ -1153,6 +1681,11 @@ impl World {
         if p.armies > 0 {
             return self.warn(id, "Beam your armies down before refitting");
         }
+        let ship = match self.hull_for(i, p.team, ship) {
+            Ok(s) => s,
+            Err(e) => return self.warn(id, e),
+        };
+        let p = &self.players[i];
         if ship == ShipType::Starbase && self.has_starbase(p.team, id) {
             return self.warn(id, "Your team already has a starbase");
         }
@@ -1164,6 +1697,82 @@ impl World {
         p.damage = p.damage / old.max_damage * new.max_damage;
         p.ship = ship;
         self.warn(id, format!("Refitted to a {}", new.name));
+        self.fit_tech(i);
+    }
+
+    /// Check a ship choice: the classics for anyone; an empire's special
+    /// ship for Captains and up; a relic (drawn at random) for Commodores
+    /// and up. Specials and relics need ranks on.
+    fn hull_for(&self, i: usize, team: Team, ship: ShipType) -> Result<ShipType, String> {
+        // (The server's own ships, like convoy freighters, fly anything.)
+        if !ship.playable() && !self.players[i].robot {
+            return Err("That ship can't be flown".into());
+        }
+        if !ship.is_special() && !ship.is_relic() {
+            return Ok(ship);
+        }
+        let p = &self.players[i];
+        if !self.features.ranks || p.robot {
+            return Err("Special and relic ships need a server running with ranks".into());
+        }
+        let rank = p.rank.unwrap_or(0);
+        if ship.is_special() {
+            if rank < SPECIAL_RANK {
+                return Err(format!("Special ships need the rank of {}", RANKS[SPECIAL_RANK as usize].0));
+            }
+            return ShipType::special_for(team).ok_or_else(|| "No special ship for that empire".into());
+        }
+        if rank < RELIC_RANK {
+            return Err(format!("Relic ships need the rank of {}", RANKS[RELIC_RANK as usize].0));
+        }
+        Ok(*ShipType::RELICS.choose(&mut rand::thread_rng()).unwrap())
+    }
+
+    /// Fit a senior officer's advanced tech (at launch and refit): one tech
+    /// from each rank reached, from Captain up. An Admiral in a starbase gets
+    /// starbase tech in place of the active techs a starbase can't use.
+    fn fit_tech(&mut self, i: usize) {
+        let mut rng = rand::thread_rng();
+        let (ranks, rank_tech) = (self.features.ranks, self.features.rank_tech);
+        let p = &mut self.players[i];
+        let id = p.id;
+        p.techs.clear();
+        p.armor = 0.0;
+        let ranked = ranks && !p.robot && p.decoy_until.is_none();
+        let rank = if ranked { p.rank.unwrap_or(0) } else { 0 };
+        // Senior officers are worth hunting: +0.5 kill credit per rank above Commander.
+        p.bounty = if ranked { rank.saturating_sub(STARBASE_RANK) as f64 * 5.0 } else { 0.0 };
+        if !ranked || !rank_tech {
+            return;
+        }
+        let starbase = p.ship == ShipType::Starbase;
+        let tiers = (rank + 1).saturating_sub(TECH_RANK).min(5) as usize;
+        for (t, tier) in Tech::TIERS.iter().take(tiers).enumerate() {
+            if !(starbase && t >= 2) {
+                p.techs.push(tier[rng.gen_range(0..3)]);
+            }
+        }
+        if starbase && tiers == 5 {
+            for set in Tech::STARBASE {
+                p.techs.push(set[rng.gen_range(0..3)]);
+            }
+        }
+        if p.techs.contains(&Tech::AblativeArmor) {
+            p.armor = ABLATIVE_ARMOR;
+        }
+        if !p.techs.is_empty() {
+            let list: Vec<String> = p
+                .techs
+                .iter()
+                .map(|t| match t.key() {
+                    Some(k) => format!("{} [{}]", t.name(), k),
+                    None => t.name().to_string(),
+                })
+                .collect();
+            let text = format!("Advanced tech aboard: {}", list.join(", "));
+            self.warnings.push((id, text.clone()));
+            self.reply(id, text);
+        }
     }
 
     // ------------------------------------------------------------------
@@ -1181,12 +1790,17 @@ impl World {
         let killer_team = killer.map(|k| self.players[k as usize].team);
         let tick = self.tick;
         let p = &mut self.players[i];
-        if !p.alive() || amount <= 0.0 {
+        if !p.alive() || amount <= 0.0 || tick < p.phased_until {
             return;
         }
         if p.only_hurt_by.is_some() && killer_team != p.only_hurt_by {
             return;
         }
+        // A Suliban cell ship's enhanced reflexes: about a third of hits miss.
+        if p.ship == ShipType::SulibanCell && rand::thread_rng().gen_bool(0.35) {
+            return;
+        }
+        p.last_hit = tick;
         // Any hit on Chang's Bird-of-Prey lights up its exhaust.
         if p.ship == ShipType::BirdOfPrey {
             let hidden = tick >= p.revealed_until;
@@ -1218,17 +1832,33 @@ impl World {
             }
             _ => amount,
         };
+        // A Vidiian harvester repairs itself with what it takes from others.
+        if let Some(k) = killer.map(|k| k as usize).filter(|&k| k != i && self.players[k].ship == ShipType::VidiianHarvester) {
+            let v = &mut self.players[k];
+            v.damage = (v.damage - amount * 0.4).max(0.0);
+        }
         let absorb = 1.0 - 0.1 * self.upgrade(self.players[i].team, UPGRADE_SHIELDS);
         let p = &mut self.players[i];
-        if p.shields_up && kind != HitKind::Polaron {
-            p.shield -= amount * absorb;
+        // Polaron beams go straight through shields; overcharged phasers partly.
+        let (through, rest) = match kind {
+            HitKind::Polaron => (amount, 0.0),
+            HitKind::Overcharge => (amount * 0.25, amount * 0.75),
+            _ => (0.0, amount),
+        };
+        let mut hull = through;
+        if p.shields_up {
+            p.shield -= rest * absorb;
             if p.shield < 0.0 {
-                p.damage -= p.shield;
+                hull -= p.shield;
                 p.shield = 0.0;
             }
         } else {
-            p.damage += amount;
+            hull += rest;
         }
+        // Ablative armor soaks up hull damage first.
+        let soak = hull.min(p.armor);
+        p.armor -= soak;
+        p.damage += hull - soak;
         p.repair_mode = false;
         if p.damage >= p.stats().max_damage {
             self.kill(i, killer, how);
@@ -1236,6 +1866,11 @@ impl World {
     }
 
     pub fn kill(&mut self, i: usize, killer: Option<u8>, how: String) {
+        // A holographic decoy just flickers out.
+        if self.players[i].decoy_until.is_some() {
+            self.remove_player(i as u8);
+            return;
+        }
         self.hunt_outcome(i, killer);
         let victim_kills = self.players[i].kills + self.players[i].bounty;
         let victim_armies = self.players[i].armies;
@@ -1406,6 +2041,23 @@ impl World {
             if self.players[i].overwatch && self.players[i].alive() {
                 self.overwatch_fire(i);
             }
+            if self.players[i].jump_at.map_or(false, |t| self.tick >= t) {
+                self.transwarp(i);
+            }
+            if let Some(until) = self.players[i].decoy_until {
+                if self.tick >= until || !self.players[i].alive() {
+                    self.remove_player(i as u8);
+                }
+            }
+            if self.players[i].fighter_of.is_some() {
+                self.fly_fighter(i);
+            }
+            if self.players[i].ship == ShipType::KazonRaider {
+                self.kazon_ram(i);
+            }
+            if self.players[i].alive() && self.players[i].ship == ShipType::Starbase && !self.players[i].techs.is_empty() {
+                self.starbase_passives(i);
+            }
         }
         if self.features.terrain {
             super::terrain::tick(self);
@@ -1548,6 +2200,10 @@ impl World {
         let p = &mut self.players[i];
 
         // The whale probe's call drains all power.
+        if self.tick < p.netted_until {
+            p.desired_speed = p.desired_speed.min(1);
+            p.speed = p.speed.min(1);
+        }
         let powerless = self.tick < p.powerless_until;
         if powerless {
             p.desired_speed = p.desired_speed.min(1);
@@ -1605,6 +2261,12 @@ impl World {
         let fix = 1.0 + 0.25 * if self.features.supply { self.supply[p.team.idx()].levels[UPGRADE_REPAIR] as f64 } else { 0.0 };
         let at_repair = own_planet.map_or(false, |(_, _, f)| f & PL_REPAIR != 0);
         let mut smul = if p.repair_mode { 4.0 } else { 2.0 };
+        if p.techs.contains(&Tech::RegenShields) && self.tick.saturating_sub(p.last_hit) > 5 * UPS as u32 {
+            smul *= 3.0;
+        }
+        if p.techs.contains(&Tech::AblativeArmor) && (p.repair_mode || at_repair) {
+            p.armor = (p.armor + 0.1).min(ABLATIVE_ARMOR);
+        }
         let mut dmul = if p.repair_mode { 2.0 } else { 1.0 };
         if at_repair {
             smul += 2.0;
@@ -1627,21 +2289,31 @@ impl World {
         if let Some((k, owner, _)) = planet_under {
             let p = &mut self.players[i];
             p.action_timer += 1;
+            // A Husnock warship bombs harder, and all the way down to 1 army.
+            let husnock = p.ship == ShipType::HusnockWarship;
+            let floor = if husnock { 1 } else { 4 };
+            let beam_every = if p.ship == ShipType::VothCityShip { 4 } else { 8 };
+            let team = p.team;
+            let shielded = self.sheliak_shield(k, team);
+            let p = &mut self.players[i];
             if p.bombing && p.action_timer >= 5 {
                 p.action_timer = 0;
-                if owner == p.team || self.planets[k].armies <= 4 {
+                if owner == p.team || self.planets[k].armies <= floor {
                     p.bombing = false;
-                    self.warn(id, "Bombing stopped: planet down to 4 armies");
+                    self.warn(id, format!("Bombing stopped: planet down to {} {}", floor, if floor == 1 { "army" } else { "armies" }));
+                } else if shielded {
+                    p.bombing = false;
+                    self.warn(id, "A Sheliak shield protects this planet from bombing");
                 } else if rng.gen_bool(0.6) {
-                    let n = if p.ship == ShipType::Assault { 2 } else { 1 };
-                    let n = n.min(self.planets[k].armies - 4);
+                    let n = if husnock { 3 } else if p.ship == ShipType::Assault { 2 } else { 1 };
+                    let n = n.min(self.planets[k].armies - floor);
                     self.planets[k].armies -= n;
                     self.planets[k].tribbles = false;
                     self.events.push(GameEvent::Bombed { player: id, planet: k, armies: n });
                     p.kills += 0.02 * n as f64;
                     p.total_kills += 0.02 * n as f64;
                 }
-            } else if p.beam_up && p.action_timer >= 8 {
+            } else if p.beam_up && p.action_timer >= beam_every {
                 p.action_timer = 0;
                 if owner != p.team || self.planets[k].armies <= 1 {
                     p.beam_up = false;
@@ -1653,7 +2325,7 @@ impl World {
                     p.armies += 1;
                     self.planets[k].armies -= 1;
                 }
-            } else if p.beam_down && p.action_timer >= 8 {
+            } else if p.beam_down && p.action_timer >= beam_every {
                 p.action_timer = 0;
                 if p.armies == 0 {
                     p.beam_down = false;
@@ -1772,10 +2444,33 @@ impl World {
         let mut hits: Vec<(usize, f64, u8, TorpKind)> = Vec::new();
         let treaties = self.treaties.clone();
         let foes = |a: Team, b: Team| a != b && !treaties.iter().any(|&(x, y)| (x == a && y == b) || (x == b && y == a));
-        for t in self.torps.iter_mut() {
+        // Preserver obelisks' deflectors, as (x, y, team, id).
+        let deflectors: Vec<(f64, f64, Team, u8)> = self
+            .players
+            .iter()
+            .filter(|p| p.alive() && p.ship == ShipType::PreserverObelisk)
+            .map(|p| (p.x, p.y, p.team, p.id))
+            .collect();
+        let tick = self.tick;
+        for (n, t) in self.torps.iter_mut().enumerate() {
             if t.explode > 0 {
                 t.explode += 1;
                 continue;
+            }
+            // An enemy photon coming within 1,200 of an obelisk is usually
+            // turned back the way it came, and becomes the obelisk's.
+            if t.kind == TorpKind::Photon && !t.deflect_tried {
+                for &(ox, oy, team, oid) in &deflectors {
+                    if foes(team, t.team) && (t.x - ox).powi(2) + (t.y - oy).powi(2) < 1200.0f64.powi(2) {
+                        t.deflect_tried = true;
+                        if (tick as usize + n) % 5 < 3 {
+                            t.dir = (t.dir + 128.0).rem_euclid(256.0);
+                            t.owner = oid;
+                            t.team = team;
+                        }
+                        break;
+                    }
+                }
             }
             // Plasma homes in on the nearest enemy.
             if t.kind == TorpKind::Plasma {
@@ -1802,9 +2497,11 @@ impl World {
                 let hostile = |p: &Player| {
                     foes(p.team, t.team) || matches!((owner_fac, p.faction), (Some(x), Some(y)) if x.at_war_with(y))
                 };
+                let tick = self.tick;
                 boom = self.players.iter().any(|p| {
                     let r = p.ship.hit_radius();
                     p.alive()
+                        && tick >= p.phased_until
                         && hostile(p)
                         && (p.x - t.x).abs() < r
                         && (p.y - t.y).abs() < r
@@ -1813,11 +2510,16 @@ impl World {
             }
             if boom {
                 t.explode = 1;
-                let damdist = if t.kind == TorpKind::Plasma { PLASDAMDIST } else { DAMDIST };
+                let damdist = match t.kind {
+                    TorpKind::Plasma => PLASDAMDIST,
+                    TorpKind::Tricobalt => TRICOBALT_BLAST,
+                    TorpKind::Photon => DAMDIST,
+                };
                 let owner_fac = self.players.get(t.owner as usize).and_then(|o| if o.in_use { o.faction } else { None });
                 for (j, p) in self.players.iter().enumerate() {
                     let hostile = foes(p.team, t.team) || matches!((owner_fac, p.faction), (Some(x), Some(y)) if x.at_war_with(y));
-                    if !p.alive() || !hostile {
+                    // A tricobalt blast hurts everyone in range, friend or foe.
+                    if !p.alive() || (!hostile && t.kind != TorpKind::Tricobalt) {
                         continue;
                     }
                     // Measure from the hull, so big monsters take full hits.
@@ -1833,10 +2535,27 @@ impl World {
         }
         self.torps.retain(|t| t.explode < 6);
         for (j, dmg, owner, kind) in hits {
-            let what = if kind == TorpKind::Plasma { "plasma" } else { "torp" };
+            let what = match kind {
+                TorpKind::Plasma => "plasma",
+                TorpKind::Tricobalt => "a tricobalt device",
+                TorpKind::Photon => "torp",
+            };
             let tag = self.players[owner as usize].tag();
-            self.hit_kind = if kind == TorpKind::Plasma { HitKind::Plasma } else { HitKind::Photon };
+            self.hit_kind = match kind {
+                TorpKind::Plasma => HitKind::Plasma,
+                TorpKind::Tricobalt => HitKind::Other,
+                TorpKind::Photon => HitKind::Photon,
+            };
             self.inflict(j, dmg, Some(owner), format!("killed by {} from {}", what, tag));
+            // Breen energy-dampening torpedoes.
+            if kind == TorpKind::Photon && self.players[owner as usize].ship == ShipType::BreenWarship && self.players[j].alive() {
+                let tick = self.tick;
+                let q = &mut self.players[j];
+                q.shields_up = false;
+                q.jammed_until = tick + 3 * UPS as u32;
+                q.fuel = (q.fuel - 500.0).max(0.0);
+                self.warn(j as u8, "Breen energy dampener! Shields down, power drained");
+            }
         }
     }
 
@@ -1850,6 +2569,11 @@ impl World {
             let len2 = (dx * dx + dy * dy).max(1.0);
             for (j, p) in self.players.iter().enumerate() {
                 if !p.alive() || p.faction == Some(Faction::Tholian) {
+                    continue;
+                }
+                // A player's web-spinner spares its own side (and allies).
+                let o = &self.players[w.owner as usize];
+                if o.in_use && o.faction.is_none() && !self.hostile(o.team, p.team) {
                     continue;
                 }
                 let t = (((p.x - w.x1) * dx + (p.y - w.y1) * dy) / len2).clamp(0.0, 1.0);
@@ -1900,9 +2624,23 @@ impl World {
                 self.reply(id, format!("{} supplies. Upgrades: {}. Buy with /upgrade <name>.", s.stock, levels.join(", ")));
             }
             "overwatch" | "ow" => self.toggle_overwatch(id as usize),
+            "tech" => {
+                let p = &self.players[id as usize];
+                let text = if p.techs.is_empty() {
+                    format!("No advanced tech: it starts at the rank of {} (with ranks on).", RANKS[TECH_RANK as usize].0)
+                } else {
+                    let v: Vec<String> = p
+                        .techs
+                        .iter()
+                        .map(|t| format!("{}{}: {}", t.name(), t.key().map_or(String::new(), |k| format!(" [{}]", k)), t.blurb()))
+                        .collect();
+                    v.join(" • ")
+                };
+                self.reply(id, text);
+            }
             "record" | "orders" | "order" => self.commands.push((id, verb)),
             "help" | "" => {
-                let mut cmds = vec!["/overwatch", "/record", "/orders"];
+                let mut cmds = vec!["/overwatch", "/tech", "/record", "/orders"];
                 if d {
                     cmds.extend(["/treaty <empire>", "/break", "/treaties"]);
                 }
@@ -2173,14 +2911,33 @@ impl World {
                 let friendly = p.team == my_team || p.id == me || self.allied(p.team, my_team);
                 // Terrain: nebulae and ion storms hide ships from all but close range.
                 let far = (p.x - mp.x).powi(2) + (p.y - mp.y).powi(2) > 3000.0 * 3000.0;
-                let fuzzy = ((p.cloaked && !p.detected) || (p.hidden && far)) && !friendly;
+                // A tachyon sweep by us (or an ally) shows everything near the sweeper.
+                let swept = self.players.iter().any(|s| {
+                    s.alive()
+                        && (s.team == my_team || self.allied(s.team, my_team))
+                        && (s.scan_until > self.tick
+                            || (s.sweep_until > self.tick
+                                && (s.x - p.x).powi(2) + (s.y - p.y).powi(2) < SWEEP_RANGE * SWEEP_RANGE))
+                });
+                let fuzzy = ((p.cloaked && !p.detected) || (p.hidden && far)) && !friendly && !swept;
+                let illusion = p.ship == ShipType::TalosianShip
+                    && !friendly
+                    && p.alive()
+                    && (p.x - mp.x).powi(2) + (p.y - mp.y).powi(2) > 2000.0f64.powi(2);
                 let (x, y) = if fuzzy {
                     (p.x + rng.gen_range(-4000.0..4000.0), p.y + rng.gen_range(-4000.0..4000.0))
+                } else if illusion {
+                    // A Talosian illusion: to distant enemies it appears 1,500 to
+                    // 2,500 from where it really is, drifting every few seconds.
+                    let phase = self.tick as f64 / (4.0 * UPS as f64) + p.id as f64 * 1.7;
+                    let a = phase * 1.3 + (phase * 0.37).sin() * 3.0;
+                    let r = 1500.0 + 1000.0 * (phase * 0.71).sin().abs();
+                    (p.x + a.cos() * r, p.y + a.sin() * r)
                 } else {
                     (p.x, p.y)
                 };
-                let mut flags = 0u16;
-                let set = |flags: &mut u16, cond: bool, f: u16| {
+                let mut flags = 0u32;
+                let set = |flags: &mut u32, cond: bool, f: u32| {
                     if cond {
                         *flags |= f
                     }
@@ -2201,11 +2958,18 @@ impl World {
                 set(&mut flags, p.tribbles, pf::TRIBBLES);
                 set(&mut flags, p.hidden && p.id == me, pf::HIDDEN);
                 set(&mut flags, p.overwatch && friendly, pf::OVERWATCH);
+                set(&mut flags, p.jump_at.is_some(), pf::CHARGING);
+                set(&mut flags, self.tick < p.phased_until, pf::PHASED);
+                // An Excalbian shapeshifter looks like one of your own cruisers from afar.
+                let disguised = p.ship == ShipType::ExcalbianShip
+                    && !friendly
+                    && p.alive()
+                    && (p.x - mp.x).powi(2) + (p.y - mp.y).powi(2) > 3000.0f64.powi(2);
                 PlayerInfo {
                     id: p.id,
                     name: p.name.clone(),
-                    team: p.team,
-                    ship: p.ship,
+                    team: if disguised { my_team } else { p.team },
+                    ship: if disguised { ShipType::Cruiser } else { p.ship },
                     state: p.state,
                     x: x as i32,
                     y: y as i32,
@@ -2230,7 +2994,7 @@ impl World {
         let torps = self
             .torps
             .iter()
-            .map(|t| TorpInfo { owner: t.owner, team: t.team, kind: t.kind, x: t.x as i32, y: t.y as i32, explode: t.explode })
+            .map(|t| TorpInfo { owner: t.owner, team: t.team, kind: t.kind, x: t.x as i32, y: t.y as i32, explode: t.explode, quantum: t.quantum })
             .collect();
         let phasers = self.phasers.iter().map(|p| p.info.clone()).collect();
         let planets = self
@@ -2274,6 +3038,15 @@ impl World {
             supply: (self.features.supply && my_team != Team::Ind)
                 .then(|| (self.supply[my_team.idx()].stock, self.supply[my_team.idx()].levels)),
             service: mp.service.clone(),
+            techs: mp
+                .techs
+                .iter()
+                .map(|&t| {
+                    let left = t.slot().map_or(0, |s| mp.tech_ready[s].saturating_sub(self.tick) / UPS as u32);
+                    (t, left.min(u16::MAX as u32) as u16)
+                })
+                .collect(),
+            armor: mp.armor.ceil() as u16,
         };
         Frame {
             tick: self.tick,
@@ -2306,6 +3079,7 @@ fn parse_team_word(s: &str) -> Option<Team> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::proto::TerrainKind;
 
     /// Beam armies onto a planet from a ship in orbit, one army at a time.
     fn beam_down(w: &mut World, id: u8, k: usize, n: u32) {
@@ -2472,5 +3246,478 @@ mod tests {
         // And off again.
         w.handle(kirk, ClientMsg::Message { to: MsgTarget::All, text: "/overwatch".into() });
         assert!(!w.players[kirk as usize].overwatch);
+    }
+
+    /// A ranked officer at (x, y) with exactly these techs.
+    fn officer(w: &mut World, team: Team, x: f64, y: f64, techs: &[Tech]) -> usize {
+        let id = pilot(w, "Officer", team, x, y) as usize;
+        w.players[id].techs = techs.to_vec();
+        if techs.contains(&Tech::AblativeArmor) {
+            w.players[id].armor = ABLATIVE_ARMOR;
+        }
+        id
+    }
+
+    #[test]
+    fn tech_comes_with_rank() {
+        let mut w = World::new();
+        w.features.ranks = true;
+        w.features.rank_tech = true;
+        for (rank, expect) in [(3u8, 0usize), (4, 1), (6, 3), (8, 5)] {
+            let id = w.add_player("Officer", false).unwrap();
+            w.players[id as usize].rank = Some(rank);
+            w.join(id, Team::Fed, ShipType::Cruiser).unwrap();
+            let techs = &w.players[id as usize].techs;
+            assert_eq!(techs.len(), expect, "rank {}", rank);
+            for (tier, t) in techs.iter().enumerate() {
+                assert_eq!(t.tier(), tier, "one from each tier, in order");
+            }
+            // Senior officers carry a bounty: +0.5 kill credit per rank above Commander.
+            assert_eq!(w.players[id as usize].bounty, rank.saturating_sub(3) as f64 * 5.0);
+            w.remove_player(id);
+        }
+        w.features.rank_tech = false;
+        let id = w.add_player("Officer", false).unwrap();
+        w.players[id as usize].rank = Some(8);
+        w.join(id, Team::Fed, ShipType::Cruiser).unwrap();
+        assert!(w.players[id as usize].techs.is_empty(), "--no-rank-tech");
+    }
+
+    #[test]
+    fn captain_weapons() {
+        let mut w = World::new();
+        let q = officer(&mut w, Team::Fed, 50_000.0, 50_000.0, &[Tech::QuantumTorps]);
+        w.handle(q as u8, ClientMsg::Torp(0));
+        let s = ShipType::Cruiser.stats();
+        assert!((w.torps[0].damage - s.torp_damage * 1.2).abs() < 1e-9 && w.torps[0].quantum);
+        let sp = officer(&mut w, Team::Fed, 50_000.0, 60_000.0, &[Tech::PhotonSpread]);
+        w.handle(sp as u8, ClientMsg::Torp(0));
+        assert_eq!(w.torps.iter().filter(|t| t.owner == sp as u8).count(), 3, "a fan of three");
+        // Overcharged phasers reach farther, and some damage gets through shields.
+        let oc = officer(&mut w, Team::Fed, 20_000.0, 20_000.0, &[Tech::PhaserOvercharge]);
+        let tal = pilot(&mut w, "Tal", Team::Rom, 20_000.0 + PHASEDIST * 1.1, 20_000.0);
+        w.handle(oc as u8, ClientMsg::Phaser(64));
+        assert!(w.players[tal as usize].damage > 0.0, "reached past normal range and pierced shields");
+    }
+
+    #[test]
+    fn fleet_captain_defences() {
+        let mut w = World::new();
+        let a = officer(&mut w, Team::Fed, 50_000.0, 50_000.0, &[Tech::AblativeArmor]);
+        w.players[a].shields_up = false;
+        w.inflict(a, 30.0, None, "test".into());
+        assert_eq!((w.players[a].damage, w.players[a].armor), (0.0, 10.0), "armor soaks it");
+        w.inflict(a, 30.0, None, "test".into());
+        assert_eq!(w.players[a].damage, 20.0);
+        // Regenerative shields: much faster once you've been left alone.
+        let r = officer(&mut w, Team::Fed, 60_000.0, 50_000.0, &[Tech::RegenShields]);
+        let n = pilot(&mut w, "Plain", Team::Fed, 70_000.0, 50_000.0) as usize;
+        w.tick = 1000;
+        for id in [r, n] {
+            w.players[id].shield = 0.0;
+            w.players[id].last_hit = 0;
+        }
+        w.tick();
+        assert!(w.players[r].shield > w.players[n].shield * 2.5);
+        // Metaphasic shields shrug off the star's core.
+        w.features.terrain = true;
+        let m = officer(&mut w, Team::Fed, 30_000.0, 30_000.0, &[Tech::MetaphasicShields]);
+        w.terrain.push(super::super::terrain::tests_make(TerrainKind::Star, 30_000.0, 30_000.0, 5000.0));
+        w.players[m].shields_up = false;
+        super::super::terrain::tick(&mut w);
+        assert_eq!(w.players[m].damage, 0.0);
+    }
+
+    #[test]
+    fn commodore_tricks() {
+        let mut w = World::new();
+        let c = officer(&mut w, Team::Fed, 50_000.0, 50_000.0, &[Tech::TachyonSweep]);
+        let tal = pilot(&mut w, "Tal", Team::Rom, 58_000.0, 50_000.0);
+        w.players[tal as usize].cloaked = true;
+        let seen = |w: &World| !w.frame_for(c as u8).players.iter().find(|p| p.id == tal).unwrap().fuzzy;
+        assert!(!seen(&w));
+        w.handle(c as u8, ClientMsg::Tech { slot: 0, dir: 0 });
+        assert!(seen(&w), "swept");
+        // Cooldown.
+        let until = w.players[c].sweep_until;
+        w.players[c].sweep_until = 0;
+        w.handle(c as u8, ClientMsg::Tech { slot: 0, dir: 0 });
+        assert_eq!(w.players[c].sweep_until, 0, "still cooling down");
+        assert!(until > 0);
+        // Decoy: a copy that vanishes quietly when hit.
+        w.players[c].techs = vec![Tech::Decoy];
+        w.players[c].tech_ready = [0; 3];
+        let before = w.players.iter().filter(|p| p.in_use).count();
+        w.handle(c as u8, ClientMsg::Tech { slot: 0, dir: 0 });
+        let d = w.players.iter().position(|p| p.decoy_until.is_some()).unwrap();
+        assert_eq!(w.players.iter().filter(|p| p.in_use).count(), before + 1);
+        w.outbox.clear();
+        w.inflict(d, 5.0, Some(tal), "test".into());
+        assert!(!w.players[d].in_use && w.outbox.is_empty(), "no kill, no message");
+        // Graviton pulse: shove and jam.
+        w.players[c].techs = vec![Tech::GravitonPulse];
+        w.players[c].tech_ready = [0; 3];
+        (w.players[tal as usize].x, w.players[tal as usize].cloaked) = (52_000.0, false);
+        w.handle(c as u8, ClientMsg::Tech { slot: 0, dir: 0 });
+        assert!(w.players[tal as usize].x > 54_000.0 && !w.players[tal as usize].shields_up);
+        w.handle(tal, ClientMsg::Shields);
+        assert!(!w.players[tal as usize].shields_up, "jammed");
+    }
+
+    #[test]
+    fn rear_admiral_weapons() {
+        let mut w = World::new();
+        let r = officer(&mut w, Team::Fed, 50_000.0, 50_000.0, &[Tech::Isokinetic]);
+        let tal = pilot(&mut w, "Tal", Team::Rom, 58_000.0, 50_000.0) as usize;
+        w.handle(r as u8, ClientMsg::Tech { slot: 1, dir: 64 });
+        assert_eq!(w.players[tal].damage, 120.0, "straight through the shields at 8,000");
+        // Antiproton burst hits everyone close.
+        let a = officer(&mut w, Team::Fed, 20_000.0, 20_000.0, &[Tech::Antiproton]);
+        let x = pilot(&mut w, "X", Team::Rom, 22_000.0, 20_000.0) as usize;
+        let y = pilot(&mut w, "Y", Team::Rom, 20_000.0, 23_000.0) as usize;
+        w.handle(a as u8, ClientMsg::Tech { slot: 1, dir: 0 });
+        assert!(w.players[x].shield < 100.0 && w.players[y].shield < 100.0);
+        // Tricobalt: hurts everyone in the blast, its owner too.
+        let t = officer(&mut w, Team::Fed, 80_000.0, 80_000.0, &[Tech::Tricobalt]);
+        w.players[t].shields_up = false;
+        w.handle(t as u8, ClientMsg::Tech { slot: 1, dir: 0 });
+        assert!(w.torps.iter().any(|q| q.kind == TorpKind::Tricobalt));
+        w.torps.iter_mut().for_each(|q| q.fuse = 1);
+        w.tick();
+        w.tick();
+        assert!(w.players[t].damage > 0.0, "caught in its own blast");
+    }
+
+    #[test]
+    fn admiral_tech() {
+        let mut w = World::new();
+        let a = officer(&mut w, Team::Fed, 50_000.0, 50_000.0, &[Tech::Transwarp]);
+        (w.players[a].dir, w.players[a].desired_dir) = (64.0, 64.0);
+        w.handle(a as u8, ClientMsg::Tech { slot: 2, dir: 0 });
+        assert!(w.frame_for(a as u8).players.iter().find(|p| p.id == a as u8).unwrap().flags & pf::CHARGING != 0);
+        for _ in 0..(2 * UPS as u32 + 1) {
+            w.tick();
+        }
+        assert!(w.players[a].x > 64_000.0, "jumped 15,000 east");
+        // Phase cloak: untouchable and can't shoot.
+        let p = officer(&mut w, Team::Fed, 20_000.0, 20_000.0, &[Tech::PhaseCloak]);
+        w.handle(p as u8, ClientMsg::Tech { slot: 2, dir: 0 });
+        w.inflict(p, 50.0, None, "test".into());
+        assert_eq!(w.players[p].damage, 0.0);
+        let shield = w.players[p].shield;
+        assert_eq!(shield, 100.0);
+        w.handle(p as u8, ClientMsg::Torp(0));
+        assert!(!w.torps.iter().any(|t| t.owner == p as u8));
+        // Emergency reserve.
+        let e = officer(&mut w, Team::Fed, 80_000.0, 20_000.0, &[Tech::EmergencyReserve]);
+        (w.players[e].fuel, w.players[e].shield, w.players[e].wtemp) = (10.0, 5.0, 900.0);
+        w.handle(e as u8, ClientMsg::Tech { slot: 2, dir: 0 });
+        let s = ShipType::Cruiser.stats();
+        assert_eq!((w.players[e].fuel, w.players[e].shield, w.players[e].wtemp), (s.max_fuel, s.max_shield, 0.0));
+    }
+
+    #[test]
+    fn admiral_starbase_tech() {
+        let mut w = World::new();
+        w.features.ranks = true;
+        w.features.rank_tech = true;
+        // Only an Admiral in a starbase: Captain and Fleet Captain passives,
+        // plus one starbase passive and one starbase active.
+        let id = w.add_player("Janeway", false).unwrap();
+        w.players[id as usize].rank = Some(8);
+        w.join(id, Team::Fed, ShipType::Starbase).unwrap();
+        let t = w.players[id as usize].techs.clone();
+        let tiers: Vec<usize> = t.iter().map(|t| t.tier()).collect();
+        assert_eq!(tiers, vec![0, 1, 5, 6], "{:?}", t);
+        assert_eq!(t[3].key(), Some('j'));
+        // A Rear Admiral's starbase gets none of it.
+        let ra = w.add_player("Nechayev", false).unwrap();
+        w.players[ra as usize].rank = Some(7);
+        w.join(ra, Team::Rom, ShipType::Starbase).unwrap();
+        assert!(w.players[ra as usize].techs.iter().all(|t| !t.starbase_only()));
+        // Refitting into a starbase refits the tech.
+        let cr = w.add_player("Paris", false).unwrap();
+        w.players[cr as usize].rank = Some(8);
+        w.join(cr, Team::Kli, ShipType::Cruiser).unwrap();
+        assert_eq!(w.players[cr as usize].techs.len(), 5);
+        w.players[cr as usize].orbiting = Some(Team::Kli.home_planet());
+        w.handle(cr, ClientMsg::Refit(ShipType::Starbase));
+        assert!(w.players[cr as usize].techs.iter().any(|t| t.starbase_only()));
+    }
+
+    #[test]
+    fn starbase_tech_works() {
+        let mut w = World::new();
+        let sb = pilot(&mut w, "Base", Team::Fed, 50_000.0, 50_000.0) as usize;
+        w.players[sb].ship = ShipType::Starbase;
+        let tal = pilot(&mut w, "Tal", Team::Rom, 54_000.0, 50_000.0) as usize;
+        // Point defense: enemy torpedoes near the base are shot down.
+        w.players[sb].techs = vec![Tech::PointDefense];
+        let dir = dir_to(54_000.0, 50_000.0, 50_000.0, 50_000.0);
+        w.handle(tal as u8, ClientMsg::Torp(dir as u8));
+        w.players[sb].shields_up = false;
+        for _ in 0..30 {
+            w.tick();
+        }
+        assert_eq!(w.players[sb].damage, 0.0, "torpedo shot down");
+        // Shield projector and drydock look after friends nearby.
+        let friend = pilot(&mut w, "Friend", Team::Fed, 52_000.0, 52_000.0) as usize;
+        w.players[sb].techs = vec![Tech::ShieldProjector, Tech::MobileDrydock];
+        (w.players[friend].shield, w.players[friend].damage, w.players[friend].fuel) = (10.0, 50.0, 100.0);
+        w.players[tal].x = 90_000.0;
+        w.tick();
+        // (Normal recharge alone gives about +24 fuel a tick; the drydock adds 72.)
+        assert!(w.players[friend].shield > 10.2 && w.players[friend].damage < 49.8 && w.players[friend].fuel > 160.0);
+        // Tractor net.
+        w.players[sb].techs = vec![Tech::TractorNet];
+        w.players[tal].x = 54_000.0;
+        w.players[tal].desired_speed = 9;
+        w.handle(sb as u8, ClientMsg::Tech { slot: 2, dir: 0 });
+        w.tick();
+        assert!(w.players[tal].speed <= 1 && w.players[tal].desired_speed <= 1);
+        // Galactic scan: a cloaked ship across the galaxy shows up.
+        w.players[sb].techs = vec![Tech::GalacticScan];
+        w.players[sb].tech_ready = [0; 3];
+        (w.players[tal].x, w.players[tal].cloaked) = (95_000.0, true);
+        w.handle(sb as u8, ClientMsg::Tech { slot: 2, dir: 0 });
+        assert!(!w.frame_for(friend as u8).players.iter().find(|p| p.id == tal as u8).unwrap().fuzzy);
+        assert!(w.planets.iter().all(|pl| pl.known[Team::Fed.idx()]));
+        // Fighter wing: three fighters that go home after 30 seconds.
+        w.players[sb].techs = vec![Tech::FighterWing];
+        w.players[sb].tech_ready = [0; 3];
+        w.handle(sb as u8, ClientMsg::Tech { slot: 2, dir: 0 });
+        let fighters = |w: &World| w.players.iter().filter(|p| p.in_use && p.fighter_of.is_some()).count();
+        assert_eq!(fighters(&w), 3);
+        for _ in 0..(30 * UPS as u32 + 2) {
+            w.tick();
+        }
+        assert_eq!(fighters(&w), 0);
+    }
+
+    /// A ranked human launching in `ship`.
+    fn flyer(w: &mut World, rank: u8, team: Team, ship: ShipType, x: f64, y: f64) -> usize {
+        let id = w.add_player("Flyer", false).unwrap();
+        w.players[id as usize].rank = Some(rank);
+        w.join(id, team, ship).unwrap();
+        (w.players[id as usize].x, w.players[id as usize].y) = (x, y);
+        id as usize
+    }
+
+    #[test]
+    fn special_and_relic_ships_need_rank() {
+        let mut w = World::new();
+        let id = w.add_player("Cadet", false).unwrap();
+        w.players[id as usize].rank = Some(8);
+        assert!(w.join(id, Team::Fed, ShipType::Defiant).is_err(), "needs ranks on");
+        w.features.ranks = true;
+        w.players[id as usize].rank = Some(3);
+        assert!(w.join(id, Team::Fed, ShipType::Defiant).is_err(), "needs Captain");
+        w.players[id as usize].rank = Some(4);
+        // Asking for any special gets your own empire's.
+        w.join(id, Team::Kli, ShipType::Defiant).unwrap();
+        assert_eq!(w.players[id as usize].ship, ShipType::NeghVar);
+        let r = w.add_player("Ensign", false).unwrap();
+        w.players[r as usize].rank = Some(5);
+        assert!(w.join(r, Team::Rom, ShipType::IconianShip).is_err(), "relics need Commodore");
+        w.players[r as usize].rank = Some(6);
+        let mut seen = std::collections::HashSet::new();
+        for _ in 0..200 {
+            w.players[r as usize].state = PState::Outfit;
+            w.join(r, Team::Rom, ShipType::IconianShip).unwrap();
+            assert!(w.players[r as usize].ship.is_relic());
+            seen.insert(w.players[r as usize].ship);
+        }
+        assert_eq!(seen.len(), ShipType::RELICS.len(), "all the relics turn up");
+    }
+
+    #[test]
+    fn special_ship_traits() {
+        let mut w = World::new();
+        w.features.ranks = true;
+        // Defiant: pulse phasers.
+        let d = flyer(&mut w, 4, Team::Fed, ShipType::Defiant, 50_000.0, 50_000.0);
+        w.handle(d as u8, ClientMsg::Phaser(0));
+        assert_eq!(w.players[d].phaser_timer, 5);
+        // Warbird: plasma after one kill.
+        let wb = flyer(&mut w, 4, Team::Rom, ShipType::Warbird, 10_000.0, 10_000.0);
+        w.players[wb].kills = 1.0;
+        w.handle(wb as u8, ClientMsg::Plasma(0));
+        assert!(w.torps.iter().any(|t| t.owner == wb as u8 && t.kind == TorpKind::Plasma));
+        // Negh'Var: twelve torpedoes.
+        let nv = flyer(&mut w, 4, Team::Kli, ShipType::NeghVar, 90_000.0, 10_000.0);
+        for _ in 0..15 {
+            w.handle(nv as u8, ClientMsg::Torp(0));
+            w.players[nv].wtemp = 0.0;
+        }
+        assert_eq!(w.torps.iter().filter(|t| t.owner == nv as u8).count(), 12);
+        // Corsair: three armies a kill.
+        let oc = flyer(&mut w, 4, Team::Ori, ShipType::Corsair, 90_000.0, 90_000.0);
+        w.players[oc].kills = 2.0;
+        assert_eq!(w.players[oc].max_armies_now(), 6);
+    }
+
+    #[test]
+    fn relic_traits() {
+        let mut w = World::new();
+        w.features.ranks = true;
+        let relic = |w: &mut World, ship: ShipType, team: Team, x: f64, y: f64| {
+            let i = flyer(w, 6, team, ShipType::IconianShip, x, y);
+            w.players[i].ship = ship;
+            let s = ship.stats();
+            (w.players[i].shield, w.players[i].fuel) = (s.max_shield, s.max_fuel);
+            i
+        };
+        // Iconian: gateway between our worlds.
+        let ic = relic(&mut w, ShipType::IconianShip, Team::Fed, 0.0, 0.0);
+        let (a, b) = (1, 8);
+        w.players[ic].orbiting = Some(a);
+        w.handle(ic as u8, ClientMsg::LockPlanet(b as u8));
+        assert_eq!(w.players[ic].orbiting, Some(b), "stepped through to {}", w.planets[b].name);
+        w.handle(ic as u8, ClientMsg::LockPlanet(a as u8));
+        assert_ne!(w.players[ic].orbiting, Some(a), "the gateway needs to recharge");
+        // Breen: dampening torpedoes.
+        let br = relic(&mut w, ShipType::BreenWarship, Team::Fed, 50_000.0, 50_000.0);
+        let tal = pilot(&mut w, "Tal", Team::Rom, 53_000.0, 50_000.0) as usize;
+        w.handle(br as u8, ClientMsg::Torp(64));
+        let mut hit = false;
+        for _ in 0..20 {
+            let fuel = w.players[tal].fuel;
+            w.tick();
+            if w.players[tal].jammed_until > w.tick {
+                assert!(!w.players[tal].shields_up && w.players[tal].fuel < fuel - 400.0);
+                hit = true;
+                break;
+            }
+        }
+        assert!(hit, "the Breen torpedo never hit");
+        w.handle(tal as u8, ClientMsg::Shields);
+        assert!(!w.players[tal].shields_up, "jammed");
+        // Vidiian: damage dealt repairs the harvester.
+        let vh = relic(&mut w, ShipType::VidiianHarvester, Team::Fed, 20_000.0, 20_000.0);
+        w.players[vh].damage = 50.0;
+        w.inflict(tal, 50.0, Some(vh as u8), "test".into());
+        assert_eq!(w.players[vh].damage, 30.0);
+        // Xindi: the beam pierces every enemy along it.
+        let xr = relic(&mut w, ShipType::XindiWarship, Team::Fed, 20_000.0, 80_000.0);
+        let e1 = pilot(&mut w, "E1", Team::Rom, 22_000.0, 80_000.0) as usize;
+        let e2 = pilot(&mut w, "E2", Team::Rom, 24_000.0, 80_000.0) as usize;
+        w.handle(xr as u8, ClientMsg::Phaser(64));
+        assert!(w.players[e1].shield < 100.0 && w.players[e2].shield < 100.0);
+        // Preserver: enemy torpedoes are turned back, most of the time.
+        let po = relic(&mut w, ShipType::PreserverObelisk, Team::Fed, 80_000.0, 20_000.0);
+        let k = pilot(&mut w, "Kor", Team::Rom, 84_000.0, 20_000.0) as usize;
+        let mut turned = 0;
+        for _ in 0..10 {
+            w.torps.clear();
+            w.players[k].wtemp = 0.0;
+            w.handle(k as u8, ClientMsg::Torp(192));
+            let mut this = false;
+            for _ in 0..25 {
+                w.tick();
+                this |= w.torps.iter().any(|t| t.owner == po as u8);
+            }
+            turned += usize::from(this);
+        }
+        assert!((3..=9).contains(&turned), "{} of 10 torpedoes turned", turned);
+        // Talosian: to distant enemies it shows up where it isn't.
+        let ti = relic(&mut w, ShipType::TalosianShip, Team::Fed, 50_000.0, 90_000.0);
+        let far = pilot(&mut w, "Far", Team::Rom, 60_000.0, 90_000.0);
+        let seen = w.frame_for(far).players.iter().find(|p| p.id == ti as u8).cloned().unwrap();
+        let off = ((seen.x as f64 - 50_000.0).powi(2) + (seen.y as f64 - 90_000.0).powi(2)).sqrt();
+        assert!((1400.0..=2600.0).contains(&off) && !seen.fuzzy, "offset {}", off);
+        let friend = pilot(&mut w, "Friend", Team::Fed, 60_000.0, 90_000.0);
+        let seen = w.frame_for(friend).players.iter().find(|p| p.id == ti as u8).cloned().unwrap();
+        assert_eq!((seen.x, seen.y), (50_000, 90_000), "friends see the truth");
+    }
+
+    #[test]
+    fn more_relic_traits() {
+        let mut w = World::new();
+        w.features.ranks = true;
+        let relic = |w: &mut World, ship: ShipType, team: Team, x: f64, y: f64| {
+            let i = flyer(w, 6, team, ShipType::IconianShip, x, y);
+            w.players[i].ship = ship;
+            let s = ship.stats();
+            (w.players[i].shield, w.players[i].fuel) = (s.max_shield, s.max_fuel);
+            i
+        };
+        // Voth: four armies a kill.
+        let vc = relic(&mut w, ShipType::VothCityShip, Team::Fed, 10_000.0, 10_000.0);
+        w.players[vc].kills = 3.0;
+        assert_eq!(w.players[vc].max_armies_now(), 12);
+        // Kazon: rams what it touches at speed.
+        let kz = relic(&mut w, ShipType::KazonRaider, Team::Fed, 30_000.0, 30_000.0);
+        let tal = pilot(&mut w, "Tal", Team::Rom, 30_500.0, 30_000.0) as usize;
+        w.players[kz].speed = 8;
+        w.players[kz].desired_speed = 8;
+        w.players[tal].shields_up = false;
+        w.tick();
+        assert!(w.players[tal].damage >= 70.0, "rammed for {}", w.players[tal].damage);
+        // Sheliak: its planet can't be bombed.
+        let k = Team::Fed.home_planet() + 3;
+        let sh = relic(&mut w, ShipType::SheliakShip, Team::Fed, 0.0, 0.0);
+        w.planets[k].owner = Team::Fed;
+        w.players[sh].orbiting = Some(k);
+        let bomber = pilot(&mut w, "Kor", Team::Rom, 0.0, 0.0) as usize;
+        w.players[bomber].orbiting = Some(k);
+        w.handle(bomber as u8, ClientMsg::Bomb);
+        assert!(!w.players[bomber].bombing, "shielded");
+        // Kelvan: no torpedoes near it.
+        let kv = relic(&mut w, ShipType::KelvanShip, Team::Fed, 70_000.0, 70_000.0);
+        let near = pilot(&mut w, "Near", Team::Rom, 71_500.0, 70_000.0);
+        w.handle(near, ClientMsg::Torp(0));
+        assert!(!w.torps.iter().any(|t| t.owner == near));
+        w.players[kv].x = 90_000.0;
+        w.handle(near, ClientMsg::Torp(0));
+        assert!(w.torps.iter().any(|t| t.owner == near), "out of the field it fires");
+        // Husnock: bombs three at a time, down to one.
+        let hn = relic(&mut w, ShipType::HusnockWarship, Team::Fed, 0.0, 0.0);
+        let target = Team::Rom.home_planet() + 2;
+        w.planets[target].armies = 5;
+        w.players[hn].orbiting = Some(target);
+        w.handle(hn as u8, ClientMsg::Bomb);
+        assert!(w.players[hn].bombing);
+        let mut lowest = w.planets[target].armies;
+        for _ in 0..100 {
+            w.tick();
+            w.players[hn].orbiting = Some(target);
+            lowest = lowest.min(w.planets[target].armies);
+        }
+        assert_eq!(lowest, 1);
+        // Suliban: a good share of hits miss.
+        let sc = relic(&mut w, ShipType::SulibanCell, Team::Fed, 50_000.0, 20_000.0);
+        w.players[sc].shields_up = false;
+        let mut missed = 0;
+        for _ in 0..40 {
+            let before = w.players[sc].damage;
+            w.inflict(sc, 1.0, None, "test".into());
+            missed += usize::from(w.players[sc].damage == before);
+        }
+        assert!((5..=25).contains(&missed), "{} of 40 missed", missed);
+        // Excalbian: from afar, enemies see one of their own cruisers.
+        let ex = relic(&mut w, ShipType::ExcalbianShip, Team::Fed, 50_000.0, 90_000.0);
+        let far = pilot(&mut w, "Far", Team::Rom, 60_000.0, 90_000.0);
+        let seen = w.frame_for(far).players.iter().find(|p| p.id == ex as u8).cloned().unwrap();
+        assert_eq!((seen.team, seen.ship), (Team::Rom, ShipType::Cruiser));
+        let friend = pilot(&mut w, "Friend", Team::Fed, 60_000.0, 90_000.0);
+        let seen = w.frame_for(friend).players.iter().find(|p| p.id == ex as u8).cloned().unwrap();
+        assert_eq!((seen.team, seen.ship), (Team::Fed, ShipType::ExcalbianShip));
+    }
+
+    /// The ranks are minimums: every rank from Captain up can fly a special
+    /// ship, and every rank from Commodore up can fly a relic (so an
+    /// Admiral can fly either).
+    #[test]
+    fn senior_ranks_can_fly_both() {
+        let mut w = World::new();
+        w.features.ranks = true;
+        for rank in 0..RANKS.len() as u8 {
+            let id = w.add_player("Officer", false).unwrap();
+            w.players[id as usize].rank = Some(rank);
+            assert_eq!(w.join(id, Team::Fed, ShipType::Defiant).is_ok(), rank >= SPECIAL_RANK, "special at rank {}", rank);
+            w.players[id as usize].state = PState::Outfit;
+            assert_eq!(w.join(id, Team::Fed, ShipType::IconianShip).is_ok(), rank >= RELIC_RANK, "relic at rank {}", rank);
+            w.remove_player(id);
+        }
     }
 }

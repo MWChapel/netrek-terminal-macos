@@ -44,6 +44,8 @@ that runs entirely inside a terminal window on macOS.
 - [Alien incursions](#alien-incursions)
 - [Extras](#extras)
   - [Ranks and service records](#ranks-and-service-records)
+  - [Advanced tech](#advanced-tech)
+  - [Special and relic ships](#special-and-relic-ships)
   - [Orders](#orders)
   - [Diplomacy](#diplomacy)
   - [Space terrain](#space-terrain)
@@ -142,6 +144,7 @@ netrek <COMMAND>
 | `--terrain` | off | Space terrain: nebulae, a black hole, a wormhole, a comet and more |
 | `--supply` | off | Supply convoys and empire upgrades |
 | `--extras` | off | All five of the above |
+| `--no-rank-tech` | off | With ranks: don't give Captains and above their [advanced tech](#advanced-tech) |
 
 The server logs connections, joins, kills and planet captures to stdout.
 
@@ -288,6 +291,7 @@ map. With no mouse, they fire along your current heading.
 | `s` or `u` | Shields up / down |
 | `c` | Cloak on / off (drains fuel; you can't fire while cloaked) |
 | `d` | Detonate enemy torpedoes near you (costs fuel) |
+| `v` / `e` / `j` | Use your [advanced tech](#advanced-tech) (Commodore / Rear Admiral / Admiral, with `--ranks`), aimed at the pointer |
 | `w` | **Overwatch** on / off: automatically fire at the nearest enemy that comes into weapons range (also `/overwatch`) |
 | `D` | Detonate your own torpedoes |
 | `T` | Tractor beam on the ship nearest the pointer (again to release) |
@@ -317,7 +321,7 @@ It stays on through deaths until you switch it off. Overwatch works on any serve
 | `b` | Bomb the enemy planet you're orbiting (kills armies, down to 4) |
 | `z` | Beam armies up from a friendly planet |
 | `x` | Beam armies down onto the planet you're orbiting |
-| `r` then a ship key | Refit to another ship class (while orbiting your home planet, with no armies aboard) |
+| `r` then a ship key | Refit to another ship class (while orbiting your home planet, with no armies aboard). `e` / `u` for a special or relic ship |
 
 ### Information and interface
 
@@ -342,6 +346,7 @@ It stays on through deaths until you switch it off. Overwatch works on any serve
 |---|---|
 | `f` `r` `k` `o`, `←` `→` | Choose Federation, Romulan, Klingon, Orion |
 | `s` `d` `c` `b` `a` `x`, `↑` `↓` | Choose Scout, Destroyer, Cruiser, Battleship, Assault ship, Starbase |
+| `e` / `u` | Choose your empire's [special ship](#special-and-relic-ships) (Captain) or a relic (Commodore), with `--ranks` |
 | Enter or Space | Launch |
 | `m` | Send a message |
 | `q` / `Esc` | Quit |
@@ -697,6 +702,7 @@ one. `/help` lists the commands the server accepts.
 | Command | With | What it does |
 |---|---|---|
 | `/record` | `--ranks` | Your service record and honours |
+| `/tech` | `--ranks` | Your advanced tech and what it does |
 | `/orders` | `--orders` | Repeat your current orders |
 | `/treaty <empire>` | `--diplomacy` | Offer a treaty (or accept one offered to you) |
 | `/break` | `--diplomacy` | Break your treaty (10 seconds' notice) |
@@ -736,6 +742,77 @@ tab-separated text.
 - **On screen:** your rank shows in the player list and `i` info. Your service record and
   the top five careers are on the outfit screen. You're welcomed back by rank when you
   join.
+
+### Advanced tech
+
+With `--ranks`, officers from **Captain** up get advanced tech. Each rank from Captain to
+Admiral has three techs, and your ship is fitted with **one from every rank you've
+reached**, drawn at random each time you launch. So a Captain has one tech and an Admiral
+has five. You're told what's aboard when you launch. `/tech` repeats it, and the line
+above the message log shows it along with cooldowns and armor. Robots never get tech.
+Turn it off with `--no-rank-tech`.
+
+| Rank | Role | The three techs |
+|---|---|---|
+| **Captain** | Weapons (passive) | **Quantum torpedoes:** 20% more damage, 15% faster, glowing blue-white. **Photon spread:** every torpedo shot is a fan of three. **Phaser overcharge:** 25% more range, and a quarter of the damage goes through shields. |
+| **Fleet Captain** | Defence (passive) | **Ablative armor:** 40 points of armor soak up hull damage and come back in repair mode or at repair planets. **Regenerative shields:** shields recharge 3× faster after 5 seconds without a hit. **Metaphasic shields:** immune to terrain hazards, V'Ger's slowing cloud and the whale probe's power drain. |
+| **Commodore** | Sensors and tricks, key `v` | **Tachyon sweep:** for 10 s, cloaked and hidden ships within 12,000 show up for you and your allies (60 s cooldown). **Holographic decoy:** a copy of your ship flies on for 15 s; robots and plasma chase it, and one hit dispels it (60 s). **Graviton pulse:** enemies within 4,000 are shoved 2,500 away and their shields are knocked down and jammed for 3 s (45 s). |
+| **Rear Admiral** | Heavy weapon, key `e` | **Tricobalt device:** a slow heavy warhead fired at the pointer: 150 damage and a 3,500 blast that **hurts everyone**, you included (90 s, 3,000 fuel). **Isokinetic cannon:** a beam at the pointer out to 9,000 that goes straight through shields for 120 damage (45 s). **Antiproton burst:** strikes every enemy within 4,500 at once (60 s). |
+| **Admiral** | Escape and power, key `j` | **Transwarp jump:** charges for 2 s (everyone can see the glow), then jumps 15,000 the way you're heading, breaking tractor beams and orbits (120 s). **Phase cloak:** 6 s out of phase: nothing can touch you, and you can't fire (120 s). **Emergency reserve:** instantly refills shields and fuel and vents all heat (120 s). |
+
+- **Starbases** keep the Captain and Fleet Captain techs but can't use the three
+  active ones. An **Admiral who launches in a starbase** gets starbase-only tech in their
+  place: one passive and one active (key `j`), each drawn from three:
+
+  | Starbase passive | Starbase active (`j`) |
+  |---|---|
+  | **Point-defense grid:** shoots down enemy torpedoes and plasma within 3,000, about three a second | **Fighter wing:** launches 3 fighters that hunt enemies within 15,000 of the base, then return after 30 s (120 s cooldown) |
+  | **Shield projector:** friendly and allied ships within 6,000 recharge shields as if in repair mode | **Tractor net:** every enemy within 6,000 is held to warp 1 for 6 s (90 s) |
+  | **Mobile drydock:** friendly ships holding within 4,000 at warp 2 or less are repaired and refuelled, like at a repair and fuel planet | **Galactic scan:** for 20 s your team sees every cloaked and hidden ship in the galaxy, and every planet is charted (90 s) |
+
+  Refitting into or out of a starbase at your home world refits the tech too.
+- **Bounty:** senior officers are worth more to kill: +0.5 kill credit for each rank
+  above Commander.
+- **Promotions:** new tech is fitted at your next launch after a promotion.
+
+### Special and relic ships
+
+With `--ranks`, senior officers can fly ships nobody else can. Pick them on the outfit
+screen, or when refitting at your home world. They show up as extra rows in the ship
+table, with what's needed if you don't qualify yet.
+
+**Special ships** (Captain and up, key `e`): each empire has one, in its own style.
+
+| Empire | Ship | Speed | Shields | Hull | Torp | Phaser | What makes it special |
+|---|---|---|---|---|---|---|---|
+| Federation | **Defiant** | 10 | 120 | 110 | 40 | 90 | Pulse phasers recharge twice as fast |
+| Romulan | **D'deridex Warbird** | 8 | 170 | 170 | 40 | 100 | A cheap cloak, and 150-point plasma after just **1** kill |
+| Klingon | **Negh'Var** | 9 | 140 | 160 | 50 | 110 | 12 torpedoes in flight instead of 8 |
+| Orion | **Corsair** | 12 | 80 | 90 | 30 | 80 | The fastest ship in the game; carries 3 armies per kill |
+
+**Relic ships** (Commodore and up, key `u`): ships of long-vanished or far-off
+civilizations, found, captured or salvaged. None of them are races you'll meet as
+alien incursions. You don't choose which: one of thirteen is **drawn at random** each time you
+launch, and it's drawn in your empire's colours.
+
+| Relic | Speed | Shields | Hull | What makes it special |
+|---|---|---|---|---|
+| **Iconian gateway ship** | 9 | 120 | 120 | While orbiting one of your planets, lock onto (`l`) another of your planets to step through a gateway straight into orbit there. Recharges in 30 s |
+| **Breen warship** | 9 | 130 | 130 | Energy-dampening torpedoes: a hit knocks the target's shields down, jams them for 3 s and drains 500 fuel |
+| **Vidiian harvester** | 10 | 100 | 120 | Harvests its victims: 40% of all the damage it deals repairs its own hull |
+| **Xindi-Reptilian warship** | 8 | 140 | 150 | Particle-beam phasers pierce, hitting every enemy along the beam, not just the first |
+| **Preserver obelisk** | 7 | 200 | 160 | Its deflector turns most enemy torpedoes that come within 1,200 back the way they came, as its own |
+| **Talosian illusion ship** | 10 | 90 | 90 | To enemy pilots more than 2,000 away it appears 1,500 to 2,500 from where it really is, drifting every few seconds. Robots aren't fooled |
+| **Voth city ship** | 7 | 150 | 200 | A hauler: carries 4 armies per kill (up to 24) and beams armies up and down twice as fast |
+| **Kazon raider** | 10 | 90 | 140 | Rams: at warp 6 or more it slams into any enemy within 700, doing 70 damage to them and 20 to itself (every 5 s at most) |
+| **Sheliak colony ship** | 8 | 160 | 150 | While it's in orbit around one of your planets, that planet can't be bombed |
+| **Kelvan ship** | 9 | 120 | 120 | Neural field: enemy ships within 2,500 can't fire torpedoes (phasers still work) |
+| **Husnock warship** | 8 | 140 | 150 | Planet cracker: bombs 3 armies at a time, and can bomb a planet down to 1 army instead of 4 |
+| **Suliban cell ship** | 11 | 70 | 80 | Enhanced reflexes: about 35% of shots and hits against it miss entirely |
+| **Excalbian shapeshifter** | 9 | 110 | 120 | To enemy pilots more than 3,000 away it looks like one of their own cruisers. Up close, the disguise fails |
+
+Special and relic ships get your advanced tech like any other hull. Robots never fly
+them.
 
 ### Orders
 
@@ -998,7 +1075,11 @@ The tests include:
 - **`retaking_alien_planets`:** liberated and resettled planets lose their alien mark.
 - **Extras:** `galaxy_has_ten_kinds_of_terrain_clear_of_planets` and a test for each
   terrain effect; `treaties_between_players`, `one_ally_at_a_time_and_robots_decide`,
-  `upgrades_boost_torpedoes`, `starbase_needs_rank`, `convoys_deliver_and_robots_buy`,
+  `upgrades_boost_torpedoes`, `starbase_needs_rank`, `tech_comes_with_rank`,
+  `captain_weapons`, `fleet_captain_defences`, `commodore_tricks`,
+  `rear_admiral_weapons`, `admiral_tech`, `admiral_starbase_tech`,
+  `starbase_tech_works`, `special_and_relic_ships_need_rank`, `special_ship_traits`,
+  `relic_traits`, `more_relic_traits`, `overwatch_fires_at_enemies_in_range`, `convoys_deliver_and_robots_buy`,
   `scouting_orders_pay_off` and `careers_persist_and_promote`.
 - **`extras_game`:** a 20-minute four-empire robot war with every extra and every alien
   switched on, two robots standing in for human players.

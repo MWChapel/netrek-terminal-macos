@@ -219,6 +219,9 @@ impl Careers {
             if ranks_before.get(&id).map_or(false, |&b| now > b) {
                 let who = world.players[id as usize].label();
                 world.god(format!("{} is promoted to {}!", who, RANKS[now as usize].0));
+                if now >= TECH_RANK && world.features.rank_tech {
+                    world.reply(id, "New advanced tech will be fitted at your next launch.");
+                }
             }
             let p = &mut world.players[id as usize];
             p.rank = Some(now);

@@ -68,6 +68,9 @@ pub fn ship_parts(team: Team, ship: ShipType, faction: Option<Faction>) -> Vec<P
     if ship == ShipType::Freighter {
         return freighter();
     }
+    if let Some(v) = special_or_relic(ship) {
+        return v;
+    }
     match team {
         Team::Fed | Team::Ind => federation(ship),
         Team::Kli => klingon(ship),
@@ -246,6 +249,153 @@ fn orion(ship: ShipType) -> Vec<Part> {
         }
     }
     v
+}
+
+/// Empire special ships and alien relics (drawn in the flyer's colours).
+fn special_or_relic(ship: ShipType) -> Option<Vec<Part>> {
+    let mut v = Vec::new();
+    match ship {
+        ShipType::Defiant => {
+            // A compact, heavily armed escort: nacelles hugging the hull.
+            v.push(sym(&[(0.0, -0.95), (0.3, -0.7), (0.5, -0.1), (0.55, 0.5), (0.3, 0.9), (0.0, 0.7)]));
+            v.extend(pair(|s| capsule((s * 0.5, 0.0), (s * 0.5, 0.85), 0.16)));
+            v.push(Circle { c: (0.0, -0.35), r: 0.13, fill: false });
+        }
+        ShipType::Warbird => {
+            // D'deridex: a double hull around an open core, head forward.
+            v.push(sym(&[(0.0, -1.0), (0.18, -0.75), (0.75, -0.2), (0.9, 0.35), (0.6, 0.95), (0.2, 0.75), (0.0, 0.85)]));
+            v.push(Hole { pts: (0..16).map(|k| { let a = k as f32 / 16.0 * TAU; (a.cos() * 0.38, 0.12 + a.sin() * 0.34) }).collect() });
+            v.push(circle((0.0, -0.8), 0.12));
+        }
+        ShipType::NeghVar => {
+            // A big Klingon warship: head on a neck, wide forward-swept wings.
+            v.push(circle((0.0, -0.8), 0.2));
+            v.push(capsule((0.0, -0.65), (0.0, 0.05), 0.2));
+            v.push(sym(&[(0.0, -0.1), (0.35, -0.05), (0.95, -0.35), (1.0, -0.15), (0.55, 0.5), (0.3, 0.95), (0.0, 0.8)]));
+        }
+        ShipType::Corsair => {
+            // A sleek raider with three engines.
+            v.push(sym(&[(0.0, -1.0), (0.22, -0.3), (0.7, 0.6), (0.45, 0.85), (0.0, 0.6)]));
+            v.extend(pair(|s| capsule((s * 0.5, 0.3), (s * 0.5, 0.95), 0.14)));
+            v.push(capsule((0.0, 0.4), (0.0, 1.0), 0.16));
+        }
+        ShipType::IconianShip => {
+            // Iconian: an angular arrowhead framing a glowing gateway.
+            v.push(sym(&[(0.0, -1.0), (0.45, -0.35), (0.85, 0.75), (0.45, 0.9), (0.0, 0.7)]));
+            v.push(Hole { pts: vec![(-0.2, -0.2), (0.2, -0.2), (0.2, 0.45), (-0.2, 0.45)] });
+            v.push(Poly { pts: vec![(-0.1, -0.08), (0.1, -0.08), (0.1, 0.33), (-0.1, 0.33)], fill: false });
+        }
+        ShipType::BreenWarship => {
+            // Breen: a broad, ridged, organic-looking hull.
+            v.push(sym(&[(0.0, -0.9), (0.35, -0.8), (0.75, -0.35), (0.9, 0.2), (0.65, 0.85), (0.25, 0.7), (0.0, 0.9)]));
+            for k in 0..4 {
+                let y = -0.55 + k as f32 * 0.35;
+                v.push(line((-0.55 + (k as f32 * 0.05), y), (0.55 - (k as f32 * 0.05), y)));
+            }
+        }
+        ShipType::VidiianHarvester => {
+            // Vidiian: a crescent of barbed claws around a small core.
+            v.push(sym(&[(0.0, -0.3), (0.35, -0.95), (0.55, -0.6), (0.75, 0.1), (0.5, 0.75), (0.2, 0.9), (0.0, 0.6)]));
+            v.push(circle((0.0, 0.2), 0.18));
+            v.extend(pair(|s| line((s * 0.35, -0.95), (s * 0.15, -0.55))));
+        }
+        ShipType::XindiWarship => {
+            // Xindi-Reptilian: a long hull with four forward prongs.
+            v.push(capsule((0.0, -0.6), (0.0, 0.95), 0.34));
+            v.extend(pair(|s| capsule((s * 0.2, -1.0), (s * 0.25, -0.4), 0.1)));
+            v.extend(pair(|s| capsule((s * 0.55, -0.75), (s * 0.45, 0.2), 0.12)));
+            v.extend(pair(|s| line((s * 0.17, 0.0), (s * 0.45, 0.0))));
+        }
+        ShipType::PreserverObelisk => {
+            // Preserver: a tall obelisk carved with glyphs.
+            v.push(Poly { pts: vec![(0.0, -1.0), (0.3, -0.75), (0.3, 0.85), (0.0, 1.0), (-0.3, 0.85), (-0.3, -0.75)], fill: true });
+            for k in 0..4 {
+                let y = -0.5 + k as f32 * 0.35;
+                v.push(line((-0.14, y), (0.14, y)));
+                v.push(Circle { c: (0.0, y + 0.17), r: 0.06, fill: false });
+            }
+        }
+        ShipType::VothCityShip => {
+            // Voth: a vast city ship, its hull studded with domes and lights.
+            v.push(Poly {
+                pts: (0..24).map(|k| { let a = k as f32 / 24.0 * TAU; (a.cos() * 0.7, a.sin() * 0.95) }).collect(),
+                fill: true,
+            });
+            for (x, y, r) in [(0.0, -0.45, 0.18), (-0.3, 0.05, 0.14), (0.3, 0.05, 0.14), (0.0, 0.45, 0.16)] {
+                v.push(Circle { c: (x, y), r, fill: false });
+            }
+            v.push(line((-0.55, -0.2), (0.55, -0.2)));
+            v.push(line((-0.55, 0.25), (0.55, 0.25)));
+        }
+        ShipType::KazonRaider => {
+            // Kazon: a blocky, lopsided raider bristling with spikes.
+            v.push(Poly { pts: vec![(0.0, -0.9), (0.5, -0.5), (0.7, 0.4), (0.3, 0.9), (-0.4, 0.8), (-0.75, 0.2), (-0.45, -0.55)], fill: true });
+            v.extend([line((0.5, -0.5), (0.85, -0.8)), line((-0.45, -0.55), (-0.8, -0.85)), line((0.7, 0.4), (1.0, 0.5)), line((-0.75, 0.2), (-1.0, 0.35))]);
+            v.push(Circle { c: (0.0, -0.1), r: 0.16, fill: false });
+        }
+        ShipType::SheliakShip => {
+            // Sheliak: a disc with four long radiating arms.
+            v.push(circle((0.0, 0.0), 0.45));
+            for k in 0..4 {
+                let a = std::f32::consts::FRAC_PI_4 + k as f32 * std::f32::consts::FRAC_PI_2;
+                v.push(capsule((a.cos() * 0.4, a.sin() * 0.4), (a.cos() * 0.95, a.sin() * 0.95), 0.14));
+            }
+            v.push(Circle { c: (0.0, 0.0), r: 0.2, fill: false });
+        }
+        ShipType::KelvanShip => {
+            // Kelvan: a sleek teardrop from Andromeda, ringed amidships.
+            v.push(Poly {
+                pts: (0..24)
+                    .map(|k| {
+                        let a = k as f32 / 24.0 * TAU;
+                        let w = 0.45 * (1.0 + a.sin()) * 0.5 + 0.12;
+                        (a.cos() * w, a.sin() * 0.95)
+                    })
+                    .collect(),
+                fill: true,
+            });
+            v.push(line((-0.55, 0.3), (0.55, 0.3)));
+            v.push(line((-0.45, 0.5), (0.45, 0.5)));
+        }
+        ShipType::HusnockWarship => {
+            // Husnock: a massive hammer-headed siege ship.
+            v.push(sym(&[(0.0, -1.0), (0.85, -1.0), (0.85, -0.55), (0.3, -0.45), (0.35, 0.6), (0.6, 0.95), (0.0, 0.8)]));
+            v.push(line((-0.7, -0.78), (0.7, -0.78)));
+            v.push(line((0.0, -0.45), (0.0, 0.7)));
+        }
+        ShipType::SulibanCell => {
+            // Suliban: a tiny cell ship, a cluster of pods.
+            v.push(circle((0.0, -0.2), 0.32));
+            v.extend(pair(|s| circle((s * 0.38, 0.3), 0.22)));
+            v.push(circle((0.0, 0.62), 0.18));
+        }
+        ShipType::ExcalbianShip => {
+            // Excalbian: a craggy, shifting rock.
+            v.push(Poly {
+                pts: (0..14)
+                    .map(|k| {
+                        let a = k as f32 / 14.0 * TAU;
+                        let r = 0.6 + 0.3 * ((k * 7 % 5) as f32 / 4.0);
+                        (a.cos() * r, a.sin() * r)
+                    })
+                    .collect(),
+                fill: true,
+            });
+            v.push(line((-0.3, -0.2), (0.1, 0.1)));
+            v.push(line((0.1, 0.1), (0.35, -0.15)));
+        }
+        ShipType::TalosianShip => {
+            // Talosian: a bulbous dome ringed by smaller cells.
+            v.push(circle((0.0, -0.2), 0.55));
+            for k in 0..6 {
+                let a = std::f32::consts::PI * (0.15 + 0.14 * k as f32);
+                v.push(Circle { c: (a.cos() * 0.75, -0.2 + a.sin() * 0.75), r: 0.14, fill: true });
+            }
+            v.push(Circle { c: (0.0, -0.2), r: 0.3, fill: false });
+        }
+        _ => return None,
+    }
+    Some(v)
 }
 
 /// Supply freighter: a bridge on a long spine lined with cargo pods.
@@ -429,6 +579,19 @@ pub fn engine_points(team: Team, ship: ShipType, faction: Option<Faction>) -> Ve
         Some(_) => return vec![],
         None => {}
     }
+    match ship {
+        ShipType::Defiant => return vec![(0.5, 0.95), (-0.5, 0.95)],
+        ShipType::Corsair => return vec![(0.5, 1.0), (-0.5, 1.0), (0.0, 1.05)],
+        ShipType::NeghVar | ShipType::Warbird | ShipType::IconianShip | ShipType::BreenWarship => return vec![(0.4, 0.95), (-0.4, 0.95)],
+        ShipType::XindiWarship => return vec![(0.0, 1.0)],
+        ShipType::VidiianHarvester => return vec![(0.2, 0.9), (-0.2, 0.9)],
+        ShipType::KazonRaider | ShipType::HusnockWarship => return vec![(0.3, 0.9), (-0.3, 0.9)],
+        ShipType::KelvanShip | ShipType::SulibanCell => return vec![(0.0, 0.95)],
+        ShipType::PreserverObelisk | ShipType::TalosianShip | ShipType::Freighter | ShipType::VothCityShip | ShipType::SheliakShip | ShipType::ExcalbianShip => {
+            return vec![]
+        }
+        _ => {}
+    }
     match (team, ship) {
         (_, ShipType::Starbase) => vec![],
         (Team::Fed | Team::Ind, ShipType::Scout) => vec![(0.45, 0.95), (-0.45, 0.95)],
@@ -454,7 +617,7 @@ mod tests {
     #[test]
     fn gallery() {
         let (cell, r) = (120.0f32, 44.0f32);
-        let mut c = Canvas::new(8 * cell as i32, 8 * cell as i32, [0.0, 0.0, 0.0]);
+        let mut c = Canvas::new(8 * cell as i32, 11 * cell as i32, [0.0, 0.0, 0.0]);
         let mut rows: Vec<Vec<(Team, ShipType, Option<Faction>)>> = Team::PLAYABLE
             .iter()
             .map(|&t| ShipType::ALL.iter().map(|&s| (t, s, None)).collect())
@@ -478,6 +641,29 @@ mod tests {
             (Team::Ind, ShipType::BirdOfPrey, Some(Faction::Chang)),
             (Team::Ind, ShipType::HirogenHunter, Some(Faction::Hirogen)),
             (Team::Ind, ShipType::QEntity, Some(Faction::Q)),
+        ]);
+        rows.push(vec![
+            (Team::Fed, ShipType::Defiant, None),
+            (Team::Rom, ShipType::Warbird, None),
+            (Team::Kli, ShipType::NeghVar, None),
+            (Team::Ori, ShipType::Corsair, None),
+        ]);
+        rows.push(vec![
+            (Team::Fed, ShipType::IconianShip, None),
+            (Team::Rom, ShipType::BreenWarship, None),
+            (Team::Kli, ShipType::VidiianHarvester, None),
+            (Team::Ori, ShipType::XindiWarship, None),
+            (Team::Fed, ShipType::PreserverObelisk, None),
+            (Team::Rom, ShipType::TalosianShip, None),
+            (Team::Kli, ShipType::VothCityShip, None),
+            (Team::Ori, ShipType::KazonRaider, None),
+        ]);
+        rows.push(vec![
+            (Team::Fed, ShipType::SheliakShip, None),
+            (Team::Rom, ShipType::KelvanShip, None),
+            (Team::Kli, ShipType::HusnockWarship, None),
+            (Team::Ori, ShipType::SulibanCell, None),
+            (Team::Fed, ShipType::ExcalbianShip, None),
         ]);
         rows.push(vec![
             (Team::Ind, ShipType::QChampion, Some(Faction::Q)),

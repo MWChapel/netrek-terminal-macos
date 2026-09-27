@@ -96,6 +96,9 @@ struct Extras {
     /// Switch on all five extras at once
     #[arg(long)]
     extras: bool,
+    /// With ranks: don't give Captains and above their advanced tech
+    #[arg(long)]
+    no_rank_tech: bool,
 }
 
 impl Extras {
@@ -107,6 +110,7 @@ impl Extras {
             diplomacy: all || self.diplomacy,
             terrain: all || self.terrain,
             supply: all || self.supply,
+            rank_tech: !self.no_rank_tech,
         }
     }
 

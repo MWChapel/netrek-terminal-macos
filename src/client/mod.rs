@@ -685,7 +685,7 @@ impl App {
             if nm.damage > om.damage || nm.shield + 2 < om.shield {
                 plays.push((Sfx::Hit, 0.8));
             }
-            let flip = |flag: u16| (o.flags & flag != 0, n.flags & flag != 0);
+            let flip = |flag: u32| (o.flags & flag != 0, n.flags & flag != 0);
             match flip(pf::SHIELD) {
                 (false, true) => plays.push((Sfx::ShieldUp, 0.5)),
                 (true, false) => plays.push((Sfx::ShieldDown, 0.5)),
@@ -843,7 +843,8 @@ impl App {
             Mode::Refit => {
                 self.mode = Mode::Play;
                 if let KeyCode::Char(c) = k.code {
-                    if let Some(s) = ShipType::from_key(c) {
+                    let team = self.me().map_or(Team::Fed, |p| p.team);
+                    if let Some(s) = ShipType::from_key_for(c, team) {
                         self.cmd(ClientMsg::Refit(s));
                     }
                 }
@@ -897,6 +898,16 @@ impl App {
             'R' => self.cmd(ClientMsg::Repair),
             'd' => self.cmd(ClientMsg::DetEnemy),
             'w' => self.cmd(ClientMsg::Overwatch),
+            // Advanced tech (senior officers): aimed at the pointer where it matters.
+            'v' | 'e' | 'j' => {
+                let slot = match c {
+                    'v' => 0,
+                    'e' => 1,
+                    _ => 2,
+                };
+                let dir = self.aim();
+                self.cmd(ClientMsg::Tech { slot, dir });
+            }
             'D' => self.cmd(ClientMsg::DetOwn),
             'T' | 'y' => {
                 let pressor = c == 'y';
@@ -1040,14 +1051,26 @@ impl App {
                 self.outfit_team = Some(Team::PLAYABLE[(i + d).rem_euclid(4) as usize]);
             }
             KeyCode::Up | KeyCode::Down => {
-                let i = ShipType::ALL.iter().position(|&s| s == self.outfit_ship).unwrap_or(2) as i32;
+                // The classic ships, then the special ship and relic rows when
+                // your rank allows them.
+                let rank = self.frame.as_ref().and_then(|f| f.players.iter().find(|p| p.id == self.slot)).and_then(|p| p.rank);
+                let team = self.outfit_team.unwrap_or(Team::Fed);
+                let mut rows: Vec<ShipType> = ShipType::ALL.to_vec();
+                if rank.map_or(false, |r| r >= SPECIAL_RANK) {
+                    rows.extend(ShipType::special_for(team));
+                }
+                if rank.map_or(false, |r| r >= RELIC_RANK) {
+                    rows.push(ShipType::RELICS[0]);
+                }
+                let here = |s: ShipType| s == self.outfit_ship || (s.is_special() && self.outfit_ship.is_special()) || (s.is_relic() && self.outfit_ship.is_relic());
+                let i = rows.iter().position(|&s| here(s)).unwrap_or(2) as i32;
                 let d = if k.code == KeyCode::Up { -1 } else { 1 };
-                self.outfit_ship = ShipType::ALL[(i + d).rem_euclid(6) as usize];
+                self.outfit_ship = rows[(i + d).rem_euclid(rows.len() as i32) as usize];
             }
             KeyCode::Char(c) => {
                 if let Some(t) = Team::from_char(c) {
                     self.outfit_team = Some(t);
-                } else if let Some(s) = ShipType::from_key(c) {
+                } else if let Some(s) = ShipType::from_key_for(c, self.outfit_team.unwrap_or(Team::Fed)) {
                     self.outfit_ship = s;
                 }
             }
@@ -1076,7 +1099,12 @@ impl App {
             }
         };
         self.outfit_team = Some(team);
-        let ship = self.outfit_ship;
+        // A special ship follows the empire you launch with.
+        let ship = if self.outfit_ship.is_special() {
+            ShipType::special_for(team).unwrap_or(ShipType::Cruiser)
+        } else {
+            self.outfit_ship
+        };
         self.cmd(ClientMsg::Join { team, ship });
     }
 
