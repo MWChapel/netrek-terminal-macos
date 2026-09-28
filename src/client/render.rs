@@ -431,11 +431,11 @@ impl App {
         if !side_col && by + bh - 1 - list_top > 1 {
             let lh = by + bh - 1 - list_top;
             if vector {
-                let img = self.draw_players_vec((sc as f64 * cw) as i32, (lh as f64 * ch) as i32);
+                let img = self.draw_side_list_vec((sc as f64 * cw) as i32, (lh as f64 * ch) as i32);
                 self.images.push(super::Image { x: 1, y: list_top, slot: 4, data: super::sixel::encode_canvas(&img) });
                 scr.masks.push((1, list_top, sc, lh));
             } else {
-                self.draw_player_list(scr, Rect { x: 1, y: list_top, w: sc, h: lh }, true);
+                self.draw_side_list(scr, Rect { x: 1, y: list_top, w: sc, h: lh });
             }
         }
 
@@ -452,7 +452,7 @@ impl App {
             if side_col {
                 scr.frame(maps_right, 0, w - maps_right, sr + 2, "", Color::White);
                 let (lw, lh) = (w - maps_right - 2, sr);
-                let img = self.draw_players_vec((lw as f64 * cw) as i32, (lh as f64 * ch) as i32);
+                let img = self.draw_side_list_vec((lw as f64 * cw) as i32, (lh as f64 * ch) as i32);
                 self.images.push(super::Image { x: maps_right + 1, y: 1, slot: 4, data: super::sixel::encode_canvas(&img) });
                 scr.masks.push((maps_right + 1, 1, lw, lh));
             }
@@ -480,7 +480,7 @@ impl App {
         // Side column: the player list, beside the maps.
         if side_col {
             scr.frame(maps_right, 0, w - maps_right, sr + 2, "", Color::White);
-            self.draw_player_list(scr, Rect { x: maps_right + 1, y: 1, w: w - maps_right - 2, h: sr }, true);
+            self.draw_side_list(scr, Rect { x: maps_right + 1, y: 1, w: w - maps_right - 2, h: sr });
         }
     }
 
@@ -970,6 +970,80 @@ impl App {
         }
     }
 
+    /// The player list, or the field manual in its place (G).
+    fn draw_side_list(&self, scr: &mut Screen, r: Rect) {
+        if self.guide {
+            self.draw_guide(scr, r);
+        } else {
+            self.draw_player_list(scr, r, true);
+        }
+    }
+
+    /// The field manual in character cells, from the current position down.
+    fn draw_guide(&self, scr: &mut Screen, r: Rect) {
+        use super::guide::{self, Kind};
+        let maxx = r.x + r.w - 1;
+        let w = r.w.max(8) as usize;
+        let blocks = guide::blocks();
+        let pos = self.guide_pos.min(blocks.len() - 1);
+        scr.text_clip(r.x, r.y, &format!("FIELD MANUAL  {}/{}", guide::chapter_at(pos), guide::chapters()), Color::White, true, maxx);
+        scr.text_clip(r.x, r.y + 1, "[ ] page  { } chapter  G close", DIM, false, maxx);
+        // The last row is kept for the "more" marker.
+        let bottom = r.y + r.h - 1;
+        let mut y = r.y + 3;
+        let mut shown = 0;
+        for (n, b) in blocks[pos..].iter().enumerate() {
+            // Each line: text, colour, bold, and the key column (for key rows).
+            let mut lines: Vec<(String, Color, bool)> = Vec::new();
+            let gap = matches!(b.kind, Kind::Chapter | Kind::Section) && n > 0;
+            match &b.kind {
+                Kind::Chapter => lines.push((b.text.to_uppercase(), Color::Yellow, true)),
+                Kind::Section => lines.push((b.text.clone(), Color::Cyan, true)),
+                Kind::Para => lines.extend(wrap_chars(&b.text, w).into_iter().map(|l| (l, Color::Grey, false))),
+                Kind::Bullet | Kind::Note => {
+                    let (mark, col) = if b.kind == Kind::Note { ("▌ ", Color::Magenta) } else { ("• ", Color::Grey) };
+                    for (k, l) in wrap_chars(&b.text, w.saturating_sub(2).max(4)).into_iter().enumerate() {
+                        lines.push((format!("{}{}", if k == 0 { mark } else { "  " }, l), col, false));
+                    }
+                }
+                Kind::Key(key) => {
+                    let kw = (w / 3).clamp(6, 17);
+                    let desc = wrap_chars(&b.text, w.saturating_sub(kw + 1).max(4));
+                    for (k, l) in desc.into_iter().enumerate() {
+                        let head = if k == 0 { format!("{:<kw$}", key, kw = kw) } else { " ".repeat(kw) };
+                        lines.push((format!("{}\u{1}{} {}", "", head, l), Color::Grey, false));
+                    }
+                }
+            }
+            let need = lines.len() as i32 + i32::from(gap);
+            if y + need > bottom && shown > 0 {
+                scr.text_clip(r.x, bottom, "  ... more: ]", DIM, false, maxx);
+                break;
+            }
+            if gap {
+                y += 1;
+            }
+            for (text, col, bold) in lines {
+                if y >= bottom {
+                    break;
+                }
+                // Key rows: the key bright, what it does in grey.
+                if let Some(rest) = text.strip_prefix('\u{1}') {
+                    let kw = (w / 3).clamp(6, 17);
+                    let head: String = rest.chars().take(kw).collect();
+                    let tail: String = rest.chars().skip(kw).collect();
+                    scr.text_clip(r.x, y, &head, Color::White, true, maxx);
+                    scr.text_clip(r.x + kw as i32, y, &tail, Color::Grey, false, maxx);
+                } else {
+                    scr.text_clip(r.x, y, &text, col, bold, maxx);
+                }
+                y += 1;
+            }
+            shown += 1;
+        }
+        self.guide_fit.set(shown.max(1));
+    }
+
     fn draw_player_list(&self, scr: &mut Screen, r: Rect, _wide: bool) {
         let f = self.frame.as_ref().unwrap();
         let mut ps: Vec<&PlayerInfo> = f.players.iter().filter(|p| p.state != PState::Outfit).collect();
@@ -1416,6 +1490,7 @@ pub(super) const HELP: &[(&str, &str)] = &[
     ("/", "server command, e.g. /record /orders /treaty rom /upgrade torps /fix warp /build yard (when enabled)"),
     ("Ctrl-L", "redraw screen"),
     ("q", "quit"),
+    ("G", "field manual in place of the player list: [ ] page, { } chapter"),
     ("W", "on the outfit screen: watch as an observer instead of flying"),
     ("Tab", "observers: follow the next ship (Shift-Tab previous, click a ship, arrows or Esc for a free camera, J to join)"),
     ("", ""),

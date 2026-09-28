@@ -1,0 +1,161 @@
+# 1 The galaxy
+40 planets, 10 per empire. Federation (Earth, bottom left), Romulan (Romulus, top left), Klingon (Klingus, top right), Orion (Orion, bottom right).
+You win by conquest: an empire that loses its last planet is genocided, and when only one empire still holds planets, the galaxy is conquered and resets.
+Kills are the currency. A kill is worth 1 + 0.1 x the victim's kills + 0.1 x the armies it carried. Kills let you carry armies, and armies take planets. Your kills reset when you die.
+
+# 2 First flight
+- Launch a cruiser (c): the best all-rounder.
+- Cruise at warp 6. Top speed burns fuel and heats engines.
+- Right-click or k steers toward the pointer. Head for the nearest border.
+- Shields up (s) near enemies. Left-click fires a torpedo: lead your target.
+- Phasers (p) hit instantly, out to 6,000 in a cruiser.
+- Hurt? Orbit a friendly repair planet (o, or l to autopilot) and press R. You keep your kills if you live.
+> Press ? for every key, L for players, P for planets, i for info on whatever is under the pointer.
+
+# 3 Controls
+@ k | Steer toward the pointer (or right-click)
+@ 0-9 ) ! @ | Warp 0-12
+@ % # | Max / half speed
+@ o | Orbit (warp 2 or less)
+@ l | Autopilot to planet or ship
+@ t | Photon torpedo (or left-click; 8 in flight)
+@ p | Phaser (or middle-click)
+@ f | Plasma (DD CA BB SB, 2 kills)
+@ d / D | Detonate enemy / own torps
+@ s c R | Shields, cloak, repair mode
+@ T y | Tractor, pressor
+@ b z x | Bomb, beam up, beam down
+@ v e j | Advanced tech (ranks)
+@ w | Overwatch (in orbit)
+@ B | Board a ship (boarding)
+@ r | Refit (home world or shipyard)
+@ m / | Message, server command
+@ G | This guide ([ ] page, { } chapter)
+
+# 4 Ships
+@ SC Scout | Warp 12, 75/75. Scouting, chasing
+@ DD Destroyer | Warp 10, 85/85. Raids, plasma
+@ CA Cruiser | Warp 9, 100/100. Everything
+@ BB Battleship | Warp 8, 130/130. Holding a front
+@ AS Assault | Warp 8, 80/200. Carrier: 3 armies/kill
+@ SB Starbase | Warp 2, 500/600. Fortress, one per team
+Fast ships turn slowly: turn rate falls with the square of speed. Drop to warp 3-4 to turn inside an enemy. A damaged hull lowers your top speed.
+
+# 5 The conquest loop
+- Kill: each kill lets you carry 2 armies (3 in an assault ship).
+- Bomb: orbit the target, b. Bombing stops at 4 armies.
+- Load: orbit your own planet, z. One must stay behind.
+- Invade: orbit the target, x. Each army kills a defender; the next takes it.
+After bombing to 4 you need 5 armies. Neutral planets with no armies fall to one.
+- Bomb first, carry second.
+- Defenders carry over between ships: a teammate can beam 3, you finish with 2.
+- A loaded carrier is the most valuable ship on the map. Hunt theirs, guard yours.
+- Reinforce a new capture: it starts with 1 army.
+
+# 6 Combat
+- Torpedoes travel: aim where the target will be. D detonates yours early.
+- Phasers hit the first enemy near the beam, instantly. Your finisher.
+- Plasma homes in and hits hard. The only real weapon against Species 8472.
+- d detonates incoming enemy torpedoes for 100 fuel.
+- Below a quarter fuel, stop fighting and refuel.
+- Overheated weapons lock up; overheated engines cut out.
+- Fight near your planets: their guns shoot your pursuers.
+- Exploding ships hurt everything within 3,000. Don't die next to friends.
+- Tractor an enemy carrier into your planet's guns; pressor attackers off you.
+> Hull past half and shields gone? Leave. A live cruiser with kills is a carrier in waiting.
+
+# 7 Planets
+- Planets start with 17 armies; home worlds with 30, plus repair, fuel and farming.
+- Repair (R) fixes hull and shields; fuel (F) refuels; farming (A) grows armies faster.
+- You only see an enemy planet's armies once your team has flown within 6,000.
+- Planets fire on enemies within 1,500, harder with more armies. Shields up to bomb.
+- Losing your last planet genocides your empire.
+
+# 8 Team play
+@ Bomber | Knocks planets down to 4
+@ Carrier | Builds kills, delivers armies
+@ Escort | Kills enemy carriers, guards
+@ Scout | Charts planets, calls out armies
+- Talk: m T messages your team. "Carrier with 6 heading to Cygni."
+- A Commander can launch a starbase: a wall of shields at the front.
+- Diplomacy: /treaty rom offers an alliance, /break ends it (10 s notice).
+
+# 9 Careers
+Points: kill credit, +0.5 per planet taken, +1 per order, +2 per honour.
+@ Commander 15 | Starbases
+@ Captain 25 | Weapons tech, special ship
+@ Fleet Capt 40 | Defence tech
+@ Commodore 60 | Tech on v, relic ships
+@ Rear Adm 90 | Heavy weapon on e
+@ Admiral 130 | Escape tech on j
+From Captain up you're worth +0.5 kill per rank to whoever gets you. /tech lists your tech.
+- Special ships (e): Defiant, D'deridex, Negh'Var, Corsair.
+- Best relics (u): Voth city ship (4 armies/kill), Husnock (bombs to 1), Iconian (gateway jumps), Sheliak (unbombable planet).
+
+# 10 The extras
+## Terrain
+- Nebulae and ion storms hide you beyond 3,000.
+- Slipstreams add warp 3; wormholes cross the galaxy.
+- Asteroids and planetoids soak up torpedoes: cover.
+- Stars, comet tails and derelicts refuel and repair.
+- Avoid the black hole, pulsar, minefields, Metreon gas and the galactic barrier.
+## Supplies
+Escort your freighter, raid theirs. /upgrade shields|repair|torps|phasers|engines (10, 20, 30 supplies).
+## Orders
+Each completed order is +1 kill and a full resupply. Take them.
+## Subsystems
+Hull hits can knock out a system; shields protect them. /fix warp to escape, /fix phasers to fight on, /fix transporters before a drop.
+## Boarding
+Shields down, within 1,500, armies aboard: B at the ship. Crew: SC 2, DD 3, CA 4, AS 5, BB 6. Double their number wins about 95%. Tow the prize home. Never board a Borg cube.
+## Outposts
+/build yard near the front first: you relaunch there. Defence on planets they keep bombing. Sensor arrays reveal cloaked ships within 12,000. 30 s in orbit; 15 supplies or 3 armies.
+## Overwatch
+In orbit, w fires at anything hostile in range, special weapons first. Off when you leave orbit.
+
+# 11 Aliens
+## Fight them together
+@ Khan | Gang up; bomb the stronghold hard
+@ Gorn | Catch them in orbit
+@ Terran Empire | Treat like a fleet
+@ Jem'Hadar | Range and torps; dodge rammers
+@ Hirogen | Prey: run to friends or fight
+@ Ferengi | Guard colonies; grab spilled loot
+@ Fesarius | Long-range torps; it's slow
+@ Amoeba | Stay out of 3,200; torps
+@ Changelings | Stick together; phaser suspects
+@ Pakleds | Keep moving; chase thieves
+@ Caretaker | Wait out waves, then kill
+@ Horta | Orbit 10 s without firing: peace
+@ Spheres | Kill spheres one at a time
+## Fight them the right way
+@ Species 8472 | Plasma only, from 6,600
+@ Crystalline | 3 ships' phasers within 2.5 s
+@ Planet killer | A ship exploding in its maw
+@ Borg | Hit early; cubes only make warp 6
+@ Chang | Fire where torps come from
+@ Tholians | Wait at a corner of the web
+@ Swarm | d the moment they latch on
+@ Tempest | Shoot flippers; d to Superzap
+## Don't shoot
+@ V'Ger | Park at the core 10 s
+@ Whale probe | Bring it 2 armies
+@ Q | Read the trial
+@ Nomad | Message it: "you are imperfect"
+@ Armus | Stop shooting; it withers
+@ Metrons | Win the duel: 3 kills
+@ Species 10-C | Hold all 3 beacons at once
+@ Dyson sphere | Stay 15,000 from the hatch
+## Outbreaks
+@ Tribbles | Avoid T planets; Klingons cure
+@ Nanites | d, or a friendly repair world
+
+# 12 The Ringworld
+Ten sections around a planet, each a planet you can claim. Kzin (12 armies) is the Kzinti homeworld; three Kzinti ships always fly, relaunching a minute after loss.
+Robots go into a ring frenzy and fight only for the ring.
+> When the Kzinti lose their last section, the ring jumps away with every section on it, yours included.
+- Grab unclaimed sections early.
+- Don't sink your whole empire into the ring.
+- Finishing the Kzinti strips rivals of their ring holdings.
+
+# 13 Watching
+netrek observe HOST, or W on the outfit screen. Everything visible. Tab follows a ship, arrows pan, m talks to all, J joins.

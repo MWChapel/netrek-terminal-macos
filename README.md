@@ -410,6 +410,7 @@ Overwatch works on any server (protocol version 6).
 | `m` | Send a message: then `A` all, `T` your team, `F`/`R`/`K`/`O` a team, or a player slot (`0`–`9`, `a`–`v`). Type, then Enter |
 | `/` | Type a server command, such as `/record`, `/orders`, `/treaty rom` or `/upgrade torps` (see [Extras](#extras)) |
 | `L` | Player list |
+| `G` | Field manual: a players' and strategy guide shown in place of the player list (vector and braille). `[` `]` page through it, `{` `}` jump between chapters, `G` again to close |
 | `P` | Planet list |
 | `?` or `h` | Help |
 | `+` / `-`, mouse wheel | Zoom the tactical view |
@@ -855,8 +856,9 @@ damage, and a Borg cube's resistance builds as it's hit.
   grabs a teammate, it takes several ships pouring fire into the hatch emitter to break it. If you're shut inside,
   the planet can repair and refuel you; wait by the hatch, and when it opens to take the
   next ship, hold the doorway so everyone can get out. Killing the emitter takes a
-  coordinated attack: ships that are going down anyway can blow themselves up (`Q`) in the
-  doorway, and two or three of those will finish it.
+  coordinated attack: a ship that's going down anyway should make its last stand in the
+  doorway, since its explosion there does 6× damage, and two or three of those will
+  finish it.
 - **Borg:** a cube assimilates a ship it holds in its tractor beam within about 2,600
   units for four seconds. Its tractor is far stronger than any pressor, so don't try to
   push free. Instead stay out of range, and if you're caught, run at full speed: cubes

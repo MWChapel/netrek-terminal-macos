@@ -1057,6 +1057,103 @@ impl App {
         c
     }
 
+    /// The player list, or the field manual in its place (G).
+    pub(super) fn draw_side_list_vec(&self, pw: i32, ph: i32) -> Canvas {
+        if self.guide {
+            self.draw_guide_vec(pw, ph)
+        } else {
+            self.draw_players_vec(pw, ph)
+        }
+    }
+
+    /// The field manual, from the current position down.
+    pub(super) fn draw_guide_vec(&self, pw: i32, ph: i32) -> Canvas {
+        let (c, shown) = guide_canvas(&self.text, self.panel_font(), self.guide_pos, pw, ph);
+        self.guide_fit.set(shown);
+        c
+    }
+}
+
+/// Draw the field manual from block `pos` into a `pw` × `ph` canvas; returns
+/// it and how many blocks fit.
+pub(super) fn guide_canvas(tr: &super::sixel::TextRenderer, (fs, lh): (f32, f32), pos: usize, pw: i32, ph: i32) -> (Canvas, usize) {
+    use super::guide::{self, Kind};
+    let lh = (fs * 1.4).round().max(lh * 0.9);
+    let mut c = Canvas::new(pw, ph, [0.0, 0.0, 0.0]);
+    let (w, h) = (pw as f32, ph as f32);
+    let pad = 8.0;
+    let text_w = w - 2.0 * pad;
+    let (body, dim) = (rgb(0xc8ccd4), rgb(0x6c7488));
+    let (chapter_col, section_col, note_col, key_col) = (rgb(0xffb347), rgb(0x45c8f2), rgb(0xd493ff), rgb(0xf2f4f8));
+    let blocks = guide::blocks();
+    let pos = pos.min(blocks.len() - 1);
+    c.text(tr, pad, pad + fs, "FIELD MANUAL", fs * 0.85, chapter_col);
+    c.text_right(tr, w - pad, pad + fs, &format!("{}/{}", guide::chapter_at(pos), guide::chapters()), fs * 0.85, dim);
+    c.text(tr, pad, pad + fs + lh * 0.95, "[ ] page   { } chapter   G close", fs * 0.75, dim);
+    let rule_y = pad + fs + lh * 1.35;
+    c.line(pad, rule_y, w - pad, rule_y, 1.0, rgb(0x3a404c), 1.0, 0.0);
+    let mut y = rule_y + lh;
+    // The last line is kept for the "more" marker.
+    let bottom = h - pad - lh;
+    let mut shown = 0;
+    for (n, b) in blocks[pos..].iter().enumerate() {
+        let gap = if matches!(b.kind, Kind::Chapter | Kind::Section) && n > 0 { lh * 0.6 } else { 0.0 };
+        // Lay the block out first, to see if it fits: (indent, text, size, colour).
+        let mut rows: Vec<(f32, String, f32, Rgb)> = Vec::new();
+        let mut key: Option<(String, f32)> = None;
+        match &b.kind {
+            Kind::Chapter => rows.push((0.0, b.text.to_uppercase(), fs * 1.05, chapter_col)),
+            Kind::Section => rows.push((0.0, b.text.clone(), fs * 0.95, section_col)),
+            Kind::Para => rows.extend(wrap(tr, &b.text, fs * 0.9, text_w).into_iter().map(|l| (0.0, l, fs * 0.9, body))),
+            Kind::Bullet | Kind::Note => {
+                let indent = fs * 1.1;
+                let col = if b.kind == Kind::Note { note_col } else { body };
+                rows.extend(wrap(tr, &b.text, fs * 0.9, text_w - indent).into_iter().map(|l| (indent, l, fs * 0.9, col)));
+            }
+            Kind::Key(k) => {
+                let kw = (text_w * 0.36).min(tr.width("Species 10-C  ", fs * 0.85));
+                rows.extend(wrap(tr, &b.text, fs * 0.85, text_w - kw).into_iter().map(|l| (kw, l, fs * 0.85, body)));
+                if rows.is_empty() {
+                    rows.push((kw, String::new(), fs * 0.85, body));
+                }
+                key = Some((k.clone(), kw));
+            }
+        }
+        let need = gap + rows.len() as f32 * lh;
+        if y + need - lh * 0.3 > bottom && shown > 0 {
+            c.text_centered(tr, w / 2.0, h - pad, "more: ]", fs * 0.75, dim);
+            break;
+        }
+        y += gap;
+        let first_y = y;
+        for (k, (indent, text, size, col)) in rows.iter().enumerate() {
+            if y > bottom {
+                break;
+            }
+            if k == 0 && matches!(b.kind, Kind::Bullet) {
+                c.disc(pad + fs * 0.4, y - size * 0.32, size * 0.14, dim, 1.0);
+            }
+            if k == 0 && matches!(b.kind, Kind::Note) {
+                c.fill_rect(pad + 1.0, y - size * 0.85, 3.0, rows.len() as f32 * lh - lh + size * 1.1, note_col, 0.8);
+            }
+            c.text(tr, pad + indent, y, text, *size, *col);
+            y += lh;
+        }
+        if let Some((k, kw)) = key {
+            let ks = fs * 0.85;
+            let k = if tr.width(&k, ks) > kw - 6.0 { wrap(tr, &k, ks, kw - 6.0).into_iter().next().unwrap_or(k) } else { k };
+            c.text(tr, pad, first_y, &k, ks, key_col);
+        }
+        if matches!(b.kind, Kind::Chapter) {
+            c.line(pad, first_y + lh * 0.3, w - pad, first_y + lh * 0.3, 1.0, scale(chapter_col, 0.35), 1.0, 0.0);
+            y += lh * 0.25;
+        }
+        shown += 1;
+    }
+    (c, shown.max(1))
+}
+
+impl App {
     pub(super) fn draw_players_vec(&self, pw: i32, ph: i32) -> Canvas {
         let f = self.frame.as_ref().unwrap();
         let tr = &self.text;
@@ -1193,6 +1290,30 @@ mod tests {
             }
         }
         std::fs::write(std::env::temp_dir().join("netrek-planets.ppm"), out).unwrap();
+    }
+
+    /// Renders the field manual as the side column shows it (the first
+    /// chapter, then the controls and the alien guide) into
+    /// $TMPDIR/netrek-guide.ppm for eyeballing.
+    #[test]
+    fn guide_gallery() {
+        let tr = super::super::sixel::TextRenderer::load();
+        let (pw, ph) = (380, 620);
+        let starts = [0, super::super::guide::jump(super::super::guide::jump(0, 1), 1), (0..10).fold(0, |p, _| super::super::guide::jump(p, 1))];
+        let mut c = Canvas::new(pw * 3 + 20, ph, [30.0, 30.0, 30.0]);
+        for (k, &pos) in starts.iter().enumerate() {
+            let (g, shown) = guide_canvas(&tr, (14.0, 22.0), pos, pw, ph);
+            assert!(shown > 0);
+            c.draw_canvas(&g, k as i32 * (pw + 10), 0);
+        }
+        let mut out = format!("P6 {} {} 255\n", c.w, c.h).into_bytes();
+        for y in 0..c.h {
+            for x in 0..c.w {
+                let p = c.get(x, y);
+                out.extend([p[0] as u8, p[1] as u8, p[2] as u8]);
+            }
+        }
+        std::fs::write(std::env::temp_dir().join("netrek-guide.ppm"), out).unwrap();
     }
 
     /// Renders a phaser hit and a miss at every age of their animation into

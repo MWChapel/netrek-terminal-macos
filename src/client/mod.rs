@@ -2,6 +2,7 @@
 //! the tactical and galactic displays with braille graphics.
 
 mod canvas;
+mod guide;
 mod palette;
 mod render;
 mod render_terrain;
@@ -370,6 +371,11 @@ pub struct App {
     /// Watching as an observer (no ship): `slot` then tracks the ship being
     /// followed, so the maps and gauges follow it.
     observer: bool,
+    /// The field manual is showing in place of the player list (G), from
+    /// this block; `guide_fit` is how many blocks the last draw showed.
+    guide: bool,
+    guide_pos: usize,
+    guide_fit: std::cell::Cell<usize>,
 }
 
 pub fn run(cfg: ClientConfig) -> io::Result<()> {
@@ -446,6 +452,9 @@ pub fn run(cfg: ClientConfig) -> io::Result<()> {
         tech_in_controls: false,
         sound: sound::Sound::new(!cfg_mute),
         observer,
+        guide: false,
+        guide_pos: 0,
+        guide_fit: std::cell::Cell::new(8),
     };
     if let Some(h) = hint {
         app.warn(h);
@@ -888,6 +897,9 @@ impl App {
             self.popup = Popup::None;
             return;
         }
+        if self.guide_key(&k) {
+            return;
+        }
         if self.observer {
             return self.observer_key(k);
         }
@@ -1124,6 +1136,29 @@ impl App {
             }
             _ => {}
         }
+    }
+
+    /// The field manual: G shows or hides it in place of the player list,
+    /// [ ] page through it and { } jump between chapters. Returns whether
+    /// the key was the guide's.
+    fn guide_key(&mut self, k: &KeyEvent) -> bool {
+        let KeyCode::Char(c) = k.code else { return false };
+        let last = guide::blocks().len() - 1;
+        match c {
+            'G' => {
+                self.guide = !self.guide;
+                self.redraw = true;
+                if self.guide {
+                    self.warn("Field manual: [ ] to page, { } for chapters, G to close");
+                }
+            }
+            ']' if self.guide => self.guide_pos = (self.guide_pos + self.guide_fit.get().max(1)).min(last),
+            '[' if self.guide => self.guide_pos = self.guide_pos.saturating_sub(self.guide_fit.get().max(1)),
+            '}' if self.guide => self.guide_pos = guide::jump(self.guide_pos, 1),
+            '{' if self.guide => self.guide_pos = guide::jump(self.guide_pos, -1),
+            _ => return false,
+        }
+        true
     }
 
     /// Observers: follow ships, move a free camera, talk, or join.
