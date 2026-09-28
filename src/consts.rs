@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 pub const DEFAULT_PORT: u16 = 2592; // the traditional Netrek port
-pub const PROTOCOL_VERSION: u32 = 15;
+pub const PROTOCOL_VERSION: u32 = 16;
 
 pub const UPS: u64 = 10; // server updates per second, like the original
 pub const GWIDTH: f64 = 100_000.0;
@@ -146,10 +146,11 @@ pub enum Faction {
     Caretaker,
     Horta,
     SphereBuilders,
+    Dyson,
 }
 
 impl Faction {
-    pub const ALL: [Faction; 30] = [
+    pub const ALL: [Faction; 31] = [
         Faction::Khan,
         Faction::Gorn,
         Faction::Tholian,
@@ -180,6 +181,7 @@ impl Faction {
         Faction::Caretaker,
         Faction::Horta,
         Faction::SphereBuilders,
+        Faction::Dyson,
     ];
 
     /// Name used on the command line.
@@ -215,6 +217,7 @@ impl Faction {
             Faction::Caretaker => "caretaker",
             Faction::Horta => "horta",
             Faction::SphereBuilders => "spheres",
+            Faction::Dyson => "dyson",
         }
     }
 
@@ -250,6 +253,7 @@ impl Faction {
             Faction::Caretaker => "the Caretaker",
             Faction::Horta => "the Horta",
             Faction::SphereBuilders => "the Sphere Builders",
+            Faction::Dyson => "the Dyson sphere",
         }
     }
 
@@ -286,6 +290,7 @@ impl Faction {
             Faction::Caretaker => "Caretaker",
             Faction::Horta => "Horta",
             Faction::SphereBuilders => "Sphere",
+            Faction::Dyson => "Dyson",
         }
     }
 
@@ -322,6 +327,7 @@ impl Faction {
             Faction::Caretaker => "CT",
             Faction::Horta => "HO",
             Faction::SphereBuilders => "SB",
+            Faction::Dyson => "DY",
         }
     }
 
@@ -400,6 +406,8 @@ pub enum ShipType {
     CaretakerArray,
     Horta,
     DelphicSphere,
+    /// The hatch (and tractor emitter) of a Dyson sphere.
+    DysonHatch,
 }
 
 impl ShipType {
@@ -598,7 +606,7 @@ pub struct ShipStats {
     pub tract_str: f64,
 }
 
-pub static SHIPS: [ShipStats; 56] = [
+pub static SHIPS: [ShipStats; 57] = [
     ShipStats {
         name: "Scout", abbr: "SC", max_speed: 12, max_shield: 75.0, max_damage: 75.0,
         max_fuel: 5000.0, max_armies: 2, torp_damage: 25.0, torp_speed: 16.0, torp_fuse: 16,
@@ -1102,6 +1110,15 @@ pub static SHIPS: [ShipStats; 56] = [
         recharge: 50.0, repair: 100.0, warp_cost: 2.0, cloak_cost: 20.0, shield_cost: 2.0,
         turns: 100000.0, acc: 150, dec: 250, wpn_cool: 2.5, egn_cool: 7.0,
         max_etemp: 100_000.0, max_wtemp: 1100.0, mass: 500000.0, tract_range: 1.0, tract_str: 3000.0,
+    },
+    ShipStats {
+        name: "Dyson sphere hatch", abbr: "DY", max_speed: 0, max_shield: 600.0, max_damage: 1200.0,
+        max_fuel: 1_000_000.0, max_armies: 0, torp_damage: 0.0, torp_speed: 10.0, torp_fuse: 40,
+        torp_cost: 0.0, phaser_damage: 0.0, phaser_cost: 0.0,
+        plasma_damage: 0.0, plasma_speed: 0.0, plasma_fuse: 0, plasma_cost: 0.0,
+        recharge: 50.0, repair: 150.0, warp_cost: 0.0, cloak_cost: 0.0, shield_cost: 0.0,
+        turns: 100000.0, acc: 150, dec: 250, wpn_cool: 2.5, egn_cool: 7.0,
+        max_etemp: 100_000.0, max_wtemp: 100_000.0, mass: 500000.0, tract_range: 3.0, tract_str: 1.0,
     },
 ];
 

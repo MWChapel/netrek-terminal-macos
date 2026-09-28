@@ -367,6 +367,12 @@ pub enum ZoneKind {
     BeaconLit,
     /// The Caretaker's displacement wave, rippling out.
     Displacement,
+    /// The shell of a Dyson sphere.
+    DysonShell,
+    /// A Dyson sphere's hatch, shut...
+    DysonHatch,
+    /// ...and open.
+    DysonHatchOpen,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

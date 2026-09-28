@@ -527,6 +527,7 @@ const SLICK: Rgb = rgb(0x9a80b8);
 const ARENA: Rgb = rgb(0xf4f0ff);
 const BEACON: Rgb = rgb(0x9060ff);
 const DISPLACE: Rgb = rgb(0x80e0ff);
+const DYSON: Rgb = rgb(0xd0a860);
 
 /// The edge of Armus's slick: a wobbling blob, `n` points round.
 fn slick_edge(z: &ZoneInfo, tick: f32, n: usize) -> Vec<(f64, f64)> {
@@ -577,6 +578,28 @@ pub fn draw_zones_vec(px: &mut Canvas, f: &Frame, to: &dyn Fn(f64, f64) -> (f32,
                 px.ring(x, y, r, 3.0, DISPLACE, 0.6);
                 px.ring(x, y, r * 0.8, 1.5, DISPLACE, 0.4);
             }
+            ZoneKind::DysonShell => {
+                // A dark metal band with panel seams.
+                let band = (r * 0.06).max(2.0);
+                px.ring(x, y, r, band, scale(DYSON, 0.35), 0.9);
+                px.ring(x, y, r + band / 2.0, 1.2, DYSON, 0.9);
+                px.ring(x, y, r - band / 2.0, 1.0, DYSON, 0.6);
+                if detail {
+                    for k in 0..48 {
+                        let a = k as f32 / 48.0 * TAU;
+                        let (c, s) = (a.cos(), a.sin());
+                        px.line(x + c * (r - band / 2.0), y + s * (r - band / 2.0), x + c * (r + band / 2.0), y + s * (r + band / 2.0), 0.8, DYSON, 0.5, 0.0);
+                    }
+                }
+            }
+            ZoneKind::DysonHatch => {
+                px.ring(x, y, (r * 0.4).max(2.0), 1.5, DYSON, 0.9);
+            }
+            ZoneKind::DysonHatchOpen => {
+                let pulse = 0.6 + 0.4 * (tick * 0.3).sin();
+                px.glow(x, y, r * 0.9, rgb(0xfff0c0), 0.4 * pulse);
+                px.ring_dashed(x, y, r * 0.6, 1.5, rgb(0xfff0c0), 0.9, 4.0);
+            }
         }
     }
 }
@@ -604,6 +627,12 @@ pub fn draw_zones_braille(b: &mut Braille, f: &Frame, to_dot: &dyn Fn(f64, f64) 
                 b.disc(x, y, (r * 0.2).max(1.0), Color::White, 2);
             }
             ZoneKind::Displacement => b.arc(x, y, r, Color::Cyan, 1, 2),
+            ZoneKind::DysonShell => {
+                b.circle(x, y, r, Color::DarkYellow, 1);
+                b.arc(x, y, r + 1.0, Color::DarkYellow, 1, 3);
+            }
+            ZoneKind::DysonHatch => b.circle(x, y, (r * 0.4).max(1.0), Color::Yellow, 2),
+            ZoneKind::DysonHatchOpen => b.disc(x, y, (r * 0.4).max(1.0), Color::White, 2),
         }
     }
 }

@@ -62,6 +62,10 @@ struct Event {
     duel: Option<(u8, u8)>,
     /// Pakleds: what each clunker has taken.
     stolen: HashMap<u8, Stolen>,
+    /// Dyson sphere: the ships shut inside it.
+    inside: Vec<u8>,
+    /// Dyson sphere: when the tractor beam can grab another ship.
+    cooldown: u32,
 }
 
 /// Something climbing the Tempest's web.
@@ -120,7 +124,7 @@ fn duration(kind: Faction) -> u32 {
     let mins = match kind {
         Faction::Khan | Faction::Gorn | Faction::Mirror | Faction::Tholian => 6,
         Faction::Borg | Faction::Vger | Faction::Species8472 | Faction::Tribbles | Faction::Hirogen => 5,
-        Faction::TenC | Faction::SphereBuilders => 5,
+        Faction::TenC | Faction::SphereBuilders | Faction::Dyson => 5,
         _ => 4,
     };
     mins * 60 * UPS as u32
@@ -227,7 +231,11 @@ impl Director {
                 }
                 Faction::Metrons => end_duel(world, &mut e),
                 Faction::Pakleds => recover(world, &mut e),
-                Faction::SphereBuilders => world.terrain.retain(|t| t.owner.is_none()),
+                // Anomalies (and the Jenolan's wreck) go with whatever made them.
+                Faction::SphereBuilders | Faction::Dyson => {
+                    let players = &world.players;
+                    world.terrain.retain(|t| t.owner.map_or(true, |o| players[o as usize].alive()));
+                }
                 _ => {}
             }
         }
@@ -296,6 +304,7 @@ impl Director {
         let mut trial = None;
         let mut duel = None;
         let mut waypoint = (ax, ay);
+        let mut inside = Vec::new();
         let mut spawn = |world: &mut World, name: &str, ship: ShipType, (x, y): (f64, f64), bounty: f64| {
             if let Some(id) = world.spawn_alien(name, kind, ship, x, y, bounty) {
                 ships.push(id);
@@ -593,6 +602,35 @@ impl Director {
                 }
                 "The Sphere Builders have planted Delphic Expanse spheres across the galaxy! Each one warps the space around it into anomalies until it is destroyed.".to_string()
             }
+            Faction::Dyson => {
+                // A colony with space around it for the shell.
+                let lonely: Vec<usize> = (0..world.planets.len())
+                    .filter(|&k| {
+                        let pl = &world.planets[k];
+                        pl.flags & PL_HOME == 0
+                            && world.planets.iter().enumerate().all(|(m, o)| m == k || dist(pl.x, pl.y, o.x, o.y) > DYSON_R + 2500.0)
+                            && pl.x.min(pl.y).min(GWIDTH - pl.x).min(GWIDTH - pl.y) > DYSON_R + 2000.0
+                    })
+                    .collect();
+                let Some(&k) = lonely.choose(&mut rng) else { return };
+                let (cx, cy, name) = (world.planets[k].x, world.planets[k].y, world.planets[k].name);
+                let a = rng.gen_range(0.0..TAU);
+                spawn(world, "Dyson sphere", ShipType::DysonHatch, (cx + a.cos() * DYSON_R, cy + a.sin() * DYSON_R), 40.0);
+                let Some(&h) = ships.first() else { return };
+                // The wreck of the Jenolan, crashed on the far side of the shell.
+                let wreck = (cx - a.cos() * (DYSON_R + 1500.0), cy - a.sin() * (DYSON_R + 1500.0));
+                world.terrain.push(Terrain::planted(TerrainKind::Derelict, "wreck of the USS Jenolan", wreck, super::terrain::SALVAGE_REACH, h));
+                // Anyone caught inside is shut in with the planet.
+                inside = (0..MAXPLAYER)
+                    .filter(|&j| world.players[j].alive() && world.players[j].faction.is_none() && dist(world.players[j].x, world.players[j].y, cx, cy) < DYSON_R)
+                    .map(|j| j as u8)
+                    .collect();
+                waypoint = (cx, cy);
+                format!(
+                    "A DYSON SPHERE has materialised around {}, sealing the whole world inside a shell! A tractor beam at its hatch drags passing ships in, and the hatch only opens to take one. A ship in the doorway holds it open. Destroy the hatch emitter to jam it open for good; legend says a ship blowing up in the doorway will do it. The wreck of the USS Jenolan lies on its surface.",
+                    name
+                )
+            }
         };
         if ships.is_empty() && !matches!(kind, Faction::Tribbles | Faction::Nanites) {
             return;
@@ -621,6 +659,8 @@ impl Director {
             next_at: world.tick + 3 * UPS as u32,
             duel,
             stolen: HashMap::new(),
+            inside,
+            cooldown: world.tick + 3 * UPS as u32,
         });
     }
 }
@@ -681,6 +721,7 @@ fn defeat_text(kind: Faction) -> String {
         Faction::Caretaker => "The Caretaker's array has been destroyed! Nobody else will be taken.".into(),
         Faction::Horta => "The Horta is no longer a threat to the colonies.".into(),
         Faction::SphereBuilders => "The last Delphic sphere is destroyed, and the anomalies around it fade.".into(),
+        Faction::Dyson => "The Dyson sphere's hatch emitter is destroyed! Its doors jam open and every ship inside flies free.".into(),
     }
 }
 
@@ -716,6 +757,7 @@ fn withdraw_text(kind: Faction) -> String {
         Faction::Caretaker => "The Caretaker's array fades away to search for another species.".into(),
         Faction::Horta => "The Horta burrows deep into the rock and falls silent.".into(),
         Faction::SphereBuilders => "The Sphere Builders withdraw their spheres, and the anomalies fade.".into(),
+        Faction::Dyson => "The Dyson sphere's automated systems go dormant. Its hatch swings open and the trapped ships fly free.".into(),
     }
 }
 
@@ -863,13 +905,14 @@ fn run_event(world: &mut World, e: &mut Event) {
             Faction::Caretaker => caretaker(world, e, i, tick),
             Faction::Horta => horta(world, e, i, tick),
             Faction::SphereBuilders => sphere(world, i, n, tick),
+            Faction::Dyson => dyson(world, e, i, tick),
         }
     }
     match e.kind {
         Faction::Nanites => nanites(world, e),
         Faction::Metrons => metrons(world, e, tick),
         Faction::Pakleds => recover(world, e),
-        Faction::SphereBuilders => {
+        Faction::SphereBuilders | Faction::Dyson => {
             // Anomalies go when the sphere that made them does.
             let spheres: Vec<u8> = e.ships.iter().copied().filter(|&s| world.players[s as usize].alive()).collect();
             world.terrain.retain(|t| t.owner.map_or(true, |o| spheres.contains(&o)));
@@ -2924,6 +2967,142 @@ fn sphere(world: &mut World, i: usize, n: usize, tick: u32) {
     }
 }
 
+/// Radius of a Dyson sphere's shell. (In "Relics" it enclosed a star; here
+/// it encloses a planet.)
+pub const DYSON_R: f64 = 4500.0;
+/// How close to the hatch counts as being in the doorway.
+pub const HATCH_REACH: f64 = 900.0;
+/// How far the tractor beam reaches from the hatch, and how hard it pulls.
+const DYSON_REACH: f64 = 15_000.0;
+const DYSON_PULL: f64 = 70.0;
+/// Damage to the emitter that breaks its hold on a ship.
+const DYSON_BREAK: f64 = 200.0;
+
+/// What the emitter can still take (shields plus hull).
+fn toughness(p: &super::world::Player) -> f64 {
+    p.shield + p.stats().max_damage - p.damage
+}
+
+/// A Dyson sphere (TNG "Relics"): its shell encloses a planet, and nothing
+/// crosses it except through the hatch. An automated tractor beam at the
+/// hatch drags ships inside; the hatch only opens to take one in, but a ship
+/// sitting in the doorway holds it open (as the Jenolan did). Destroying the
+/// hatch emitter jams the doors open for good.
+fn dyson(world: &mut World, e: &mut Event, i: usize, tick: u32) {
+    let (cx, cy) = e.waypoint;
+    let (hx, hy) = (world.players[i].x, world.players[i].y);
+    let empire = |w: &World, j: usize| w.players[j].alive() && w.players[j].faction.is_none();
+    e.inside.retain(|&s| empire(world, s as usize));
+    // A ship in the doorway holds the doors open.
+    let mut open = tick < e.next_at;
+    let in_door = (0..MAXPLAYER).any(|j| empire(world, j) && Some(j as u8) != e.prey && dist(world.players[j].x, world.players[j].y, hx, hy) < HATCH_REACH);
+    if open && in_door {
+        e.next_at = tick + 10;
+    }
+    open = open || (in_door && tick < e.next_at);
+    world.zones.push(ZoneInfo { kind: ZoneKind::DysonShell, x: cx as i32, y: cy as i32, r: DYSON_R as i32 });
+    let hatch = if open { ZoneKind::DysonHatchOpen } else { ZoneKind::DysonHatch };
+    world.zones.push(ZoneInfo { kind: hatch, x: hx as i32, y: hy as i32, r: HATCH_REACH as i32 });
+
+    // The shell: ships inside stay in, ships outside stay out.
+    for j in 0..MAXPLAYER {
+        if !empire(world, j) {
+            continue;
+        }
+        let sid = j as u8;
+        let p = &mut world.players[j];
+        if dist(p.x, p.y, cx, cy) < 1.0 {
+            p.x += 1.0;
+        }
+        let d = dist(p.x, p.y, cx, cy);
+        let doorway = open && dist(p.x, p.y, hx, hy) < HATCH_REACH;
+        let inside = e.inside.contains(&sid);
+        let wall = |p: &mut super::world::Player, r: f64| {
+            p.x = cx + (p.x - cx) / d * r;
+            p.y = cy + (p.y - cy) / d * r;
+        };
+        if inside {
+            if d > DYSON_R + 300.0 && doorway {
+                e.inside.retain(|&s| s != sid);
+                world.warn(sid, "You slip out of the Dyson sphere through the open hatch!");
+            } else if d > DYSON_R + 3000.0 {
+                // Carried off by something else (a transwarp jump, the Caretaker...).
+                e.inside.retain(|&s| s != sid);
+            } else if d > DYSON_R - 300.0 && !doorway {
+                wall(p, DYSON_R - 300.0);
+            }
+        } else if d < DYSON_R - 300.0 && doorway {
+            e.inside.push(sid);
+            world.warn(sid, "You fly in through the hatch of the Dyson sphere.");
+        } else if d < DYSON_R + 300.0 && !doorway && Some(sid) != e.prey {
+            wall(p, DYSON_R + 300.0);
+            p.leave_orbit_pub();
+        }
+    }
+    // Torpedoes can't get through the shell either, except by the open hatch.
+    let inside = e.inside.clone();
+    world.torps.retain(|t| {
+        let through = open && dist(t.x, t.y, hx, hy) < HATCH_REACH;
+        through || (dist(t.x, t.y, cx, cy) < DYSON_R) == inside.contains(&t.owner)
+    });
+
+    // The tractor beam.
+    if let Some(v) = e.prey {
+        let vi = v as usize;
+        let lost = !empire(world, vi) || e.inside.contains(&v);
+        let broken = !lost && toughness(&world.players[i]) < e.dwell as f64 - DYSON_BREAK;
+        if lost || broken {
+            e.prey = None;
+            world.players[i].tractor = None;
+            e.cooldown = tick + 10 * UPS as u32;
+            if broken {
+                let who = world.players[vi].label();
+                announce(world, format!("Fire on the hatch emitter breaks the Dyson sphere's hold on {}!", who));
+            }
+        } else {
+            let q = &mut world.players[vi];
+            q.leave_orbit_pub();
+            q.speed = q.speed.min(2);
+            let d = dist(q.x, q.y, hx, hy).max(1.0);
+            let step = DYSON_PULL.min(d);
+            q.x += (hx - q.x) / d * step;
+            q.y += (hy - q.y) / d * step;
+            if d < 700.0 {
+                // Swallowed: the hatch opens, takes it in, and shuts behind it.
+                let r = dist(hx, hy, cx, cy).max(1.0);
+                q.x = cx + (hx - cx) / r * (DYSON_R - 600.0);
+                q.y = cy + (hy - cy) / r * (DYSON_R - 600.0);
+                let who = q.label();
+                e.inside.push(v);
+                e.prey = None;
+                e.next_at = tick + 3 * UPS as u32;
+                e.cooldown = tick + 10 * UPS as u32;
+                world.players[i].tractor = None;
+                world.warn(v, "You're inside the Dyson sphere, and the hatch is closing! It only opens again to take another ship.");
+                announce(world, format!("{} is dragged into the Dyson sphere!", who));
+            }
+        }
+    } else if tick >= e.cooldown {
+        let victim = (0..MAXPLAYER)
+            .filter(|&j| {
+                let q = &world.players[j];
+                empire(world, j) && !e.inside.contains(&(j as u8)) && !q.trapped && q.only_hurt_by.is_none() && dist(q.x, q.y, hx, hy) < DYSON_REACH
+            })
+            .min_by(|&a, &b| {
+                let (pa, pb) = (&world.players[a], &world.players[b]);
+                dist(pa.x, pa.y, hx, hy).total_cmp(&dist(pb.x, pb.y, hx, hy))
+            });
+        if let Some(t) = victim {
+            e.prey = Some(t as u8);
+            e.dwell = toughness(&world.players[i]) as i32;
+            world.players[i].tractor = Some((t as u8, false));
+            let who = world.players[t].label();
+            world.warn(t as u8, "The Dyson sphere's tractor beam has you! Engines can't break it; heavy fire on the hatch emitter can.");
+            announce(world, format!("The Dyson sphere's tractor beam locks onto {}!", who));
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2964,7 +3143,7 @@ mod tests {
                     ["Khan", "Gorn", "Tholian", "Fesarius", "Balok", "Terran", "planet killer", "amoeba", "Borg", "V'Ger",
                         "Crystalline", "probe", "8472", "Jem'Hadar", "wormhole", "ribble", "Chang", "Hirogen", "Q", "Ferengi",
                         "warm", "TEMPEST", "Tempest", "NOMAD", "Nomad", "Armus", "anite", "hangeling", "Metron", "Pakled", "10-C",
-                        "Caretaker", "Horta", "Sphere"]
+                        "Caretaker", "Horta", "Sphere", "DYSON", "Dyson"]
                         .iter()
                         .any(|k| m.contains(k))
                 })
@@ -3502,6 +3681,52 @@ mod tests {
         assert!(w.terrain.is_empty(), "anomalies fade with the sphere");
     }
 
+    #[test]
+    fn dyson_sphere_swallows_ships_and_the_jenolan_gambit() {
+        let (mut w, kirk) = with_cruiser(0.0, 0.0);
+        let k = kirk as usize;
+        let mut d = Director::new(AlienConfig { kinds: vec![Faction::Dyson], interval: 9999 });
+        d.spawn_kind(&mut w, Faction::Dyson, None);
+        let (cx, cy) = d.events[0].waypoint;
+        let h = d.events[0].ships[0] as usize;
+        let (hx, hy) = (w.players[h].x, w.players[h].y);
+        assert!(w.terrain.iter().any(|t| t.name.contains("Jenolan")));
+        // Kirk flies past, outside the shell: the beam drags him in.
+        let r = dist(hx, hy, cx, cy);
+        (w.players[k].x, w.players[k].y) = (cx + (hx - cx) / r * (DYSON_R + 5000.0), cy + (hy - cy) / r * (DYSON_R + 5000.0));
+        for _ in 0..200 {
+            d.tick(&mut w);
+            w.tick();
+            if d.events[0].inside.contains(&kirk) {
+                break;
+            }
+        }
+        assert!(d.events[0].inside.contains(&kirk), "swallowed");
+        // Once the hatch shuts, he can't get out through the shell...
+        for _ in 0..40 {
+            d.tick(&mut w);
+            w.tick();
+        }
+        assert!(w.players[k].alive() && d.events[0].inside.contains(&kirk));
+        (w.players[k].x, w.players[k].y) = (cx - (hx - cx) / r * (DYSON_R + 1000.0), cy - (hy - cy) / r * (DYSON_R + 1000.0));
+        d.tick(&mut w);
+        assert!(dist(w.players[k].x, w.players[k].y, cx, cy) < DYSON_R, "held inside");
+        // ...and a ship outside can't get in.
+        let r2 = w.add_player("Tomalak", false).unwrap() as usize;
+        w.join(r2 as u8, Team::Rom, ShipType::Cruiser).unwrap();
+        (w.players[r2].x, w.players[r2].y) = (cx + 100.0, cy + 2000.0);
+        d.tick(&mut w);
+        assert!(dist(w.players[r2].x, w.players[r2].y, cx, cy) > DYSON_R);
+        // The Jenolan gambit: a ship blowing up in the doorway wrecks the hatch.
+        let before = toughness(&w.players[h]);
+        (w.players[r2].x, w.players[r2].y) = (hx + 100.0, hy);
+        w.kill(r2, None, "test".into());
+        for _ in 0..12 {
+            w.tick();
+        }
+        assert!(before - toughness(&w.players[h]) >= 500.0, "{} -> {}", before, toughness(&w.players[h]));
+    }
+
     fn test_event(kind: Faction) -> Event {
         Event {
             kind,
@@ -3526,6 +3751,8 @@ mod tests {
             next_at: 0,
             duel: None,
             stolen: HashMap::new(),
+            inside: Vec::new(),
+            cooldown: 0,
         }
     }
 

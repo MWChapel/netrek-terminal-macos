@@ -695,6 +695,14 @@ fn alien(f: Faction, ship: ShipType) -> Vec<Part> {
             }
             v.push(Circle { c: (0.0, 0.0), r: 0.25, fill: false });
         }
+        Faction::Dyson => {
+            // The hatch: a pair of great doors in a frame, with the tractor emitter above.
+            v.push(Poly { pts: vec![(-0.95, -0.45), (0.95, -0.45), (0.95, 0.55), (-0.95, 0.55)], fill: true });
+            v.push(line((0.0, -0.45), (0.0, 0.55)));
+            v.extend(pair(|s| Poly { pts: vec![(s * 0.12, -0.3), (s * 0.8, -0.3), (s * 0.8, 0.4), (s * 0.12, 0.4)], fill: false }));
+            v.push(capsule((0.0, -0.45), (0.0, -0.75), 0.18));
+            v.push(Circle { c: (0.0, -0.85), r: 0.15, fill: true });
+        }
         // Nanites never fly a ship of their own.
         Faction::Nanites => {
             v.push(Circle { c: (0.0, 0.0), r: 0.3, fill: true });
@@ -825,6 +833,7 @@ mod tests {
             (Team::Ind, ShipType::CaretakerArray, Some(Faction::Caretaker)),
             (Team::Ind, ShipType::Horta, Some(Faction::Horta)),
             (Team::Ind, ShipType::DelphicSphere, Some(Faction::SphereBuilders)),
+            (Team::Ind, ShipType::DysonHatch, Some(Faction::Dyson)),
         ]);
         for (row, ships) in rows.iter().enumerate() {
             for (col, &(team, ship, faction)) in ships.iter().enumerate() {

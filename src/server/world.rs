@@ -2231,6 +2231,11 @@ impl World {
             if self.players[j].ship == ShipType::PlanetKiller {
                 dmg *= 8.0;
             }
+            // Scotty's gambit with the Jenolan: a ship blowing up in a Dyson
+            // sphere's doorway wrecks the hatch.
+            if self.players[j].ship == ShipType::DysonHatch {
+                dmg *= 6.0;
+            }
             self.inflict(j, dmg, Some(i as u8), format!("caught in the explosion of {}", tag));
         }
     }

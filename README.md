@@ -17,9 +17,9 @@ that runs entirely inside a terminal window on macOS.
 - **Trek-style ships:** each empire has its own ship designs (Federation saucers and
   nacelles, Klingon D7s and Birds-of-Prey, Romulan warbirds, Orion raiders).
 - **Robots:** AI pilots fight, bomb, carry armies and capture planets, so you can play solo.
-- **Alien incursions** (optional): thirty threats, from Khan, the Borg and the
+- **Alien incursions** (optional): thirty-one threats, from Khan, the Borg and the
   planet killer to V'Ger, Species 8472, the Jem'Hadar, General Chang, Q, Nomad, the
-  Metrons' arena and a plague of tribbles, drop into the game.
+  Metrons' arena, a Dyson sphere and a plague of tribbles, drop into the game.
 - **Extras** (optional, each its own server option): career ranks and service records,
   personal orders from command, treaties between empires, 21 kinds of space terrain (10
   in any one galaxy),
@@ -138,7 +138,7 @@ netrek <COMMAND>
 | `-b, --bind <ADDR>` | `0.0.0.0` | Address to bind; use `127.0.0.1` for local-only |
 | `--bots <N>` | `6` | Robot players kept in the game |
 | `-e, --empires <LIST>` | `fed,rom` | Empires the robots play for: `all`, or a comma list such as `fed,rom,kli` |
-| `--aliens [LIST]` | off | Alien incursions: bare `--aliens` for all thirty, or a list such as `khan,borg,vger`. See [Alien incursions](#alien-incursions) |
+| `--aliens [LIST]` | off | Alien incursions: bare `--aliens` for all thirty-one, or a list such as `khan,borg,vger`. See [Alien incursions](#alien-incursions) |
 | `--alien-interval <SECS>` | `150` | Average seconds between incursions |
 | `--ranks [FILE]` | off | Career ranks, service records and a leaderboard, saved to `FILE` (default `~/.netrek/service-records.tsv`). See [Extras](#extras) |
 | `--orders` | off | Personal orders from command, with rewards |
@@ -547,7 +547,7 @@ with aliens on the server keeps 8 of them free for incursions, running fewer rob
 is announced to everyone as a magenta **ALERT** message with a klaxon.
 
 ```sh
-netrek server --empires all --bots 12 --aliens            # all thirty
+netrek server --empires all --bots 12 --aliens            # all thirty-one
 netrek solo --aliens khan,borg,doomsday --alien-interval 90
 ```
 
@@ -583,6 +583,7 @@ netrek solo --aliens khan,borg,doomsday --alien-interval 90
 | `caretaker` | **The Caretaker** (Voyager): a vast array appears in open space. Every 20 seconds its **displacement wave** pulls two ships from anywhere in the galaxy to it, and its beam burns anything that comes close. It's **heavily shielded**: at first it takes only 15% of the damage done to it, but every wave it sends out weakens it by another 15%, so it gets easier to kill the longer it stays. Worth 4 kills. |
 | `horta` | **The Horta** (*The Devil in the Dark*, TOS): something tunnels through the rock of a colony and kills an army every 2.5 seconds, then moves on to the next when it's empty. Destroy it (it's a slow, unshielded rock creature, 150 hull, 2 kills), or **make peace**: orbit its planet for **10 seconds without firing**. "NO KILL I." The colony gains 10 armies and becomes a **repair world**, and the peacemaker earns 2 kills. |
 | `spheres` | **The Sphere Builders** (Enterprise): four **Delphic Expanse spheres** appear in open space. Each one scorches ships within 3,500 units every 5 seconds and **warps the space around it into anomalies** (a spatial eddy, a chroniton field, a tetryon field or a spatial rift; see [Space terrain](#space-terrain)), up to three each, even when `--terrain` is off. The anomalies vanish when their sphere is destroyed. |
+| `dyson` | **A Dyson sphere** (*Relics*, TNG): a shell 9,000 across materialises around an out-of-the-way colony (in the episode it encloses a star). Nothing gets through the shell, ships or torpedoes, except by its **hatch**. The planet keeps its owner, but only ships inside can reach it (and repair, refuel or fight over it there). An automated **tractor beam** at the hatch locks onto the nearest ship within 15,000 units every 10 seconds and drags it in, whatever its engines do; the hatch opens to take it and shuts behind it. Heavy fire on the **hatch emitter** (200 damage while it holds you) breaks the beam. The hatch only opens to take a ship, but **a ship in the doorway holds it open**, as the Jenolan did, letting everyone in or out. **Destroy the hatch emitter** (600 shields, 1,200 hull, fast repairs, 5 kills) to jam the doors open for good. It's very tough, so bring friends: **a ship blowing up in the doorway does 6× damage** (Scotty's gambit), about a third of its strength for a cruiser. The **wreck of the USS Jenolan** lies on the shell and can be salvaged. |
 
 **How aliens behave:**
 
@@ -604,7 +605,7 @@ netrek solo --aliens khan,borg,doomsday --alien-interval 90
 - **Ending:** an incursion ends when all its ships are destroyed (or V'Ger is joined, the
   probe answered, Q's trial judged, Nomad talked into destroying itself, Armus starved,
   the Metrons' duel decided, first contact made with Species 10-C, peace made with the
-  Horta, or the last tribble or nanite cleared), or it withdraws after 4–6 minutes. If an empire loses its last planet to aliens, it has been wiped out by
+  Horta, the Dyson sphere's hatch destroyed, or the last tribble or nanite cleared), or it withdraws after 4–6 minutes. If an empire loses its last planet to aliens, it has been wiped out by
   alien invaders.
 
 **Who's who on screen:**
@@ -640,6 +641,7 @@ netrek solo --aliens khan,borg,doomsday --alien-interval 90
 | Caretaker | light blue | `CT` | A vast flat panel array around a central emitter; its waves ripple out in rings |
 | Horta | rust | `HO` | A lumpy, speckled rock creature, sitting inside its planet |
 | Sphere Builders | teal | `SB` | A great banded sphere |
+| Dyson sphere | bronze | `DY` | A vast dark metal ring around a planet, with a hatch (two great doors under an emitter) that glows when open |
 
 The status line shows **HUNTED** (vector mode: **PREY**) when the Hirogen are after you,
 **TRIBBLES** (**TRIB**) when you're carrying them, and **NANITES** (**NANO**) when you're
@@ -679,6 +681,7 @@ infected.
 | Caretaker's array | – | 300 | 600 | beam 30, displacement waves; takes 15% damage, +15% per wave | 4 |
 | Horta | 3 | – | 150 | kills armies from inside a planet | 2 (or 2 for making peace) |
 | Delphic sphere | – | – | 350 | pulse 15, plants anomalies | 1.8 |
+| Dyson sphere hatch | – | 600 | 1,200 | tractor beam 15,000 (no weapons); 6× damage from explosions in the doorway | 5 |
 
 The monsters regenerate quickly. The planet killer only takes 40% of normal weapon
 damage, and a Borg cube's resistance builds as it's hit.
@@ -776,6 +779,12 @@ damage, and a Borg cube's resistance builds as it's hit.
   colony gains 10 armies and repair yards for good.
 - **Sphere Builders:** fly around the anomalies they make, not through them, and knock
   the spheres out one at a time: each one you destroy takes its anomalies with it.
+- **Dyson sphere:** give it a wide berth (15,000 units from the hatch). If the beam
+  grabs a teammate, it takes several ships pouring fire into the hatch emitter to break it. If you're shut inside,
+  the planet can repair and refuel you; wait by the hatch, and when it opens to take the
+  next ship, hold the doorway so everyone can get out. Killing the emitter takes a
+  coordinated attack: ships that are going down anyway can blow themselves up (`Q`) in the
+  doorway, and two or three of those will finish it.
 - **Borg:** a cube assimilates a ship it holds in its tractor beam within about 2,600
   units for four seconds. Its tractor is far stronger than any pressor, so don't try to
   push free. Instead stay out of range, and if you're caught, run at full speed: cubes
@@ -1172,7 +1181,7 @@ The tests include:
 
 - **`four_empire_game`:** 16 robots across all four empires. Checks every empire gets
   its share of ships and that the fighting spreads across the galaxy.
-- **`every_incursion_plays_out`:** runs each of the thirty alien incursions against a
+- **`every_incursion_plays_out`:** runs each of the thirty-one alien incursions against a
   four-empire robot war and checks it arrives, acts and ends cleanly.
 - **Alien mechanics:** `vger_merge_ends_the_threat`, `crystal_shatters_on_resonance`,
   `whale_probe_drains_and_is_answered`, `bioships_only_fear_plasma`,
@@ -1187,7 +1196,8 @@ The tests include:
   `changelings_look_like_your_own_until_hit`, `metrons_arena_duel`,
   `pakleds_steal_tech_and_give_it_back_when_destroyed`, `ten_c_first_contact`,
   `caretaker_pulls_ships_in_and_weakens`, `horta_peace` and
-  `spheres_plant_anomalies_that_vanish_with_them`.
+  `spheres_plant_anomalies_that_vanish_with_them` and
+  `dyson_sphere_swallows_ships_and_the_jenolan_gambit`.
 - **`retaking_alien_planets`:** liberated and resettled planets lose their alien mark.
 - **Extras:** `galaxy_has_ten_kinds_of_terrain_clear_of_planets` (ten of the 21 kinds in
   every galaxy, all of them turning up over many) and a test for each terrain effect; `treaties_between_players`, `one_ally_at_a_time_and_robots_decide`,

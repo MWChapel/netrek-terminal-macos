@@ -95,6 +95,7 @@ pub fn faction_rgb(f: Faction) -> Rgb {
         Faction::Caretaker => rgb(0x80e0ff),
         Faction::Horta => rgb(0xd86a30),
         Faction::SphereBuilders => rgb(0x5ad8c0),
+        Faction::Dyson => rgb(0xd0a860),
     }
 }
 
