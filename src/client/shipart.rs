@@ -695,6 +695,26 @@ fn alien(f: Faction, ship: ShipType) -> Vec<Part> {
             }
             v.push(Circle { c: (0.0, 0.0), r: 0.25, fill: false });
         }
+        // Kzinti warships: feline and aggressive, with forward claws and tiger stripes.
+        Faction::Kzinti => match ship {
+            ShipType::KzintiDreadnought => {
+                v.push(sym(&[(0.0, -0.8), (0.25, -0.95), (0.45, -0.55), (0.9, -0.2), (0.85, 0.6), (0.4, 0.95), (0.0, 0.7)]));
+                v.extend(pair(|s| line((s * 0.45, -0.55), (s * 0.62, -1.0))));
+                v.extend(pair(|s| line((s * 0.3, -0.1), (s * 0.65, 0.05))));
+                v.extend(pair(|s| line((s * 0.3, 0.25), (s * 0.7, 0.4))));
+                v.push(Circle { c: (0.0, -0.35), r: 0.14, fill: false });
+            }
+            ShipType::KzintiCruiser => {
+                v.push(sym(&[(0.0, -1.0), (0.3, -0.5), (0.75, 0.0), (0.95, 0.7), (0.35, 0.5), (0.2, 0.95), (0.0, 0.75)]));
+                v.extend(pair(|s| line((s * 0.3, -0.5), (s * 0.45, -0.85))));
+                v.extend(pair(|s| line((s * 0.2, 0.0), (s * 0.5, 0.15))));
+                v.extend(pair(|s| line((s * 0.25, 0.3), (s * 0.6, 0.45))));
+            }
+            _ => {
+                v.push(sym(&[(0.0, -1.0), (0.25, -0.2), (0.85, 0.55), (0.3, 0.4), (0.15, 0.9), (0.0, 0.7)]));
+                v.extend(pair(|s| line((s * 0.15, 0.05), (s * 0.4, 0.25))));
+            }
+        },
         Faction::Dyson => {
             // The hatch: a pair of great doors in a frame, with the tractor emitter above.
             v.push(Poly { pts: vec![(-0.95, -0.45), (0.95, -0.45), (0.95, 0.55), (-0.95, 0.55)], fill: true });
@@ -722,6 +742,7 @@ pub fn engine_points(team: Team, ship: ShipType, faction: Option<Faction>) -> Ve
         Some(Faction::Chang) => return vec![(0.0, 0.75)],
         Some(Faction::Hirogen) => return vec![(0.3, 0.95), (-0.3, 0.95)],
         Some(Faction::Ferengi) => return vec![(0.0, 0.3)],
+        Some(Faction::Kzinti) => return vec![(0.35, 0.9), (-0.35, 0.9)],
         Some(_) => return vec![],
         None => {}
     }
@@ -834,6 +855,9 @@ mod tests {
             (Team::Ind, ShipType::Horta, Some(Faction::Horta)),
             (Team::Ind, ShipType::DelphicSphere, Some(Faction::SphereBuilders)),
             (Team::Ind, ShipType::DysonHatch, Some(Faction::Dyson)),
+            (Team::Ind, ShipType::KzintiDreadnought, Some(Faction::Kzinti)),
+            (Team::Ind, ShipType::KzintiCruiser, Some(Faction::Kzinti)),
+            (Team::Ind, ShipType::KzintiStriker, Some(Faction::Kzinti)),
         ]);
         for (row, ships) in rows.iter().enumerate() {
             for (col, &(team, ship, faction)) in ships.iter().enumerate() {

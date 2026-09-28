@@ -604,6 +604,50 @@ pub fn draw_zones_vec(px: &mut Canvas, f: &Frame, to: &dyn Fn(f64, f64) -> (f32,
     }
 }
 
+const RING_LIT: Rgb = rgb(0x8fd0ff);
+const RING_DARK: Rgb = rgb(0x26405c);
+
+/// The Ringworld: a band around its planet, lit blue on its inner face, with
+/// seams between its ten sections and the shadow squares circling inside.
+pub fn draw_ring_vec(px: &mut Canvas, f: &Frame, to: &dyn Fn(f64, f64) -> (f32, f32), u: &dyn Fn(f64) -> f32, detail: bool) {
+    let Some(r) = &f.ring else { return };
+    let (x, y) = to(r.x as f64, r.y as f64);
+    let rr = u(r.r as f64);
+    let band = u(1400.0).max(2.0);
+    px.ring(x, y, rr, band, RING_DARK, 0.85);
+    px.ring(x, y, rr - band / 2.0, 1.4, RING_LIT, 0.9);
+    px.ring(x, y, rr + band / 2.0, 1.0, scale(RING_LIT, 0.55), 0.8);
+    if !detail {
+        return;
+    }
+    px.glow(x, y, rr - band, RING_LIT, 0.06);
+    let n = r.sections.len().max(1);
+    for s in &r.sections {
+        // A seam halfway to the next section.
+        let a = ((s.y - r.y) as f32).atan2((s.x - r.x) as f32) + TAU / (2.0 * n as f32);
+        let (c, sn) = (a.cos(), a.sin());
+        px.line(x + c * (rr - band / 2.0), y + sn * (rr - band / 2.0), x + c * (rr + band / 2.0), y + sn * (rr + band / 2.0), 1.0, RING_LIT, 0.6, 0.0);
+    }
+    // The shadow squares, turning slowly inside the ring.
+    for k in 0..5 {
+        let a = f.tick as f32 * 0.002 + k as f32 * TAU / 5.0;
+        let (c, sn) = (a.cos(), a.sin());
+        let (sx, sy) = (x + c * rr * 0.45, y + sn * rr * 0.45);
+        let half = rr * 0.12;
+        px.line(sx - sn * half, sy + c * half, sx + sn * half, sy - c * half, (band * 0.6).max(2.0), RING_DARK, 0.9, 0.0);
+        px.line(sx - sn * half, sy + c * half, sx + sn * half, sy - c * half, 0.8, scale(RING_LIT, 0.5), 0.6, 0.0);
+    }
+}
+
+/// The Ringworld in braille.
+pub fn draw_ring_braille(b: &mut Braille, f: &Frame, to_dot: &dyn Fn(f64, f64) -> (f64, f64), per_dot: f64) {
+    let Some(r) = &f.ring else { return };
+    let (x, y) = to_dot(r.x as f64, r.y as f64);
+    let rr = r.r as f64 / per_dot;
+    b.circle(x, y, rr, Color::Blue, 1);
+    b.arc(x, y, rr - (700.0 / per_dot).max(1.0), Color::DarkBlue, 1, 2);
+}
+
 /// The alien zones in braille.
 pub fn draw_zones_braille(b: &mut Braille, f: &Frame, to_dot: &dyn Fn(f64, f64) -> (f64, f64), per_dot: f64) {
     for z in &f.zones {
@@ -885,6 +929,7 @@ mod tests {
             leaders: vec![],
             tempest: None,
             zones: Vec::new(),
+            ring: None,
             open_teams: vec![],
             team_planets: [0; 4],
             starbase_teams: vec![],
@@ -904,5 +949,52 @@ mod tests {
             }
         }
         std::fs::write(std::env::temp_dir().join("netrek-terrain.ppm"), out).unwrap();
+    }
+
+    /// Renders the Ringworld to $TMPDIR/netrek-ring.ppm, for eyeballing.
+    #[test]
+    fn ringworld_gallery() {
+        use crate::proto::{RingInfo, RingSectionInfo};
+        let (cx, cy, r) = (15_000.0f64, 15_000.0f64, 8500.0f64);
+        let sections = (0..10)
+            .map(|k| {
+                let a = 0.3 + k as f64 * std::f64::consts::TAU / 10.0;
+                RingSectionInfo { name: format!("S{}", k), x: (cx + a.cos() * r) as i32, y: (cy + a.sin() * r) as i32 }
+            })
+            .collect();
+        let f = Frame {
+            tick: 500,
+            me: 0,
+            me_info: SelfInfo::default(),
+            players: vec![],
+            torps: vec![],
+            phasers: vec![],
+            planets: vec![],
+            webs: vec![],
+            loot: vec![],
+            terrain: vec![],
+            treaties: vec![],
+            leaders: vec![],
+            tempest: None,
+            zones: Vec::new(),
+            ring: Some(RingInfo { x: cx as i32, y: cy as i32, r: r as i32, sections, kzin: 3 }),
+            open_teams: vec![],
+            team_planets: [0; 4],
+            starbase_teams: vec![],
+            banner: None,
+        };
+        let upd = 40.0;
+        let mut c = Canvas::new((30_000.0 / upd) as i32, (30_000.0 / upd) as i32, [0.0, 0.0, 0.0]);
+        let to = |x: f64, y: f64| ((x / upd) as f32, (y / upd) as f32);
+        let u = |d: f64| (d / upd) as f32;
+        draw_ring_vec(&mut c, &f, &to, &u, true);
+        let mut out = format!("P6 {} {} 255\n", c.w, c.h).into_bytes();
+        for y in 0..c.h {
+            for x in 0..c.w {
+                let p = c.get(x, y);
+                out.extend([p[0] as u8, p[1] as u8, p[2] as u8]);
+            }
+        }
+        std::fs::write(std::env::temp_dir().join("netrek-ring.ppm"), out).unwrap();
     }
 }

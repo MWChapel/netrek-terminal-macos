@@ -231,6 +231,7 @@ impl App {
         super::render_terrain::draw_vec(&mut px, f, &to, &u, true, tr, fs);
         super::render_terrain::draw_tempest_vec(&mut px, f, &to, &u, true);
         super::render_terrain::draw_zones_vec(&mut px, f, &to, &u, true);
+        super::render_terrain::draw_ring_vec(&mut px, f, &to, &u, true);
 
         // Edge of the galaxy.
         let corners = [(0.0, 0.0), (GWIDTH, 0.0), (GWIDTH, GWIDTH), (0.0, GWIDTH)];
@@ -243,7 +244,7 @@ impl App {
         // Planets: outlined circles with names underneath.
         // Just inside the orbit, so orbiting ships circle the edge.
         let pr = u(ORBDIST * 0.9).clamp(5.0, 60.0);
-        for (k, def) in PLANETS.iter().enumerate() {
+        for (k, def) in super::planet_defs(f).iter().enumerate() {
             if !visible(def.x, def.y, 4000.0) {
                 continue;
             }
@@ -540,6 +541,7 @@ impl App {
         super::render_terrain::draw_vec(&mut px, f, &to, &ug, false, tr, fs);
         super::render_terrain::draw_tempest_vec(&mut px, f, &to, &ug, false);
         super::render_terrain::draw_zones_vec(&mut px, f, &to, &ug, false);
+        super::render_terrain::draw_ring_vec(&mut px, f, &to, &ug, false);
 
         for w in &f.webs {
             let (a, b) = (to(w.x1 as f64, w.y1 as f64), to(w.x2 as f64, w.y2 as f64));
@@ -547,7 +549,7 @@ impl App {
         }
 
         let gr = (pw as f32 / 70.0).clamp(3.0, 9.0);
-        for (k, def) in PLANETS.iter().enumerate() {
+        for (k, def) in super::planet_defs(f).iter().enumerate() {
             let info = &f.planets[k];
             let col = if info.known { planet_rgb(info) } else { GREY };
             let (x, y) = to(def.x, def.y);
@@ -726,7 +728,7 @@ impl App {
                 me.ship.max_torps()
             );
             if let Some(k) = mi.orbiting {
-                status += &format!("  orbiting {}", PLANETS[k as usize].name);
+                status += &format!("  orbiting {}", super::planet_name(f, k as usize));
             }
             if let Some(l) = &mi.lock {
                 status += &format!("  lock {}", l);
@@ -913,8 +915,9 @@ impl App {
                 let f = self.frame.as_ref().unwrap();
                 let cw = tr.width("M", fs);
                 let col_w = (w - 2.0 * pad) / 2.0;
-                for (k, def) in PLANETS.iter().enumerate() {
-                    let (col, row) = (k / 20, k % 20);
+                for (k, def) in super::planet_defs(f).iter().enumerate() {
+                    let rows = (f.planets.len() + 1) / 2;
+                    let (col, row) = (k / rows, k % rows);
                     let x = pad + col as f32 * col_w;
                     let y = top + 4.0 + (row as f32 + 0.75) * lh;
                     if y > h - 4.0 {

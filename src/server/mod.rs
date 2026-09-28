@@ -85,7 +85,7 @@ fn serve(listener: TcpListener, cfg: ServerConfig) -> io::Result<()> {
         if !on.is_empty() {
             println!("extras: {}", on.join(", "));
         }
-        let room = MAXPLAYER - 1 - if cfg.aliens.is_empty() { 0 } else { ALIEN_RESERVE } - if f.supply { 4 } else { 0 };
+        let room = MAXPLAYER - 1 - alien_reserve(&cfg.aliens) - if f.supply { 4 } else { 0 };
         if cfg.bots > room {
             println!(
                 "note: {} robots won't all fit; running up to {} to leave room for players{}",
@@ -230,7 +230,7 @@ fn game_loop(rx: Receiver<Event>, cfg: ServerConfig) {
         }
 
         if world.tick % UPS as u32 == 0 {
-            let want = robots_that_fit(&world, &bots, cfg.bots, !cfg.aliens.is_empty());
+            let want = robots_that_fit(&world, &bots, cfg.bots, alien_reserve(&cfg.aliens));
             balance_bots(&mut world, &mut bots, want, &cfg.empires);
         }
         director.tick(&mut world);
@@ -284,16 +284,25 @@ fn game_loop(rx: Receiver<Event>, cfg: ServerConfig) {
 /// Player slots kept free for alien incursions (when they're on).
 pub const ALIEN_RESERVE: usize = 8;
 
+/// Slots to keep free for these aliens: the incursions' share, plus the
+/// Kzinti's three warships (they stay for good once they've come).
+fn alien_reserve(kinds: &[Faction]) -> usize {
+    match (kinds.is_empty(), kinds.contains(&Faction::Kzinti)) {
+        (true, _) => 0,
+        (false, true) => ALIEN_RESERVE + aliens::KZINTI_FLEET.len(),
+        (false, false) => ALIEN_RESERVE,
+    }
+}
+
 /// How many robots fit: the configured number, less whatever it takes to
 /// leave room for humans, the server's own ships (freighters, fighters,
 /// decoys) and, with aliens on, the slots incursions need.
-fn robots_that_fit(world: &World, bots: &[bot::Bot], wanted: usize, aliens: bool) -> usize {
+fn robots_that_fit(world: &World, bots: &[bot::Bot], wanted: usize, reserve: usize) -> usize {
     let others = world
         .players
         .iter()
         .filter(|p| p.in_use && p.faction.is_none() && !bots.iter().any(|b| b.id == p.id))
         .count();
-    let reserve = if aliens { ALIEN_RESERVE } else { 0 };
     wanted.min(MAXPLAYER.saturating_sub(others + reserve))
 }
 
@@ -572,7 +581,7 @@ mod tests {
         let mut seen = false;
         for _ in 0..(UPS as u32 * 60 * 3) {
             if world.tick % UPS as u32 == 0 {
-                let want = robots_that_fit(&world, &bots, 25, true);
+                let want = robots_that_fit(&world, &bots, 25, ALIEN_RESERVE);
                 balance_bots(&mut world, &mut bots, want, &all);
             }
             director.tick(&mut world);

@@ -780,7 +780,7 @@ impl App {
 
     fn nearest_planet_to_pointer(&self) -> Option<(usize, f64)> {
         let (x, y) = self.pointer_world()?;
-        PLANETS
+        planet_defs(self.frame.as_ref()?)
             .iter()
             .enumerate()
             .map(|(k, p)| (k, ((p.x - x).powi(2) + (p.y - y).powi(2)).sqrt()))
@@ -1015,7 +1015,8 @@ impl App {
             }
             (_, Some((k, _))) => {
                 let pl = &f.planets[k];
-                let def = &PLANETS[k];
+                let defs = planet_defs(f);
+                let def = &defs[k];
                 if pl.known {
                     format!(
                         "{} — {} • {} armies{}{}{}{}",
@@ -1024,6 +1025,7 @@ impl App {
                             Some(Faction::Doomsday) => "devoured by the planet killer",
                             Some(Faction::Species8472) => "destroyed by Species 8472",
                             Some(Faction::Khan) => "Khan's stronghold",
+                            Some(Faction::Kzinti) if k == PLANETS.len() + f.ring.as_ref().map_or(0, |r| r.kzin as usize) => "Kzin, the Kzinti homeworld",
                             Some(fac) => fac.name(),
                             None => pl.owner.name(),
                         },
@@ -1146,6 +1148,31 @@ impl App {
             }
             _ => {}
         }
+    }
+}
+
+/// A planet's name and place.
+pub(super) struct PlanetDefRef<'a> {
+    pub name: &'a str,
+    pub x: f64,
+    pub y: f64,
+}
+
+/// Every planet in the frame: the fixed galaxy's 40, then the Ringworld's
+/// sections once the Kzinti have brought it (in the server's order).
+pub(super) fn planet_defs(f: &Frame) -> Vec<PlanetDefRef<'_>> {
+    let mut v: Vec<PlanetDefRef> = PLANETS.iter().map(|d| PlanetDefRef { name: d.name, x: d.x, y: d.y }).collect();
+    if let Some(r) = &f.ring {
+        v.extend(r.sections.iter().map(|s| PlanetDefRef { name: &s.name, x: s.x as f64, y: s.y as f64 }));
+    }
+    v.truncate(f.planets.len());
+    v
+}
+
+pub(super) fn planet_name(f: &Frame, k: usize) -> &str {
+    match k.checked_sub(PLANETS.len()) {
+        None => PLANETS.get(k).map_or("?", |d| d.name),
+        Some(s) => f.ring.as_ref().and_then(|r| r.sections.get(s)).map_or("?", |s| &s.name),
     }
 }
 

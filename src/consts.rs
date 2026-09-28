@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 pub const DEFAULT_PORT: u16 = 2592; // the traditional Netrek port
-pub const PROTOCOL_VERSION: u32 = 16;
+pub const PROTOCOL_VERSION: u32 = 17;
 
 pub const UPS: u64 = 10; // server updates per second, like the original
 pub const GWIDTH: f64 = 100_000.0;
@@ -147,10 +147,11 @@ pub enum Faction {
     Horta,
     SphereBuilders,
     Dyson,
+    Kzinti,
 }
 
 impl Faction {
-    pub const ALL: [Faction; 31] = [
+    pub const ALL: [Faction; 32] = [
         Faction::Khan,
         Faction::Gorn,
         Faction::Tholian,
@@ -182,6 +183,7 @@ impl Faction {
         Faction::Horta,
         Faction::SphereBuilders,
         Faction::Dyson,
+        Faction::Kzinti,
     ];
 
     /// Name used on the command line.
@@ -218,6 +220,7 @@ impl Faction {
             Faction::Horta => "horta",
             Faction::SphereBuilders => "spheres",
             Faction::Dyson => "dyson",
+            Faction::Kzinti => "kzinti",
         }
     }
 
@@ -254,6 +257,7 @@ impl Faction {
             Faction::Horta => "the Horta",
             Faction::SphereBuilders => "the Sphere Builders",
             Faction::Dyson => "the Dyson sphere",
+            Faction::Kzinti => "the Kzinti",
         }
     }
 
@@ -291,6 +295,7 @@ impl Faction {
             Faction::Horta => "Horta",
             Faction::SphereBuilders => "Sphere",
             Faction::Dyson => "Dyson",
+            Faction::Kzinti => "Kzinti",
         }
     }
 
@@ -328,6 +333,7 @@ impl Faction {
             Faction::Horta => "HO",
             Faction::SphereBuilders => "SB",
             Faction::Dyson => "DY",
+            Faction::Kzinti => "KZ",
         }
     }
 
@@ -408,6 +414,10 @@ pub enum ShipType {
     DelphicSphere,
     /// The hatch (and tractor emitter) of a Dyson sphere.
     DysonHatch,
+    // The Kzinti fleet (they come with the Ringworld and stay).
+    KzintiDreadnought,
+    KzintiCruiser,
+    KzintiStriker,
 }
 
 impl ShipType {
@@ -606,7 +616,7 @@ pub struct ShipStats {
     pub tract_str: f64,
 }
 
-pub static SHIPS: [ShipStats; 57] = [
+pub static SHIPS: [ShipStats; 60] = [
     ShipStats {
         name: "Scout", abbr: "SC", max_speed: 12, max_shield: 75.0, max_damage: 75.0,
         max_fuel: 5000.0, max_armies: 2, torp_damage: 25.0, torp_speed: 16.0, torp_fuse: 16,
@@ -1119,6 +1129,33 @@ pub static SHIPS: [ShipStats; 57] = [
         recharge: 50.0, repair: 150.0, warp_cost: 0.0, cloak_cost: 0.0, shield_cost: 0.0,
         turns: 100000.0, acc: 150, dec: 250, wpn_cool: 2.5, egn_cool: 7.0,
         max_etemp: 100_000.0, max_wtemp: 100_000.0, mass: 500000.0, tract_range: 3.0, tract_str: 1.0,
+    },
+    ShipStats {
+        name: "Kzinti dreadnought", abbr: "KD", max_speed: 8, max_shield: 170.0, max_damage: 210.0,
+        max_fuel: 14000.0, max_armies: 6, torp_damage: 50.0, torp_speed: 12.0, torp_fuse: 35,
+        torp_cost: 7.0 * 50.0, phaser_damage: 115.0, phaser_cost: 7.0 * 115.0,
+        plasma_damage: 0.0, plasma_speed: 0.0, plasma_fuse: 0, plasma_cost: 0.0,
+        recharge: 16.0, repair: 120.0, warp_cost: 3.0, cloak_cost: 24.0, shield_cost: 2.0,
+        turns: 160000.0, acc: 120, dec: 300, wpn_cool: 2.5, egn_cool: 7.0,
+        max_etemp: 1400.0, max_wtemp: 1200.0, mass: 2600.0, tract_range: 1.0, tract_str: 3000.0,
+    },
+    ShipStats {
+        name: "Kzinti cruiser", abbr: "KC", max_speed: 10, max_shield: 120.0, max_damage: 140.0,
+        max_fuel: 14000.0, max_armies: 4, torp_damage: 40.0, torp_speed: 13.0, torp_fuse: 35,
+        torp_cost: 7.0 * 40.0, phaser_damage: 95.0, phaser_cost: 7.0 * 95.0,
+        plasma_damage: 0.0, plasma_speed: 0.0, plasma_fuse: 0, plasma_cost: 0.0,
+        recharge: 16.0, repair: 120.0, warp_cost: 3.0, cloak_cost: 24.0, shield_cost: 2.0,
+        turns: 220000.0, acc: 170, dec: 300, wpn_cool: 2.5, egn_cool: 7.0,
+        max_etemp: 1400.0, max_wtemp: 1200.0, mass: 1900.0, tract_range: 1.0, tract_str: 3000.0,
+    },
+    ShipStats {
+        name: "Kzinti striker", abbr: "KS", max_speed: 12, max_shield: 80.0, max_damage: 95.0,
+        max_fuel: 14000.0, max_armies: 3, torp_damage: 30.0, torp_speed: 15.0, torp_fuse: 35,
+        torp_cost: 7.0 * 30.0, phaser_damage: 75.0, phaser_cost: 7.0 * 75.0,
+        plasma_damage: 0.0, plasma_speed: 0.0, plasma_fuse: 0, plasma_cost: 0.0,
+        recharge: 16.0, repair: 120.0, warp_cost: 3.0, cloak_cost: 24.0, shield_cost: 2.0,
+        turns: 380000.0, acc: 300, dec: 300, wpn_cool: 2.5, egn_cool: 7.0,
+        max_etemp: 1400.0, max_wtemp: 1200.0, mass: 1200.0, tract_range: 1.0, tract_str: 3000.0,
     },
 ];
 

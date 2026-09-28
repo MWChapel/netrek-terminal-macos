@@ -7,7 +7,7 @@
 
 use super::bot::lead;
 use super::terrain::Terrain;
-use super::world::{is_tempest_minion, Dest, GameEvent, Lock, Loot, Outgoing, PhaserShot, TempestWeb, Web, World};
+use super::world::{is_tempest_minion, Dest, GameEvent, Lock, Loot, Outgoing, PhaserShot, RingSection, Ringworld, TempestWeb, Web, World, KZIN_ARMIES};
 use crate::consts::*;
 use crate::proto::{ChatMsg, ClientMsg, MsgKind, PState, PhaserInfo, TempestShape, TerrainKind, ZoneInfo, ZoneKind};
 use rand::seq::SliceRandom;
@@ -107,6 +107,8 @@ pub struct Director {
     next_spawn: u32,
     /// Jem'Hadar: the wormhole opens (warning) a few seconds before they arrive.
     wormhole: Option<(u32, f64, f64)>,
+    /// The Kzinti, once they've arrived with their Ringworld (for good).
+    kzinti: Option<Kzinti>,
 }
 
 fn dist(ax: f64, ay: f64, bx: f64, by: f64) -> f64 {
@@ -133,7 +135,7 @@ fn duration(kind: Faction) -> u32 {
 impl Director {
     pub fn new(cfg: AlienConfig) -> Director {
         let first = cfg.interval.clamp(1, 120) / 2;
-        Director { cfg, events: Vec::new(), next_spawn: first as u32 * UPS as u32, wormhole: None }
+        Director { cfg, events: Vec::new(), next_spawn: first as u32 * UPS as u32, wormhole: None, kzinti: None }
     }
 
     pub fn tick(&mut self, world: &mut World) {
@@ -170,6 +172,7 @@ impl Director {
             run_event(world, e);
         }
         self.events = events;
+        self.run_kzinti(world);
     }
 
     /// Drop destroyed ships and finish incursions that are over.
@@ -247,6 +250,10 @@ impl Director {
         if self.wormhole.is_some() {
             active.push(Faction::JemHadar);
         }
+        // The Kzinti only ever come once: they're here for good.
+        if self.kzinti.is_some() {
+            active.push(Faction::Kzinti);
+        }
         let choices: Vec<Faction> = self.cfg.kinds.iter().copied().filter(|k| !active.contains(k)).collect();
         let Some(&kind) = choices.choose(&mut rng) else { return };
         if kind == Faction::JemHadar {
@@ -263,13 +270,17 @@ impl Director {
     }
 
     fn spawn_kind(&mut self, world: &mut World, kind: Faction, at: Option<(f64, f64)>) {
+        if kind == Faction::Kzinti {
+            return self.arrive_kzinti(world);
+        }
         let mut rng = rand::thread_rng();
         let free = world.players.iter().filter(|p| !p.in_use).count();
         let need = match kind {
             Faction::Khan | Faction::Tholian | Faction::Species8472 => 3,
             Faction::Gorn | Faction::Mirror => 4,
             Faction::JemHadar => 5,
-            Faction::Swarm => 8,
+            // As many as fit (up to eight).
+            Faction::Swarm => 4,
             Faction::Changeling | Faction::Pakleds => 3,
             Faction::SphereBuilders => 4,
             Faction::Nanites => 0,
@@ -614,6 +625,8 @@ impl Director {
                 }
                 "The Sphere Builders have planted Delphic Expanse spheres across the galaxy! Each one warps the space around it into anomalies until it is destroyed.".to_string()
             }
+            // Handled by `arrive_kzinti` (they're not an ordinary incursion).
+            Faction::Kzinti => return,
             Faction::Dyson => {
                 // A colony with space around it for the shell.
                 let lonely: Vec<usize> = (0..world.planets.len())
@@ -733,6 +746,7 @@ fn defeat_text(kind: Faction) -> String {
         Faction::Horta => "The Horta is no longer a threat to the colonies.".into(),
         Faction::SphereBuilders => "The last Delphic sphere is destroyed, and the anomalies around it fade.".into(),
         Faction::Dyson => "The Dyson sphere's hatch emitter is destroyed! Its doors jam open and every ship inside flies free.".into(),
+        Faction::Kzinti => "The Kzinti fleet is destroyed... for now.".into(),
     }
 }
 
@@ -769,6 +783,7 @@ fn withdraw_text(kind: Faction) -> String {
         Faction::Horta => "The Horta burrows deep into the rock and falls silent.".into(),
         Faction::SphereBuilders => "The Sphere Builders withdraw their spheres, and the anomalies fade.".into(),
         Faction::Dyson => "The Dyson sphere's automated systems go dormant. Its hatch swings open and the trapped ships fly free.".into(),
+        Faction::Kzinti => "The Kzinti never withdraw.".into(),
     }
 }
 
@@ -917,6 +932,7 @@ fn run_event(world: &mut World, e: &mut Event) {
             Faction::Horta => horta(world, e, i, tick),
             Faction::SphereBuilders => sphere(world, i, n, tick),
             Faction::Dyson => dyson(world, e, i, tick),
+            Faction::Kzinti => {}
         }
     }
     match e.kind {
@@ -3139,6 +3155,268 @@ fn dyson(world: &mut World, e: &mut Event, i: usize, tick: u32) {
     }
 }
 
+// ----------------------------------------------------------------------
+// The Kzinti and their Ringworld: they come once and stay for good.
+
+/// The three Kzinti ships (from "The Slaver Weapon"), and what they fly.
+pub const KZINTI_FLEET: [(&str, ShipType); 3] =
+    [("Chuft-Captain", ShipType::KzintiDreadnought), ("Telepath", ShipType::KzintiCruiser), ("Flyer", ShipType::KzintiStriker)];
+/// How long a destroyed Kzinti ship takes to come back.
+pub const KZINTI_RESPAWN: u32 = 30 * UPS as u32;
+/// The Ringworld's sections (other than Kzin), after Niven's Ringworld.
+const RING_SECTIONS: [&str; 9] =
+    ["Fist-of-God", "Great Ocean", "Map of Earth", "Spill Mtn", "Rim Wall", "Scrith Deck", "Heaven", "Shadow Sq", "Arch Point"];
+
+/// The Kzinti fleet: always three ships, relaunched from Kzin when lost.
+struct Kzinti {
+    ships: [Option<u8>; 3],
+    back_at: [u32; 3],
+    /// Each ship's current conquest.
+    goals: HashMap<u8, usize>,
+}
+
+fn kzinti_owns(world: &World, k: usize) -> bool {
+    world.planets[k].owner == Team::Ind && world.planets[k].alien == Some(Faction::Kzinti)
+}
+
+/// Somewhere to hang a ring of ten sections around a planet, clear of
+/// other planets, terrain and the edge of the galaxy.
+fn design_ring(world: &World) -> Option<Ringworld> {
+    let mut rng = rand::thread_rng();
+    let mut centres: Vec<usize> = (0..world.planets.len()).filter(|&k| world.planets[k].flags & PL_HOME == 0).collect();
+    centres.shuffle(&mut rng);
+    for &c in &centres {
+        let (cx, cy) = (world.planets[c].x, world.planets[c].y);
+        for r in [9000.0, 8500.0, 8000.0, 7500.0, 7000.0] {
+            for _ in 0..8 {
+                let off = rng.gen_range(0.0..TAU);
+                let pts: Vec<(f64, f64)> = (0..10).map(|k| {
+                    let a = off + k as f64 * TAU / 10.0;
+                    (cx + a.cos() * r, cy + a.sin() * r)
+                }).collect();
+                let clear = pts.iter().all(|&(x, y)| {
+                    x.min(y).min(GWIDTH - x).min(GWIDTH - y) > 4000.0
+                        && world.planets.iter().all(|pl| dist(x, y, pl.x, pl.y) > 3500.0)
+                        && world.terrain.iter().all(|t| dist(x, y, t.x, t.y) > t.r + 1500.0)
+                });
+                if !clear {
+                    continue;
+                }
+                let kzin = rng.gen_range(0..10);
+                let mut flags = vec![
+                    PL_REPAIR | PL_FUEL,
+                    PL_REPAIR,
+                    PL_FUEL,
+                    PL_FUEL,
+                    PL_AGRI,
+                    PL_AGRI | PL_FUEL,
+                    PL_AGRI,
+                    PL_REPAIR | PL_AGRI,
+                    0,
+                ];
+                flags.shuffle(&mut rng);
+                let mut names = RING_SECTIONS.iter();
+                let sections = pts
+                    .iter()
+                    .enumerate()
+                    .map(|(k, &(x, y))| {
+                        if k == kzin {
+                            RingSection { name: "Kzin", x, y, flags: PL_REPAIR | PL_FUEL | PL_AGRI, armies: KZIN_ARMIES }
+                        } else {
+                            RingSection { name: names.next().unwrap(), x, y, flags: flags.pop().unwrap_or(0), armies: rng.gen_range(4..=10) }
+                        }
+                    })
+                    .collect();
+                return Some(Ringworld { x: cx, y: cy, r, sections, kzin });
+            }
+        }
+    }
+    None
+}
+
+impl Director {
+    /// The Kzinti arrive with their Ringworld. There's only ever one, and it
+    /// never leaves.
+    fn arrive_kzinti(&mut self, world: &mut World) {
+        if world.ring.is_some() || world.players.iter().filter(|p| !p.in_use).count() < KZINTI_FLEET.len() {
+            return;
+        }
+        let Some(ring) = design_ring(world) else { return };
+        let centre = world.planets.iter().find(|pl| pl.x == ring.x && pl.y == ring.y).map_or("", |pl| pl.name);
+        world.ring = Some(ring);
+        world.place_ring();
+        self.kzinti = Some(Kzinti { ships: [None; 3], back_at: [0; 3], goals: HashMap::new() });
+        announce(
+            world,
+            format!(
+                "A RINGWORLD has appeared around {}: ten habitable sections that any empire can claim. One of them is Kzin, home of the warlike Kzinti, and their three warships are already launching. The Ringworld is here to stay. \"Scream and leap!\"",
+                centre
+            ),
+        );
+        self.run_kzinti(world);
+    }
+
+    /// Keep the fleet at three ships and fly them.
+    fn run_kzinti(&mut self, world: &mut World) {
+        let Some(kz) = self.kzinti.as_mut() else { return };
+        let Some(home) = world.kzin() else { return };
+        let tick = world.tick;
+        // Kzinti worlds grow like any empire's.
+        if tick % 150 == 0 {
+            for k in 0..world.planets.len() {
+                if kzinti_owns(world, k) && world.planets[k].armies < 40 {
+                    world.planets[k].armies += 1;
+                }
+            }
+        }
+        for n in 0..KZINTI_FLEET.len() {
+            match kz.ships[n] {
+                Some(id) if world.players[id as usize].in_use && world.players[id as usize].faction == Some(Faction::Kzinti) => {
+                    let p = &world.players[id as usize];
+                    if p.alive() {
+                        kzinti_ship(world, kz, id as usize, home, tick);
+                        continue;
+                    }
+                    if p.state == PState::Exploding {
+                        continue;
+                    }
+                    world.remove_player(id);
+                    kz.goals.remove(&id);
+                    kz.ships[n] = None;
+                    kz.back_at[n] = tick + KZINTI_RESPAWN;
+                }
+                Some(_) => {
+                    kz.ships[n] = None;
+                    kz.back_at[n] = tick + KZINTI_RESPAWN;
+                }
+                None if tick >= kz.back_at[n] => {
+                    // Launch from Kzin, or any Kzinti world, or failing that the ring itself.
+                    let base = if kzinti_owns(world, home) { Some(home) } else { (0..world.planets.len()).find(|&k| kzinti_owns(world, k)) };
+                    let (bx, by) = (world.planets[base.unwrap_or(home)].x, world.planets[base.unwrap_or(home)].y);
+                    let a = n as f64 * TAU / 3.0;
+                    let (name, ship) = KZINTI_FLEET[n];
+                    if let Some(id) = world.spawn_alien(name, Faction::Kzinti, ship, bx + a.cos() * 1500.0, by + a.sin() * 1500.0, 10.0) {
+                        kz.ships[n] = Some(id);
+                        if kz.back_at[n] > 0 {
+                            let from = world.planets[base.unwrap_or(home)].name;
+                            announce(world, format!("The Kzinti {} launches again from {}.", name, from));
+                        }
+                    }
+                }
+                None => {}
+            }
+        }
+    }
+}
+
+/// One Kzinti ship: patch up at home when hurt, defend Kzin, attack anything
+/// that comes close ("scream and leap"), and conquer: first the Ringworld,
+/// then the worlds around it. They carry their own warriors from home.
+fn kzinti_ship(world: &mut World, kz: &mut Kzinti, i: usize, home: usize, tick: u32) {
+    if tick % 2 != 0 {
+        return;
+    }
+    let id = i as u8;
+    let (x, y) = (world.players[i].x, world.players[i].y);
+    let p = &world.players[i];
+    let s = p.stats();
+    let at_dock = p.orbiting.map_or(false, |k| kzinti_owns(world, k) && world.planets[k].flags & PL_REPAIR != 0);
+    let needs_care = p.damage > s.max_damage * 0.6 || p.fuel < s.max_fuel * 0.2;
+    let still_mending = at_dock && (p.damage > s.max_damage * 0.1 || p.fuel < s.max_fuel * 0.8);
+    if needs_care || still_mending {
+        let dock = nearest_planet(world, i, |pl| pl.owner == Team::Ind && pl.alien == Some(Faction::Kzinti) && pl.flags & PL_REPAIR != 0);
+        if let Some(k) = dock {
+            go_orbit(world, i, k);
+            return;
+        }
+    }
+    // Defend Kzin.
+    let (hx, hy) = (world.planets[home].x, world.planets[home].y);
+    if kzinti_owns(world, home) && dist(x, y, hx, hy) < 40_000.0 {
+        let raider = (0..MAXPLAYER)
+            .filter(|&j| {
+                let q = &world.players[j];
+                q.alive() && q.faction.is_none() && !q.cloaked && dist(q.x, q.y, hx, hy) < 10_000.0
+            })
+            .min_by(|&a, &b| {
+                let (pa, pb) = (&world.players[a], &world.players[b]);
+                dist(pa.x, pa.y, hx, hy).total_cmp(&dist(pb.x, pb.y, hx, hy))
+            });
+        if let Some(t) = raider {
+            fight(world, i, t);
+            return;
+        }
+    }
+    // Scream and leap (though with warriors aboard, only at what's close).
+    let leap = if world.players[i].armies > 0 { 4000.0 } else { 8000.0 };
+    if let Some((t, _)) = nearest_enemy(world, i, leap, None) {
+        fight(world, i, t);
+        return;
+    }
+    // Take on warriors at a Kzinti world.
+    let p = &world.players[i];
+    let (armies, cap) = (p.armies, p.stats().max_armies);
+    let at_depot = p.orbiting.filter(|&k| kzinti_owns(world, k) && world.planets[k].armies > 4);
+    if armies < cap && (armies == 0 || at_depot.is_some()) {
+        let depot = at_depot.or_else(|| {
+            if kzinti_owns(world, home) && world.planets[home].armies > 4 {
+                Some(home)
+            } else {
+                nearest_planet(world, i, |pl| pl.owner == Team::Ind && pl.alien == Some(Faction::Kzinti) && pl.armies > 4)
+            }
+        });
+        if let Some(k) = depot {
+            if go_orbit(world, i, k) && tick % 10 == 0 {
+                world.planets[k].armies -= 1;
+                world.players[i].armies += 1;
+            }
+            return;
+        }
+        if armies == 0 {
+            return;
+        }
+    }
+    // Conquest: Kzin first if it's been lost, then the Ringworld, then its neighbours.
+    let ring = world.ring.clone();
+    let target = kz.goals.get(&id).copied().filter(|&k| !kzinti_owns(world, k)).or_else(|| {
+        if !kzinti_owns(world, home) {
+            return Some(home);
+        }
+        let open = |k: usize| !kzinti_owns(world, k) && world.planets[k].flags & PL_HOME == 0;
+        // The easiest pickings: few defenders, not too far (each army is worth 1,500 units).
+        let cost = |k: usize| dist(x, y, world.planets[k].x, world.planets[k].y) + world.planets[k].armies as f64 * 1500.0;
+        let by_dist = |a: &usize, b: &usize| cost(*a).total_cmp(&cost(*b));
+        (PLANETS.len()..world.planets.len()).filter(|&k| open(k)).min_by(by_dist).or_else(|| {
+            let r = ring.as_ref()?;
+            (0..world.planets.len()).filter(|&k| open(k) && dist(world.planets[k].x, world.planets[k].y, r.x, r.y) < 35_000.0).min_by(by_dist)
+        })
+    });
+    let Some(k) = target else { return };
+    kz.goals.insert(id, k);
+    if !go_orbit(world, i, k) || tick % 6 != 0 {
+        return;
+    }
+    let pl = &mut world.planets[k];
+    if pl.armies > 0 {
+        // Bomb the defenders down first.
+        pl.armies -= 1;
+    } else if world.players[i].armies > 0 {
+        world.players[i].armies -= 1;
+        let pl = &mut world.planets[k];
+        let (name, old) = (pl.name, pl.owner);
+        pl.owner = Team::Ind;
+        pl.alien = Some(Faction::Kzinti);
+        pl.armies = 1;
+        for t in Team::PLAYABLE {
+            pl.known[t.idx()] = true;
+        }
+        let what = if k == home { "retaken their homeworld" } else { "claimed" };
+        announce(world, format!("The Kzinti have {} {}! \"Scream and leap!\"", what, name));
+        world.check_genocide(old, Team::Ind);
+        kz.goals.remove(&id);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3179,7 +3457,7 @@ mod tests {
                     ["Khan", "Gorn", "Tholian", "Fesarius", "Balok", "Terran", "planet killer", "amoeba", "Borg", "V'Ger",
                         "Crystalline", "probe", "8472", "Jem'Hadar", "wormhole", "ribble", "Chang", "Hirogen", "Q", "Ferengi",
                         "warm", "TEMPEST", "Tempest", "NOMAD", "Nomad", "Armus", "anite", "hangeling", "Metron", "Pakled", "10-C",
-                        "Caretaker", "Horta", "Sphere", "DYSON", "Dyson"]
+                        "Caretaker", "Horta", "Sphere", "DYSON", "Dyson", "Kzin"]
                         .iter()
                         .any(|k| m.contains(k))
                 })
@@ -3715,6 +3993,93 @@ mod tests {
         w.kill(s, None, "test".into());
         d.tick(&mut w);
         assert!(w.terrain.is_empty(), "anomalies fade with the sphere");
+    }
+
+    /// The Kzinti arrive with their Ringworld: ten sections that are planets,
+    /// one of them Kzin. It never leaves, not even after a galaxy reset, and
+    /// the Kzinti always have their three ships.
+    #[test]
+    fn kzinti_ringworld_arrives_and_stays() {
+        let mut w = World::new();
+        let mut d = Director::new(AlienConfig { kinds: vec![Faction::Kzinti], interval: 9999 });
+        d.spawn_kind(&mut w, Faction::Kzinti, None);
+        assert_eq!(w.planets.len(), PLANETS.len() + 10, "ten sections");
+        let home = w.kzin().unwrap();
+        assert!(kzinti_owns(&w, home) && w.planets[home].name == "Kzin");
+        assert_eq!((PLANETS.len()..w.planets.len()).filter(|&k| kzinti_owns(&w, k)).count(), 1);
+        let ring = w.ring.clone().unwrap();
+        for s in &ring.sections {
+            assert!((dist(s.x, s.y, ring.x, ring.y) - ring.r).abs() < 1.0);
+            assert!(PLANETS.iter().all(|p| dist(s.x, s.y, p.x, p.y) > 3000.0), "{} sits on a planet", s.name);
+        }
+        let fleet = |w: &World| w.players.iter().filter(|p| p.alive() && p.faction == Some(Faction::Kzinti)).count();
+        assert_eq!(fleet(&w), 3);
+        // They never go away on their own...
+        for _ in 0..(UPS as u32 * 60 * 8) {
+            d.tick(&mut w);
+            w.tick();
+            w.outbox.clear();
+        }
+        assert!(d.events.is_empty() && d.kzinti.is_some());
+        // ...a lost ship comes back...
+        let c = w.players.iter().position(|p| p.alive() && p.faction == Some(Faction::Kzinti)).unwrap();
+        w.kill(c, None, "test".into());
+        for _ in 0..(KZINTI_RESPAWN + 30) {
+            d.tick(&mut w);
+            w.tick();
+        }
+        assert_eq!(fleet(&w), 3, "always three ships");
+        // ...and the Ringworld survives a galaxy reset, Kzin with it.
+        w.reset_galaxy();
+        assert_eq!(w.planets.len(), PLANETS.len() + 10);
+        assert!(kzinti_owns(&w, home));
+        // It never arrives twice.
+        d.spawn(&mut w);
+        assert_eq!(w.planets.len(), PLANETS.len() + 10);
+    }
+
+    #[test]
+    fn ring_sections_are_planets_anyone_can_claim() {
+        let (mut w, kirk) = with_cruiser(0.0, 0.0);
+        let mut d = Director::new(AlienConfig { kinds: vec![Faction::Kzinti], interval: 9999 });
+        d.spawn_kind(&mut w, Faction::Kzinti, None);
+        let home = w.kzin().unwrap();
+        let k = (PLANETS.len()..w.planets.len()).find(|&k| k != home).unwrap();
+        // An empire ship orbits a section and lands armies on it.
+        w.planets[k].armies = 0;
+        let (px, py) = (w.planets[k].x, w.planets[k].y);
+        let ki = kirk as usize;
+        (w.players[ki].x, w.players[ki].y) = (px + 900.0, py);
+        w.players[ki].kills = 2.0;
+        w.players[ki].armies = 2;
+        w.handle(kirk, ClientMsg::Orbit);
+        assert_eq!(w.players[ki].orbiting, Some(k), "ships can dock at a section");
+        w.handle(kirk, ClientMsg::BeamDown);
+        for _ in 0..50 {
+            w.tick();
+        }
+        assert_eq!(w.planets[k].owner, Team::Fed, "claimed for the Federation");
+        // The client sees the ring and where each section is.
+        let f = w.frame_for(kirk);
+        let ring = f.ring.expect("ring in the frame");
+        assert_eq!((ring.sections.len(), f.planets.len()), (10, PLANETS.len() + 10));
+        assert_eq!(ring.sections[ring.kzin as usize].name, "Kzin");
+        // A Kzinti ship carrying warriors takes an undefended section.
+        // (With nobody close enough to leap at.)
+        w.players[ki].orbiting = None;
+        (w.players[ki].x, w.players[ki].y) = (1000.0, 1000.0);
+        let j = (PLANETS.len()..w.planets.len()).find(|&j| j != home && j != k).unwrap();
+        w.planets[j].armies = 0;
+        let kz = d.kzinti.as_ref().unwrap().ships[0].unwrap() as usize;
+        (w.players[kz].x, w.players[kz].y) = (w.planets[j].x, w.planets[j].y);
+        w.players[kz].orbiting = Some(j);
+        w.players[kz].armies = 3;
+        let mut fleet = d.kzinti.take().unwrap();
+        fleet.goals.insert(kz as u8, j);
+        for t in 0..20 {
+            kzinti_ship(&mut w, &mut fleet, kz, home, 6 * t);
+        }
+        assert!(kzinti_owns(&w, j), "claimed by the Kzinti");
     }
 
     #[test]

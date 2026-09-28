@@ -383,6 +383,25 @@ pub struct ZoneInfo {
     pub r: i32,
 }
 
+/// The Kzinti's Ringworld: a band around a planet, lined with sections
+/// that are planets in their own right (after the fixed galaxy's 40).
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct RingInfo {
+    pub x: i32,
+    pub y: i32,
+    pub r: i32,
+    pub sections: Vec<RingSectionInfo>,
+    /// Which section is Kzin, the Kzinti homeworld.
+    pub kzin: u8,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct RingSectionInfo {
+    pub name: String,
+    pub x: i32,
+    pub y: i32,
+}
+
 /// Armies dropped by a destroyed Ferengi marauder, free for anyone to pick up.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct LootInfo {
@@ -450,6 +469,8 @@ pub struct Frame {
     pub tempest: Option<TempestInfo>,
     /// Patches of space marked out by alien incursions.
     pub zones: Vec<ZoneInfo>,
+    /// The Ringworld, once the Kzinti have brought it.
+    pub ring: Option<RingInfo>,
     /// Teams that are currently allowed to be joined.
     pub open_teams: Vec<Team>,
     /// Planets held by Fed, Rom, Kli, Ori (public knowledge, like the team window).

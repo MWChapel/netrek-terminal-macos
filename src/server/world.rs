@@ -343,6 +343,31 @@ impl TempestWeb {
 }
 
 /// Things that climb the Tempest's web.
+/// The Ringworld: a band around a planet, lined with sections that are
+/// planets in their own right.
+#[derive(Clone, Debug)]
+pub struct Ringworld {
+    pub x: f64,
+    pub y: f64,
+    pub r: f64,
+    pub sections: Vec<RingSection>,
+    /// Which section is Kzin.
+    pub kzin: usize,
+}
+
+#[derive(Clone, Debug)]
+pub struct RingSection {
+    pub name: &'static str,
+    pub x: f64,
+    pub y: f64,
+    pub flags: u8,
+    /// Its native population (armies) when the ring arrives.
+    pub armies: i32,
+}
+
+/// Kzin's garrison when the Ringworld arrives (and after a galaxy reset).
+pub const KZIN_ARMIES: i32 = 30;
+
 /// The biggest the Armus slick can swell to (added to its base size).
 pub const ARMUS_MAX_SWELL: f64 = 6000.0;
 
@@ -479,6 +504,8 @@ pub struct World {
     pub zones: Vec<ZoneInfo>,
     /// Chat sent this tick (Nomad listens for it), cleared by `tick`.
     pub chatter: Vec<(u8, String)>,
+    /// The Kzinti's Ringworld: once it arrives, it's here for good.
+    pub ring: Option<Ringworld>,
 }
 
 impl World {
@@ -508,6 +535,7 @@ impl World {
             tempest: None,
             zones: Vec::new(),
             chatter: Vec::new(),
+            ring: None,
         };
         w.reset_galaxy();
         w
@@ -590,10 +618,40 @@ impl World {
         self.proposals.clear();
         self.breaking.clear();
         self.supply = [TeamSupply::default(); 5];
+        self.place_ring();
         self.terrain.clear();
         if self.features.terrain {
             super::terrain::generate(self);
         }
+    }
+
+    /// Add the Ringworld's sections to the galaxy as planets (after the
+    /// fixed 40), fresh: Kzin to the Kzinti, the rest unclaimed.
+    pub fn place_ring(&mut self) {
+        let Some(ring) = &self.ring else { return };
+        self.planets.truncate(PLANETS.len());
+        for (k, s) in ring.sections.iter().enumerate() {
+            let kzin = k == ring.kzin;
+            self.planets.push(Planet {
+                name: s.name,
+                x: s.x,
+                y: s.y,
+                owner: Team::Ind,
+                armies: if kzin { KZIN_ARMIES } else { s.armies },
+                flags: s.flags,
+                // The Ringworld is too big to miss: everyone knows it.
+                known: [true; 5],
+                alien: kzin.then_some(Faction::Kzinti),
+                silenced_until: 0,
+                tribbles: false,
+                supply: 0,
+            });
+        }
+    }
+
+    /// The planet index of Kzin, the Kzinti homeworld (with the Ringworld here).
+    pub fn kzin(&self) -> Option<usize> {
+        self.ring.as_ref().map(|r| PLANETS.len() + r.kzin)
     }
 
     // ------------------------------------------------------------------
@@ -3118,6 +3176,7 @@ impl World {
         let mut rng = rand::thread_rng();
         let tick = self.tick;
         for pl in self.planets.iter_mut() {
+            // Independent worlds don't grow (the Kzinti's are grown by their own rules).
             if pl.owner == Team::Ind || pl.armies >= 60 || tick < pl.silenced_until || pl.tribbles {
                 continue;
             }
@@ -3324,6 +3383,13 @@ impl World {
                 level: t.level,
             }),
             zones: self.zones.clone(),
+            ring: self.ring.as_ref().map(|r| RingInfo {
+                x: r.x as i32,
+                y: r.y as i32,
+                r: r.r as i32,
+                sections: r.sections.iter().map(|s| RingSectionInfo { name: s.name.to_string(), x: s.x as i32, y: s.y as i32 }).collect(),
+                kzin: r.kzin as u8,
+            }),
             open_teams: self.open_teams(),
             team_planets: [Team::Fed, Team::Rom, Team::Kli, Team::Ori].map(|t| self.team_planet_count(t) as u8),
             starbase_teams: Team::PLAYABLE.into_iter().filter(|&t| self.has_starbase(t, me)).collect(),

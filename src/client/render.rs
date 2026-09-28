@@ -66,6 +66,11 @@ fn ship_shape(s: ShipType) -> &'static [(f64, f64)] {
 
         ShipType::PlanetKiller => &[(-0.5, -1.0), (0.5, -1.0), (0.26, 1.0), (-0.26, 1.0)],
         ShipType::NomadProbe => &[(-0.35, -1.0), (0.35, -1.0), (0.5, 0.3), (0.35, 1.0), (-0.35, 1.0), (-0.5, 0.3)],
+        ShipType::KzintiDreadnought => &[
+            (0.0, -0.8), (0.45, -0.55), (0.9, -0.2), (0.85, 0.6), (0.4, 0.95), (-0.4, 0.95), (-0.85, 0.6), (-0.9, -0.2), (-0.45, -0.55),
+        ],
+        ShipType::KzintiCruiser => &[(0.0, -1.0), (0.3, -0.5), (0.75, 0.0), (0.95, 0.7), (0.0, 0.75), (-0.95, 0.7), (-0.75, 0.0), (-0.3, -0.5)],
+        ShipType::KzintiStriker => &[(0.0, -1.0), (0.25, -0.2), (0.85, 0.55), (0.0, 0.7), (-0.85, 0.55), (-0.25, -0.2)],
         ShipType::DysonHatch => &[(-0.9, -0.5), (0.9, -0.5), (0.9, 0.5), (-0.9, 0.5)],
         ShipType::PakledClunker => &[(0.0, -0.9), (0.8, -0.5), (0.8, 0.9), (-0.8, 0.9), (-0.8, -0.5)],
         ShipType::Horta => &[(0.0, -0.8), (0.6, -0.4), (0.8, 0.3), (0.3, 0.8), (-0.4, 0.7), (-0.8, 0.1), (-0.5, -0.5)],
@@ -176,7 +181,10 @@ impl App {
                 let n = self.frame.as_ref().map_or(0, |f| f.players.iter().filter(|p| p.state != PState::Outfit).count());
                 (64, n as i32 + 3, "Players — L or Esc to close")
             }
-            Popup::Planets => (72, 24, "Planets — P or Esc to close"),
+            Popup::Planets => {
+                let n = self.frame.as_ref().map_or(40, |f| f.planets.len());
+                (72, (n as i32 + 1) / 2 + 4, "Planets — P or Esc to close")
+            }
             Popup::None => (0, 0, ""),
         }
     }
@@ -502,6 +510,7 @@ impl App {
         super::render_terrain::draw_braille(&mut b, f, &to_dot, upd, true, &mut labels);
         super::render_terrain::draw_tempest_braille(&mut b, f, &to_dot, upd);
         super::render_terrain::draw_zones_braille(&mut b, f, &to_dot, upd);
+        super::render_terrain::draw_ring_braille(&mut b, f, &to_dot, upd);
 
         // Edge of the galaxy.
         for (ax, ay, bx, by) in [
@@ -518,7 +527,7 @@ impl App {
 
         // Planets.
         let pr = (700.0 / upd).max(2.5);
-        for (k, def) in PLANETS.iter().enumerate() {
+        for (k, def) in super::planet_defs(f).iter().enumerate() {
             if !visible(def.x, def.y, 3000.0) {
                 continue;
             }
@@ -720,7 +729,8 @@ impl App {
         super::render_terrain::draw_braille(&mut b, f, &to_dot, 1.0 / sx, false, &mut labels);
         super::render_terrain::draw_tempest_braille(&mut b, f, &to_dot, 1.0 / sx);
         super::render_terrain::draw_zones_braille(&mut b, f, &to_dot, 1.0 / sx);
-        for (k, def) in PLANETS.iter().enumerate() {
+        super::render_terrain::draw_ring_braille(&mut b, f, &to_dot, 1.0 / sx);
+        for (k, def) in super::planet_defs(f).iter().enumerate() {
             let info = &f.planets[k];
             let col = if info.known { self.planet_color(info) } else { DIM };
             let (x, y) = to_dot(def.x, def.y);
@@ -801,7 +811,7 @@ impl App {
             if me.flags & pf::CLOAK != 0 { "  CLOAKED" } else { "" }
         );
         if let Some(k) = mi.orbiting {
-            line += &format!("  orbiting {}", PLANETS[k as usize].name);
+            line += &format!("  orbiting {}", super::planet_name(f, k as usize));
         }
         if let Some(l) = &mi.lock {
             line += &format!("  lock {}", l);
@@ -1236,8 +1246,8 @@ impl App {
                 let (bw, bh, title) = self.popup_size();
                 let r = self.popup_box(scr, bw, bh, title);
                 let cols = if r.w >= 68 { 2 } else { 1 };
-                let per_col = (40 + cols - 1) / cols;
-                for (k, def) in PLANETS.iter().enumerate() {
+                let per_col = (f.planets.len() as i32 + cols - 1) / cols;
+                for (k, def) in super::planet_defs(f).iter().enumerate() {
                     let (c, row) = (k as i32 / per_col, k as i32 % per_col);
                     if row >= r.h {
                         continue;

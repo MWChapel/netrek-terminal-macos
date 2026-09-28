@@ -17,9 +17,10 @@ that runs entirely inside a terminal window on macOS.
 - **Trek-style ships:** each empire has its own ship designs (Federation saucers and
   nacelles, Klingon D7s and Birds-of-Prey, Romulan warbirds, Orion raiders).
 - **Robots:** AI pilots fight, bomb, carry armies and capture planets, so you can play solo.
-- **Alien incursions** (optional): thirty-one threats, from Khan, the Borg and the
+- **Alien incursions** (optional): thirty-two threats, from Khan, the Borg and the
   planet killer to V'Ger, Species 8472, the Jem'Hadar, General Chang, Q, Nomad, the
-  Metrons' arena, a Dyson sphere and a plague of tribbles, drop into the game.
+  Metrons' arena, a Dyson sphere and a plague of tribbles, drop into the game, and the
+  Kzinti arrive with a Ringworld that's there to stay.
 - **Extras** (optional, each its own server option): career ranks and service records,
   personal orders from command, treaties between empires, 21 kinds of space terrain (10
   in any one galaxy),
@@ -138,7 +139,7 @@ netrek <COMMAND>
 | `-b, --bind <ADDR>` | `0.0.0.0` | Address to bind; use `127.0.0.1` for local-only |
 | `--bots <N>` | `6` | Robot players kept in the game |
 | `-e, --empires <LIST>` | `fed,rom` | Empires the robots play for: `all`, or a comma list such as `fed,rom,kli` |
-| `--aliens [LIST]` | off | Alien incursions: bare `--aliens` for all thirty-one, or a list such as `khan,borg,vger`. See [Alien incursions](#alien-incursions) |
+| `--aliens [LIST]` | off | Alien incursions: bare `--aliens` for all thirty-two, or a list such as `khan,borg,vger`. See [Alien incursions](#alien-incursions) |
 | `--alien-interval <SECS>` | `150` | Average seconds between incursions |
 | `--ranks [FILE]` | off | Career ranks, service records and a leaderboard, saved to `FILE` (default `~/.netrek/service-records.tsv`). See [Extras](#extras) |
 | `--orders` | off | Personal orders from command, with rewards |
@@ -542,12 +543,12 @@ on two fronts. Robots are marked in the player list.
 Pass `--aliens` to `server` or `solo` and episodes from Star Trek drop into the galaxy.
 One arrives roughly every `--alien-interval` seconds (150 by default, with some random
 variation), and at most **two** are active at once. The galaxy has 32 player slots, so
-with aliens on the server keeps 8 of them free for incursions, running fewer robots than
+with aliens on the server keeps 8 of them free for incursions (11 with the Kzinti), running fewer robots than
 `--bots` asks for if it has to (it says so at startup). Each arrival, defeat and withdrawal
 is announced to everyone as a magenta **ALERT** message with a klaxon.
 
 ```sh
-netrek server --empires all --bots 12 --aliens            # all thirty-one
+netrek server --empires all --bots 12 --aliens            # all thirty-two
 netrek solo --aliens khan,borg,doomsday --alien-interval 90
 ```
 
@@ -583,6 +584,7 @@ netrek solo --aliens khan,borg,doomsday --alien-interval 90
 | `caretaker` | **The Caretaker** (Voyager): a vast array appears in open space. Every 20 seconds its **displacement wave** pulls two ships from anywhere in the galaxy to it, and its beam burns anything that comes close. It's **heavily shielded**: at first it takes only 15% of the damage done to it, but every wave it sends out weakens it by another 15%, so it gets easier to kill the longer it stays. Worth 4 kills. |
 | `horta` | **The Horta** (*The Devil in the Dark*, TOS): something tunnels through the rock of a colony and kills an army every 2.5 seconds, then moves on to the next when it's empty. Destroy it (it's a slow, unshielded rock creature, 150 hull, 2 kills), or **make peace**: orbit its planet for **10 seconds without firing**. "NO KILL I." The colony gains 10 armies and becomes a **repair world**, and the peacemaker earns 2 kills. |
 | `spheres` | **The Sphere Builders** (Enterprise): four **Delphic Expanse spheres** appear in open space. Each one scorches ships within 3,500 units every 5 seconds and **warps the space around it into anomalies** (a spatial eddy, a chroniton field, a tetryon field or a spatial rift; see [Space terrain](#space-terrain)), up to three each, even when `--terrain` is off. The anomalies vanish when their sphere is destroyed. |
+| `kzinti` | **The Kzinti and their Ringworld** (the Kzinti are from *The Slaver Weapon*, the animated series; the Ringworld is from Larry Niven, who wrote it): a vast **Ringworld**, 14,000–18,000 across, appears around a random planet, and **it's here for good**. It never withdraws and can't be destroyed; even a galaxy reset keeps it (with its sections reset). It has **ten sections** that are planets in their own right: ships can orbit (dock at) them, bomb them, and land armies to **claim them for their empire**. Each has its own population (4 to 10 armies) and resources (repair, fuel and farming in different mixes). They're named after Niven's Ringworld: Fist-of-God, Great Ocean, Map of Earth, and so on. One section is **Kzin**, the Kzinti homeworld (30 armies, repair, fuel and farming). The **Kzinti** play like a small extra empire with **three warships, always**: the Chuft-Captain's **dreadnought**, the Telepath's **cruiser** and Flyer's **striker**. A lost ship relaunches from Kzin 30 seconds later (or from any Kzinti world if Kzin has fallen). They carry warriors from home and conquer: easy sections of the Ringworld first, then the worlds around it. They defend Kzin fiercely, patch up at home when hurt, and "scream and leap" at any ship that comes near. Their worlds grow armies like any empire's, and they'll always try to take Kzin back. Kzinti ships are worth 2 kills. The Kzinti come once; they don't count toward the two incursions at a time. |
 | `dyson` | **A Dyson sphere** (*Relics*, TNG): a shell 9,000 across materialises around an out-of-the-way colony (in the episode it encloses a star). Nothing gets through the shell, ships or torpedoes, except by its **hatch**. The planet keeps its owner, but only ships inside can reach it (and repair, refuel or fight over it there). An automated **tractor beam** at the hatch locks onto the nearest ship within 15,000 units every 10 seconds and drags it in, whatever its engines do; the hatch opens to take it and shuts behind it. Heavy fire on the **hatch emitter** (200 damage while it holds you) breaks the beam. The hatch only opens to take a ship, but **a ship in the doorway holds it open**, as the Jenolan did, letting everyone in or out. **Destroy the hatch emitter** (600 shields, 1,200 hull, fast repairs, 5 kills) to jam the doors open for good. It's very tough, so bring friends: **a ship blowing up in the doorway does 6× damage** (Scotty's gambit), about a third of its strength for a cruiser. The **wreck of the USS Jenolan** lies on the shell and can be salvaged. |
 
 **How aliens behave:**
@@ -605,8 +607,9 @@ netrek solo --aliens khan,borg,doomsday --alien-interval 90
 - **Ending:** an incursion ends when all its ships are destroyed (or V'Ger is joined, the
   probe answered, Q's trial judged, Nomad talked into destroying itself, Armus starved,
   the Metrons' duel decided, first contact made with Species 10-C, peace made with the
-  Horta, the Dyson sphere's hatch destroyed, or the last tribble or nanite cleared), or it withdraws after 4–6 minutes. If an empire loses its last planet to aliens, it has been wiped out by
-  alien invaders.
+  Horta, the Dyson sphere's hatch destroyed, or the last tribble or nanite cleared), or it withdraws after 4–6 minutes. The Kzinti
+  are the exception: they never leave. If an empire loses its last planet to aliens, it
+  has been wiped out by alien invaders.
 
 **Who's who on screen:**
 
@@ -641,6 +644,7 @@ netrek solo --aliens khan,borg,doomsday --alien-interval 90
 | Caretaker | light blue | `CT` | A vast flat panel array around a central emitter; its waves ripple out in rings |
 | Horta | rust | `HO` | A lumpy, speckled rock creature, sitting inside its planet |
 | Sphere Builders | teal | `SB` | A great banded sphere |
+| Kzinti | tiger orange | `KZ` | Clawed, tiger-striped warships; their worlds (Kzin and whatever they've conquered) show in orange. The Ringworld is a dark band lit blue on its inner face, with seams between the sections and shadow squares turning inside |
 | Dyson sphere | bronze | `DY` | A vast dark metal ring around a planet, with a hatch (two great doors under an emitter) that glows when open |
 
 The status line shows **HUNTED** (vector mode: **PREY**) when the Hirogen are after you,
@@ -681,6 +685,9 @@ infected.
 | Caretaker's array | – | 300 | 600 | beam 30, displacement waves; takes 15% damage, +15% per wave | 4 |
 | Horta | 3 | – | 150 | kills armies from inside a planet | 2 (or 2 for making peace) |
 | Delphic sphere | – | – | 350 | pulse 15, plants anomalies | 1.8 |
+| Kzinti dreadnought (Chuft-Captain) | 8 | 170 | 210 | torpedo 50, phaser 115, 6 warriors | 2 |
+| Kzinti cruiser (Telepath) | 10 | 120 | 140 | torpedo 40, phaser 95, 4 warriors | 2 |
+| Kzinti striker (Flyer) | 12 | 80 | 95 | torpedo 30, phaser 75, 3 warriors | 2 |
 | Dyson sphere hatch | – | 600 | 1,200 | tractor beam 15,000 (no weapons); 6× damage from explosions in the doorway | 5 |
 
 The monsters regenerate quickly. The planet killer only takes 40% of normal weapon
@@ -781,6 +788,11 @@ damage, and a Borg cube's resistance builds as it's hit.
   colony gains 10 armies and repair yards for good.
 - **Sphere Builders:** fly around the anomalies they make, not through them, and knock
   the spheres out one at a time: each one you destroy takes its anomalies with it.
+- **Kzinti:** the Ringworld is a land grab. Its sections are close together, rich and
+  unclaimed, so bring armies early. Expect the Kzinti to jump anything near Kzin, and to
+  go for the weakest sections first, so garrison yours. Killing their ships only buys you
+  30 seconds; taking **Kzin** itself is what really hurts them (they have to relaunch
+  from their other worlds), but it starts with 30 armies and all three ships defend it.
 - **Dyson sphere:** give it a wide berth (15,000 units from the hatch). If the beam
   grabs a teammate, it takes several ships pouring fire into the hatch emitter to break it. If you're shut inside,
   the planet can repair and refuel you; wait by the hatch, and when it opens to take the
@@ -1183,7 +1195,7 @@ The tests include:
 
 - **`four_empire_game`:** 16 robots across all four empires. Checks every empire gets
   its share of ships and that the fighting spreads across the galaxy.
-- **`every_incursion_plays_out`:** runs each of the thirty-one alien incursions against a
+- **`every_incursion_plays_out`:** runs each of the thirty-two alien incursions against a
   four-empire robot war and checks it arrives, acts and ends cleanly.
 - **Alien mechanics:** `vger_merge_ends_the_threat`, `crystal_shatters_on_resonance`,
   `whale_probe_drains_and_is_answered`, `bioships_only_fear_plasma`,
@@ -1199,7 +1211,8 @@ The tests include:
   `pakleds_steal_tech_and_give_it_back_when_destroyed`, `ten_c_first_contact`,
   `caretaker_pulls_ships_in_and_weakens`, `horta_peace` and
   `spheres_plant_anomalies_that_vanish_with_them` and
-  `dyson_sphere_swallows_ships_and_the_jenolan_gambit`.
+  `dyson_sphere_swallows_ships_and_the_jenolan_gambit`,
+  `kzinti_ringworld_arrives_and_stays` and `ring_sections_are_planets_anyone_can_claim`.
 - **`retaking_alien_planets`:** liberated and resettled planets lose their alien mark.
 - **Extras:** `galaxy_has_ten_kinds_of_terrain_clear_of_planets` (ten of the 21 kinds in
   every galaxy, all of them turning up over many) and a test for each terrain effect; `treaties_between_players`, `one_ally_at_a_time_and_robots_decide`,
