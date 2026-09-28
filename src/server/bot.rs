@@ -212,7 +212,11 @@ impl Bot {
             // down the weakest one so teammates can finish it.
             let takeable = |k: usize, pl: &super::world::Planet| ring_only(k) && is_target(pl.owner) && (pl.armies as u32) < p.armies;
             // Ring frenzy: new, unclaimed sections before enemy-held ones.
-            let fresh = frenzy.and_then(|_| self.pick_planet(world, x, y, |k, pl| takeable(k, pl) && pl.owner == Team::Ind && pl.alien.is_none()));
+            let fresh = frenzy.and_then(|_| {
+                self.pick_planet(world, x, y, |k, pl| takeable(k, pl) && pl.owner == Team::Ind && pl.alien.is_none())
+                    // ...then the Kzinti's.
+                    .or_else(|| self.pick_planet(world, x, y, |k, pl| takeable(k, pl) && pl.alien == Some(Faction::Kzinti)))
+            });
             match fresh.or_else(|| self.pick_planet(world, x, y, takeable)) {
                 Some(k) => Goal::Invade(k),
                 None => {
@@ -253,15 +257,19 @@ impl Bot {
             }
         } else {
             let target = match frenzy {
-                // Ring frenzy: bomb the enemy's sections (and the Kzinti's),
-                // the best defended first, so they can be taken.
+                // Ring frenzy: bomb the Kzinti's sections first, then the
+                // enemy's lightest, so they can be taken.
                 Some(_) => (PLANETS.len()..world.planets.len())
                     .filter(|&k| {
                         let pl = &world.planets[k];
                         is_target(pl.owner) && pl.armies > 4 && (pl.owner != Team::Ind || pl.alien.is_some())
                     })
-                    .max_by(|&a, &b| {
-                        let score = |k: usize| world.planets[k].armies as f64 * 2000.0 - dist(x, y, world.planets[k].x, world.planets[k].y);
+                    .min_by(|&a, &b| {
+                        let score = |k: usize| {
+                            let pl = &world.planets[k];
+                            let kzinti = if pl.alien == Some(Faction::Kzinti) { 0.0 } else { 100_000.0 };
+                            kzinti + pl.armies as f64 * 1000.0 + dist(x, y, pl.x, pl.y)
+                        };
                         score(a).total_cmp(&score(b))
                     })
                     .or_else(|| self.pick_planet(world, x, y, |k, pl| ring_only(k) && is_target(pl.owner) && pl.armies > 4)),

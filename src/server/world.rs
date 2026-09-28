@@ -399,7 +399,7 @@ pub struct RingSection {
 }
 
 /// Kzin's garrison when the Ringworld arrives (and after a galaxy reset).
-pub const KZIN_ARMIES: i32 = 30;
+pub const KZIN_ARMIES: i32 = 12;
 
 /// An outpost under construction.
 #[derive(Clone, Copy, Debug)]

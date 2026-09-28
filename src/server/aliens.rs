@@ -3164,7 +3164,7 @@ fn dyson(world: &mut World, e: &mut Event, i: usize, tick: u32) {
 pub const KZINTI_FLEET: [(&str, ShipType); 3] =
     [("Chuft-Captain", ShipType::KzintiDreadnought), ("Telepath", ShipType::KzintiCruiser), ("Flyer", ShipType::KzintiStriker)];
 /// How long a destroyed Kzinti ship takes to come back.
-pub const KZINTI_RESPAWN: u32 = 30 * UPS as u32;
+pub const KZINTI_RESPAWN: u32 = 60 * UPS as u32;
 /// The Ringworld's sections (other than Kzin), after Niven's Ringworld.
 const RING_SECTIONS: [&str; 9] =
     ["Fist-of-God", "Great Ocean", "Map of Earth", "Spill Mtn", "Rim Wall", "Scrith Deck", "Heaven", "Shadow Sq", "Arch Point"];
@@ -3270,10 +3270,10 @@ impl Director {
         let Some(kz) = self.kzinti.as_mut() else { return };
         let Some(home) = world.kzin() else { return };
         let tick = world.tick;
-        // Kzinti worlds grow like any empire's.
-        if tick % 150 == 0 {
+        // Kzinti worlds grow, slowly.
+        if tick % 450 == 0 {
             for k in 0..world.planets.len() {
-                if kzinti_owns(world, k) && world.planets[k].armies < 40 {
+                if kzinti_owns(world, k) && world.planets[k].armies < 12 {
                     world.planets[k].armies += 1;
                 }
             }
@@ -4129,7 +4129,7 @@ mod tests {
         w.planets[k].armies = 0;
         let (px, py) = (w.planets[k].x, w.planets[k].y);
         let ki = kirk as usize;
-        (w.players[ki].x, w.players[ki].y) = (px + 900.0, py);
+        (w.players[ki].x, w.players[ki].y) = (px + 700.0, py);
         w.players[ki].kills = 2.0;
         w.players[ki].armies = 2;
         w.handle(kirk, ClientMsg::Orbit);

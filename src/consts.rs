@@ -1278,7 +1278,7 @@ pub static SHIPS: [ShipStats; 60] = [
         max_etemp: 100_000.0, max_wtemp: 100_000.0, mass: 500000.0, tract_range: 3.0, tract_str: 1.0,
     },
     ShipStats {
-        name: "Kzinti dreadnought", abbr: "KD", max_speed: 8, max_shield: 170.0, max_damage: 210.0,
+        name: "Kzinti dreadnought", abbr: "KD", max_speed: 8, max_shield: 130.0, max_damage: 160.0,
         max_fuel: 14000.0, max_armies: 6, torp_damage: 50.0, torp_speed: 12.0, torp_fuse: 35,
         torp_cost: 7.0 * 50.0, phaser_damage: 115.0, phaser_cost: 7.0 * 115.0,
         plasma_damage: 0.0, plasma_speed: 0.0, plasma_fuse: 0, plasma_cost: 0.0,
@@ -1287,7 +1287,7 @@ pub static SHIPS: [ShipStats; 60] = [
         max_etemp: 1400.0, max_wtemp: 1200.0, mass: 2600.0, tract_range: 1.0, tract_str: 3000.0,
     },
     ShipStats {
-        name: "Kzinti cruiser", abbr: "KC", max_speed: 10, max_shield: 120.0, max_damage: 140.0,
+        name: "Kzinti cruiser", abbr: "KC", max_speed: 10, max_shield: 90.0, max_damage: 110.0,
         max_fuel: 14000.0, max_armies: 4, torp_damage: 40.0, torp_speed: 13.0, torp_fuse: 35,
         torp_cost: 7.0 * 40.0, phaser_damage: 95.0, phaser_cost: 7.0 * 95.0,
         plasma_damage: 0.0, plasma_speed: 0.0, plasma_fuse: 0, plasma_cost: 0.0,
@@ -1296,7 +1296,7 @@ pub static SHIPS: [ShipStats; 60] = [
         max_etemp: 1400.0, max_wtemp: 1200.0, mass: 1900.0, tract_range: 1.0, tract_str: 3000.0,
     },
     ShipStats {
-        name: "Kzinti striker", abbr: "KS", max_speed: 12, max_shield: 80.0, max_damage: 95.0,
+        name: "Kzinti striker", abbr: "KS", max_speed: 12, max_shield: 60.0, max_damage: 75.0,
         max_fuel: 14000.0, max_armies: 3, torp_damage: 30.0, torp_speed: 15.0, torp_fuse: 35,
         torp_cost: 7.0 * 30.0, phaser_damage: 75.0, phaser_cost: 7.0 * 75.0,
         plasma_damage: 0.0, plasma_speed: 0.0, plasma_fuse: 0, plasma_cost: 0.0,
