@@ -1334,7 +1334,7 @@ pub(super) const HELP: &[(&str, &str)] = &[
     ("R", "repair mode (stop, shields down, repair faster)"),
     ("T / y", "tractor / pressor beam on the ship nearest the pointer"),
     ("d / D", "detonate nearby enemy torps / your own torps"),
-    ("w", "overwatch: auto-fire at any enemy that comes into weapons range"),
+    ("w", "overwatch (in orbit): auto-fire at any enemy that comes into weapons range"),
     ("v / e / j", "advanced tech (Commodore / Rear Admiral / Admiral, with ranks); /tech lists yours"),
     ("r", "refit to another ship (orbiting your home planet)"),
     ("i", "info on the thing nearest the pointer"),

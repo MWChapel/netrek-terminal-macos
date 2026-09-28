@@ -20,7 +20,7 @@ that runs entirely inside a terminal window on macOS.
 - **Alien incursions** (optional): thirty-two threats, from Khan, the Borg and the
   planet killer to V'Ger, Species 8472, the Jem'Hadar, General Chang, Q, Nomad, the
   Metrons' arena, a Dyson sphere and a plague of tribbles, drop into the game, and the
-  Kzinti arrive with a Ringworld that's there to stay.
+  Kzinti arrive with a Ringworld that stays until they lose it.
 - **Extras** (optional, each its own server option): career ranks and service records,
   personal orders from command, treaties between empires, 21 kinds of space terrain (10
   in any one galaxy),
@@ -308,14 +308,16 @@ map. With no mouse, they fire along your current heading.
 | `c` | Cloak on / off (drains fuel; you can't fire while cloaked) |
 | `d` | Detonate enemy torpedoes near you (costs fuel) |
 | `v` / `e` / `j` | Use your [advanced tech](#advanced-tech) (Commodore / Rear Admiral / Admiral, with `--ranks`), aimed at the pointer |
-| `w` | **Overwatch** on / off: automatically fire at the nearest enemy that comes into weapons range (also `/overwatch`) |
+| `w` | **Overwatch** on / off, **in orbit only**: automatically fire at the nearest enemy that comes into weapons range (also `/overwatch`) |
 | `D` | Detonate your own torpedoes |
 | `T` | Tractor beam on the ship nearest the pointer (again to release) |
 | `y` | Pressor beam on the ship nearest the pointer (again to release) |
 | `R` | Repair mode: stop, drop shields, repair faster |
 
 
-**Overwatch** (`w`) turns your ship into a sentry. While it's on, the status line shows
+**Overwatch** (`w`) turns your ship into a sentry guarding a planet. It can only be
+switched on **while you're orbiting a planet**, and it switches itself off the moment you
+leave orbit (or your ship is destroyed). While it's on, the status line shows
 **OVERWATCH** (vector mode: the orange **OVWT** lamp), and every enemy that comes into
 range draws fire from you. It picks the nearest enemy you can see and reaches for **special
 weapons first**:
@@ -337,8 +339,8 @@ It holds fire:
 - when your fuel is below 25% or your weapons are running hot, so it never leaves you
   stranded
 
-It stays on through deaths until you switch it off. Overwatch works on any server
-(protocol version 6).
+A starbase's fighters are the exception: they fly on overwatch wherever they go.
+Overwatch works on any server (protocol version 6).
 ### Planets and armies
 
 | Key | Action |
@@ -524,6 +526,8 @@ Robots keep the game lively when there aren't enough people. They:
 - retreat to a repair planet when damaged or low on fuel, and repair there
 - bomb enemy planets, pick up armies once they have kills, and invade the weakest
   enemy planets
+- go into a **ring frenzy** when the Kzinti's Ringworld arrives: until it leaves they
+  fight only for the ring (see [Alien incursions](#alien-incursions))
 
 By default robots play the classic two-empire **Federation vs Romulan** game. Use
 `--empires all` (or a list such as `fed,rom,kli`) to have them fly for more empires:
@@ -584,7 +588,7 @@ netrek solo --aliens khan,borg,doomsday --alien-interval 90
 | `caretaker` | **The Caretaker** (Voyager): a vast array appears in open space. Every 20 seconds its **displacement wave** pulls two ships from anywhere in the galaxy to it, and its beam burns anything that comes close. It's **heavily shielded**: at first it takes only 15% of the damage done to it, but every wave it sends out weakens it by another 15%, so it gets easier to kill the longer it stays. Worth 4 kills. |
 | `horta` | **The Horta** (*The Devil in the Dark*, TOS): something tunnels through the rock of a colony and kills an army every 2.5 seconds, then moves on to the next when it's empty. Destroy it (it's a slow, unshielded rock creature, 150 hull, 2 kills), or **make peace**: orbit its planet for **10 seconds without firing**. "NO KILL I." The colony gains 10 armies and becomes a **repair world**, and the peacemaker earns 2 kills. |
 | `spheres` | **The Sphere Builders** (Enterprise): four **Delphic Expanse spheres** appear in open space. Each one scorches ships within 3,500 units every 5 seconds and **warps the space around it into anomalies** (a spatial eddy, a chroniton field, a tetryon field or a spatial rift; see [Space terrain](#space-terrain)), up to three each, even when `--terrain` is off. The anomalies vanish when their sphere is destroyed. |
-| `kzinti` | **The Kzinti and their Ringworld** (the Kzinti are from *The Slaver Weapon*, the animated series; the Ringworld is from Larry Niven, who wrote it): a vast **Ringworld**, 14,000–18,000 across, appears around a random planet, and **it's here for good**. It never withdraws and can't be destroyed; even a galaxy reset keeps it (with its sections reset). It has **ten sections** that are planets in their own right: ships can orbit (dock at) them, bomb them, and land armies to **claim them for their empire**. Each has its own population (4 to 10 armies) and resources (repair, fuel and farming in different mixes). They're named after Niven's Ringworld: Fist-of-God, Great Ocean, Map of Earth, and so on. One section is **Kzin**, the Kzinti homeworld (30 armies, repair, fuel and farming). The **Kzinti** play like a small extra empire with **three warships, always**: the Chuft-Captain's **dreadnought**, the Telepath's **cruiser** and Flyer's **striker**. A lost ship relaunches from Kzin 30 seconds later (or from any Kzinti world if Kzin has fallen). They carry warriors from home and conquer: easy sections of the Ringworld first, then the worlds around it. They defend Kzin fiercely, patch up at home when hurt, and "scream and leap" at any ship that comes near. Their worlds grow armies like any empire's, and they'll always try to take Kzin back. Kzinti ships are worth 2 kills. The Kzinti come once; they don't count toward the two incursions at a time. |
+| `kzinti` | **The Kzinti and their Ringworld** (the Kzinti are from *The Slaver Weapon*, the animated series; the Ringworld is from Larry Niven, who wrote it): a vast **Ringworld**, 14,000–18,000 across, appears around a random planet. It can't be destroyed and never withdraws on its own; even a galaxy reset keeps it (with its sections reset). But it only stays while the Kzinti hold it: **once they've lost their last section, the Ringworld is free and jumps out of the galaxy**, taking all ten sections with it, **including any an empire has claimed**. (An empire whose only planets were on the ring is wiped out with it.) Ships orbiting a section are left in open space, orders naming a section are cancelled, and it never comes back. It has **ten sections** that are planets in their own right: ships can orbit (dock at) them, bomb them, and land armies to **claim them for their empire**. Each has its own population (4 to 10 armies) and resources (repair, fuel and farming in different mixes). They're named after Niven's Ringworld: Fist-of-God, Great Ocean, Map of Earth, and so on. One section is **Kzin**, the Kzinti homeworld (30 armies, repair, fuel and farming). The **Kzinti** play like a small extra empire with **three warships, always**: the Chuft-Captain's **dreadnought**, the Telepath's **cruiser** and Flyer's **striker**. A lost ship relaunches from Kzin 30 seconds later (or from any Kzinti world if Kzin has fallen). They carry warriors from home and work hard to **take the rest of the Ringworld**, going for the weakest sections first; once it's all theirs they patrol it. They defend Kzin fiercely, patch up at home when hurt, and "scream and leap" at any ship that comes near. Their worlds grow armies like any empire's, and they'll always try to take Kzin back. Kzinti ships are worth 2 kills. The Kzinti come only once and don't count toward the two incursions at a time; when the Ringworld jumps away, their fleet goes with it. **Robots go into a ring frenzy** while it's here: all they care about is the Ringworld. They bomb and invade only its sections (the Kzinti's included), fight only ships at or near the ring (or ones that come right at them), and guard their own sections when there's nothing to take. The rest of the galaxy is quiet until the ring leaves. |
 | `dyson` | **A Dyson sphere** (*Relics*, TNG): a shell 9,000 across materialises around an out-of-the-way colony (in the episode it encloses a star). Nothing gets through the shell, ships or torpedoes, except by its **hatch**. The planet keeps its owner, but only ships inside can reach it (and repair, refuel or fight over it there). An automated **tractor beam** at the hatch locks onto the nearest ship within 15,000 units every 10 seconds and drags it in, whatever its engines do; the hatch opens to take it and shuts behind it. Heavy fire on the **hatch emitter** (200 damage while it holds you) breaks the beam. The hatch only opens to take a ship, but **a ship in the doorway holds it open**, as the Jenolan did, letting everyone in or out. **Destroy the hatch emitter** (600 shields, 1,200 hull, fast repairs, 5 kills) to jam the doors open for good. It's very tough, so bring friends: **a ship blowing up in the doorway does 6× damage** (Scotty's gambit), about a third of its strength for a cruiser. The **wreck of the USS Jenolan** lies on the shell and can be salvaged. |
 
 **How aliens behave:**
@@ -608,7 +612,7 @@ netrek solo --aliens khan,borg,doomsday --alien-interval 90
   probe answered, Q's trial judged, Nomad talked into destroying itself, Armus starved,
   the Metrons' duel decided, first contact made with Species 10-C, peace made with the
   Horta, the Dyson sphere's hatch destroyed, or the last tribble or nanite cleared), or it withdraws after 4–6 minutes. The Kzinti
-  are the exception: they never leave. If an empire loses its last planet to aliens, it
+  are the exception: they stay until they've lost the whole Ringworld. If an empire loses its last planet to aliens, it
   has been wiped out by alien invaders.
 
 **Who's who on screen:**
@@ -788,11 +792,13 @@ damage, and a Borg cube's resistance builds as it's hit.
   colony gains 10 armies and repair yards for good.
 - **Sphere Builders:** fly around the anomalies they make, not through them, and knock
   the spheres out one at a time: each one you destroy takes its anomalies with it.
-- **Kzinti:** the Ringworld is a land grab. Its sections are close together, rich and
-  unclaimed, so bring armies early. Expect the Kzinti to jump anything near Kzin, and to
-  go for the weakest sections first, so garrison yours. Killing their ships only buys you
-  30 seconds; taking **Kzin** itself is what really hurts them (they have to relaunch
-  from their other worlds), but it starts with 30 armies and all three ships defend it.
+- **Kzinti:** the Ringworld is a land grab, but a gamble. Its sections are close together,
+  rich and unclaimed, so bring armies early. Expect the Kzinti to jump anything near
+  Kzin and to go for the weakest sections first, so garrison yours. Killing their ships
+  only buys you 30 seconds. The catch: **the moment the Kzinti lose their last section,
+  the Ringworld jumps away with every section on it, yours included.** So don't take Kzin
+  unless you can afford to lose what you hold there. And if a rival has sunk a lot of
+  armies into the ring, finishing off the Kzinti is a way to take all of it from them.
 - **Dyson sphere:** give it a wide berth (15,000 units from the hatch). If the beam
   grabs a teammate, it takes several ships pouring fire into the hatch emitter to break it. If you're shut inside,
   the planet can repair and refuel you; wait by the hatch, and when it opens to take the
@@ -1212,7 +1218,8 @@ The tests include:
   `caretaker_pulls_ships_in_and_weakens`, `horta_peace` and
   `spheres_plant_anomalies_that_vanish_with_them` and
   `dyson_sphere_swallows_ships_and_the_jenolan_gambit`,
-  `kzinti_ringworld_arrives_and_stays` and `ring_sections_are_planets_anyone_can_claim`.
+  `kzinti_ringworld_arrives_and_stays`, `ring_sections_are_planets_anyone_can_claim` and
+  `ringworld_departs_when_the_kzinti_lose_it` and `robots_go_into_a_ring_frenzy`.
 - **`retaking_alien_planets`:** liberated and resettled planets lose their alien mark.
 - **Extras:** `galaxy_has_ten_kinds_of_terrain_clear_of_planets` (ten of the 21 kinds in
   every galaxy, all of them turning up over many) and a test for each terrain effect; `treaties_between_players`, `one_ally_at_a_time_and_robots_decide`,

@@ -112,6 +112,20 @@ impl Orders {
                 continue;
             }
             let o = slot.order.as_mut().unwrap();
+            // The planet in the orders may have gone (the Ringworld jumping away).
+            let n = world.planets.len();
+            let gone = match &o.kind {
+                Kind::Scout(v) => v.iter().any(|&k| k >= n),
+                Kind::Reinforce(k) | Kind::Guard(k) | Kind::Bomb(k) | Kind::Capture(k) => *k >= n,
+                _ => false,
+            };
+            if gone {
+                world.reply(id, format!("{}: that world is gone. Your orders are cancelled.", command_name(team)));
+                slot.order = None;
+                slot.next_at = tick + REST_SECS * UPS as u32;
+                world.players[i].order = None;
+                continue;
+            }
             if alive {
                 progress(world, logistics, i, o, events);
             }

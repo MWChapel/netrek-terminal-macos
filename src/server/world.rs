@@ -1667,9 +1667,12 @@ impl World {
 
     fn toggle_overwatch(&mut self, i: usize) {
         let p = &mut self.players[i];
+        if !p.overwatch && p.orbiting.is_none() {
+            return self.warn(i as u8, "Overwatch only works in orbit: orbit a planet first");
+        }
         p.overwatch = !p.overwatch;
         let text = if p.overwatch {
-            "Overwatch ON: firing at any enemy that comes into weapons range"
+            "Overwatch ON: firing at any enemy that comes into weapons range (until you leave orbit)"
         } else {
             "Overwatch off"
         };
@@ -2191,6 +2194,7 @@ impl World {
             p.marked = false;
             p.trapped = false;
             p.nanites = false;
+            p.overwatch = false;
         }
         let with_armies = if victim_armies > 0 { format!(" (carrying {} armies)", victim_armies) } else { String::new() };
         if self.players[i].ship == ShipType::Freighter && self.players[i].cargo > 0 {
@@ -2342,7 +2346,14 @@ impl World {
         self.tempest_trap();
         for i in 0..MAXPLAYER {
             if self.players[i].overwatch && self.players[i].alive() {
-                self.overwatch_fire(i);
+                // Overwatch is a sentry post: it only holds while in orbit
+                // (a starbase's fighters are the exception).
+                if self.players[i].orbiting.is_none() && self.players[i].fighter_of.is_none() {
+                    self.players[i].overwatch = false;
+                    self.warn(i as u8, "Overwatch off: you've left orbit");
+                } else {
+                    self.overwatch_fire(i);
+                }
             }
             if self.players[i].jump_at.map_or(false, |t| self.tick >= t) {
                 self.transwarp(i);
@@ -3448,6 +3459,18 @@ mod tests {
         assert_eq!(w.planets[d].flags, 0, "still bare rock");
     }
 
+    /// Put ship `i` in orbit where it is (a spare Federation planet is moved
+    /// in underneath it), as overwatch needs.
+    fn park_in_orbit(w: &mut World, i: usize) {
+        let k = 5;
+        (w.planets[k].x, w.planets[k].y) = (w.players[i].x, w.players[i].y - ORBDIST);
+        w.planets[k].owner = w.players[i].team;
+        w.players[i].orbiting = Some(k);
+        (w.players[i].speed, w.players[i].desired_speed) = (0, 0);
+        // Orbiting ships sit a quarter turn from their heading: keep it where it is.
+        (w.players[i].dir, w.players[i].desired_dir) = (190.0, 190.0);
+    }
+
     fn pilot(w: &mut World, name: &str, team: Team, x: f64, y: f64) -> u8 {
         let id = w.add_player(name, false).unwrap();
         w.join(id, team, ShipType::Cruiser).unwrap();
@@ -3536,6 +3559,10 @@ mod tests {
         w.features.diplomacy = true;
         let kirk = pilot(&mut w, "Kirk", Team::Fed, 50_000.0, 50_000.0);
         let tal = pilot(&mut w, "Tal", Team::Rom, 80_000.0, 50_000.0);
+        // Only in orbit.
+        w.handle(kirk, ClientMsg::Overwatch);
+        assert!(!w.players[kirk as usize].overwatch, "not in open space");
+        park_in_orbit(&mut w, kirk as usize);
         w.handle(kirk, ClientMsg::Overwatch);
         assert!(w.players[kirk as usize].overwatch);
         let run = |w: &mut World| {
@@ -3575,6 +3602,12 @@ mod tests {
         // And off again.
         w.handle(kirk, ClientMsg::Message { to: MsgTarget::All, text: "/overwatch".into() });
         assert!(!w.players[kirk as usize].overwatch);
+        // Leaving orbit switches it off.
+        w.handle(kirk, ClientMsg::Overwatch);
+        assert!(w.players[kirk as usize].overwatch);
+        w.handle(kirk, ClientMsg::Course(64));
+        w.tick();
+        assert!(!w.players[kirk as usize].overwatch, "off once out of orbit");
     }
 
     /// A ranked officer at (x, y) with exactly these techs.
@@ -4057,6 +4090,7 @@ mod tests {
             let mut w = World::new();
             let me = officer(&mut w, Team::Fed, 50_000.0, 50_000.0, techs);
             let tal = pilot(&mut w, "Tal", Team::Rom, 50_000.0 + range, 50_000.0) as usize;
+            park_in_orbit(&mut w, me);
             w.players[me].overwatch = true;
             for _ in 0..3 {
                 w.tick();
@@ -4078,6 +4112,7 @@ mod tests {
         let me = officer(&mut w, Team::Fed, 50_000.0, 50_000.0, &[Tech::Tricobalt]);
         pilot(&mut w, "Tal", Team::Rom, 55_000.0, 50_000.0);
         pilot(&mut w, "Friend", Team::Fed, 56_000.0, 51_000.0);
+        park_in_orbit(&mut w, me);
         w.players[me].overwatch = true;
         for _ in 0..3 {
             w.tick();
@@ -4098,6 +4133,7 @@ mod tests {
         w.players[sb].ship = ShipType::Starbase;
         w.players[sb].fuel = ShipType::Starbase.stats().max_fuel;
         pilot(&mut w, "Tal", Team::Rom, 60_000.0, 50_000.0);
+        park_in_orbit(&mut w, sb);
         w.players[sb].overwatch = true;
         w.tick();
         assert!(w.players.iter().any(|p| p.fighter_of.is_some()), "fighters out");

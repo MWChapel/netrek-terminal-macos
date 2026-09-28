@@ -102,10 +102,22 @@ impl Bot {
             return;
         }
         self.think_timer = 2;
+        // A planet we were after may have gone (the Ringworld jumping away).
+        if let Goal::Bomb(k) | Goal::Pickup(k) | Goal::Invade(k) | Goal::Patrol(k) = self.goal {
+            if k >= world.planets.len() {
+                self.goal = Goal::Fight;
+            }
+        }
 
         let s = p.stats();
         let (x, y, team) = (p.x, p.y, p.team);
         let mut cmds: Vec<ClientMsg> = Vec::new();
+        // Ring frenzy: while the Kzinti's Ringworld is here, robots only
+        // fight for it. They go after its sections and nothing else, and only
+        // battle ships at the ring (or ones that come right at them).
+        let frenzy = world.ring.as_ref().map(|r| (r.x, r.y, r.r));
+        let near_ring = |qx: f64, qy: f64| frenzy.map_or(true, |(rx, ry, rr)| dist(qx, qy, rx, ry) < rr + 8000.0);
+        let ring_only = |k: usize| frenzy.is_none() || k >= PLANETS.len();
 
         // Nearest visible enemy.
         let enemy = world
@@ -117,6 +129,7 @@ impl Bot {
             // Don't waste fire on Q (or anything else weapons can't hurt), or on a champion only another empire can hurt.
             // (They still close in on V'Ger and the whale probe, which is how those end.)
             .filter(|q| (!q.ship.pointless_target() || matches!(q.ship, ShipType::VgerCloud | ShipType::WhaleProbe)) && q.only_hurt_by.map_or(true, |t| t == team))
+            .filter(|q| near_ring(q.x, q.y) || dist(x, y, q.x, q.y) < 5000.0)
             .map(|q| (q, dist(x, y, q.x, q.y)))
             .min_by(|a, b| a.1.total_cmp(&b.1))
             .map(|(q, d)| (q.id, q.x, q.y, q.dir, q.speed, d));
@@ -145,6 +158,22 @@ impl Bot {
         // Pick a goal.
         let prev = self.goal;
         let fight_range = 18000.0 * self.aggression;
+        // With nothing to do, patrol: in a ring frenzy, guard our nearest
+        // section of the ring (or the world of ours closest to it).
+        let patrol = match frenzy {
+            None => team.home_planet(),
+            Some((rx, ry, _)) => self
+                .pick_planet(world, x, y, |k, pl| k >= PLANETS.len() && pl.owner == team)
+                .or_else(|| {
+                    (0..world.planets.len())
+                        .filter(|&k| world.planets[k].owner == team)
+                        .min_by(|&a, &b| {
+                            let (pa, pb) = (&world.planets[a], &world.planets[b]);
+                            dist(rx, ry, pa.x, pa.y).total_cmp(&dist(rx, ry, pb.x, pb.y))
+                        })
+                })
+                .unwrap_or(team.home_planet()),
+        };
         self.goal = if (hurt > 0.6 || low_fuel || (prev == Goal::Retreat && (hurt > 0.1 || p.fuel / s.max_fuel < 0.9)))
             && p.armies == 0
         {
@@ -154,14 +183,14 @@ impl Bot {
         } else if p.armies > 0 && (p.armies >= p.max_armies_now() || !matches!(prev, Goal::Pickup(_))) {
             // Invade: prefer a planet we can take outright, otherwise wear
             // down the weakest one so teammates can finish it.
-            match self.pick_planet(world, x, y, |pl| is_target(pl.owner) && (pl.armies as u32) < p.armies) {
+            match self.pick_planet(world, x, y, |k, pl| ring_only(k) && is_target(pl.owner) && (pl.armies as u32) < p.armies) {
                 Some(k) => Goal::Invade(k),
                 None => {
                     let weakest = world
                         .planets
                         .iter()
                         .enumerate()
-                        .filter(|(_, pl)| is_target(pl.owner))
+                        .filter(|&(k, pl)| ring_only(k) && is_target(pl.owner))
                         .min_by(|a, b| {
                             let ka = a.1.armies as f64 * 20000.0 + dist(x, y, a.1.x, a.1.y);
                             let kb = b.1.armies as f64 * 20000.0 + dist(x, y, b.1.x, b.1.y);
@@ -170,19 +199,19 @@ impl Bot {
                         .map(|(k, _)| k);
                     match weakest {
                         Some(k) => Goal::Invade(k),
-                        None => Goal::Patrol(team.home_planet()),
+                        None => Goal::Patrol(patrol),
                     }
                 }
             }
         } else if p.max_armies_now() > p.armies {
-            match self.pick_planet(world, x, y, |pl| pl.owner == team && pl.armies > 5) {
+            match self.pick_planet(world, x, y, |_, pl| pl.owner == team && pl.armies > 5) {
                 Some(k) => Goal::Pickup(k),
-                None => Goal::Patrol(team.home_planet()),
+                None => Goal::Patrol(patrol),
             }
         } else {
-            match self.pick_planet(world, x, y, |pl| is_target(pl.owner) && pl.armies > 4) {
+            match self.pick_planet(world, x, y, |k, pl| ring_only(k) && is_target(pl.owner) && pl.armies > 4) {
                 Some(k) => Goal::Bomb(k),
-                None => Goal::Patrol(team.home_planet()),
+                None => Goal::Patrol(patrol),
             }
         };
 
@@ -236,7 +265,7 @@ impl Bot {
             }
             Goal::Retreat => {
                 let target = self
-                    .pick_planet(world, x, y, |pl| pl.owner == team && pl.flags & PL_REPAIR != 0)
+                    .pick_planet(world, x, y, |_, pl| pl.owner == team && pl.flags & PL_REPAIR != 0)
                     .unwrap_or(team.home_planet());
                 if p.orbiting == Some(target) {
                     if !p.repair_mode {
@@ -291,13 +320,13 @@ impl Bot {
         world: &World,
         x: f64,
         y: f64,
-        ok: impl Fn(&super::world::Planet) -> bool,
+        ok: impl Fn(usize, &super::world::Planet) -> bool,
     ) -> Option<usize> {
         world
             .planets
             .iter()
             .enumerate()
-            .filter(|(_, pl)| ok(pl))
+            .filter(|&(k, pl)| ok(k, pl))
             .map(|(k, pl)| (k, dist(x, y, pl.x, pl.y)))
             .min_by(|a, b| a.1.total_cmp(&b.1))
             .map(|(k, _)| k)
