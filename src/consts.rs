@@ -681,13 +681,13 @@ pub static SHIPS: [ShipStats; 57] = [
         max_etemp: 1500.0, max_wtemp: 1400.0, mass: 2600.0, tract_range: 1.0, tract_str: 3000.0,
     },
     ShipStats {
-        name: "Tholian vessel", abbr: "TH", max_speed: 8, max_shield: 70.0, max_damage: 80.0,
+        name: "Tholian vessel", abbr: "TH", max_speed: 12, max_shield: 70.0, max_damage: 80.0,
         max_fuel: 20000.0, max_armies: 0, torp_damage: 20.0, torp_speed: 14.0, torp_fuse: 20,
         torp_cost: 5.0 * 20.0, phaser_damage: 70.0, phaser_cost: 5.0 * 70.0,
         plasma_damage: 0.0, plasma_speed: 0.0, plasma_fuse: 0, plasma_cost: 0.0,
         recharge: 25.0, repair: 120.0, warp_cost: 1.0, cloak_cost: 20.0, shield_cost: 1.0,
-        turns: 400_000.0, acc: 250, dec: 300, wpn_cool: 4.0, egn_cool: 12.0,
-        max_etemp: 2000.0, max_wtemp: 1400.0, mass: 1500.0, tract_range: 0.7, tract_str: 2000.0,
+        turns: 900_000.0, acc: 500, dec: 500, wpn_cool: 4.0, egn_cool: 12.0,
+        max_etemp: 100_000.0, max_wtemp: 1400.0, mass: 1500.0, tract_range: 0.7, tract_str: 2000.0,
     },
     ShipStats {
         name: "Fesarius", abbr: "FS", max_speed: 3, max_shield: 1500.0, max_damage: 1500.0,

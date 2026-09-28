@@ -29,15 +29,15 @@ struct Event {
     kind: Faction,
     ships: Vec<u8>,
     started: u32,
-    /// Planet the incursion is centred on (Khan's stronghold, the Tholian web).
-    anchor: usize,
     /// Per-ship planet objectives.
     goals: HashMap<u8, usize>,
     /// Borg: cube -> (victim, ticks held in the tractor beam).
     holds: HashMap<u8, (u8, i32)>,
     waypoint: (f64, f64),
-    web_radius: f64,
-    web_angle: f64,
+    /// Tholians: the three planets the web is strung between.
+    corners: Vec<usize>,
+    /// Tholians: where each ship laid its last strand.
+    trail: HashMap<u8, (f64, f64)>,
     lost_any: bool,
     /// V'Ger merge progress (ship, ticks at the core); 8472 beam charge.
     progress: HashMap<u8, i32>,
@@ -305,6 +305,7 @@ impl Director {
         let mut duel = None;
         let mut waypoint = (ax, ay);
         let mut inside = Vec::new();
+        let mut corners = Vec::new();
         let mut spawn = |world: &mut World, name: &str, ship: ShipType, (x, y): (f64, f64), bounty: f64| {
             if let Some(id) = world.spawn_alien(name, kind, ship, x, y, bounty) {
                 ships.push(id);
@@ -335,10 +336,21 @@ impl Director {
                 format!("Gorn raiders are attacking the colonies near {}!", world.planets[anchor].name)
             }
             Faction::Tholian => {
+                // The web is strung between this planet and its two nearest neighbours.
+                let mut others: Vec<usize> = (0..world.planets.len()).filter(|&k| k != anchor).collect();
+                others.sort_by(|&a, &b| {
+                    let (pa, pb) = (&world.planets[a], &world.planets[b]);
+                    dist(ax, ay, pa.x, pa.y).total_cmp(&dist(ax, ay, pb.x, pb.y))
+                });
+                corners = vec![anchor, others[0], others[1]];
                 for n in ["Loskene", "Tholian", "Tholian"] {
                     spawn(world, n, ShipType::TholianVessel, near(ax, ay, 3000.0), 5.0);
                 }
-                format!("Tholian vessels have appeared near {}. Beware the Tholian web!", world.planets[anchor].name)
+                let names: Vec<&str> = corners.iter().map(|&k| world.planets[k].name).collect();
+                format!(
+                    "Tholian vessels are racing between {}, {} and {}, spinning a web across all three! Its strands burn any ship that touches them.",
+                    names[0], names[1], names[2]
+                )
             }
             Faction::Fesarius => {
                 spawn(world, "Balok", ShipType::Fesarius, edge(), 30.0);
@@ -640,12 +652,11 @@ impl Director {
             kind,
             ships,
             started: world.tick,
-            anchor,
             goals: HashMap::new(),
             holds: HashMap::new(),
             waypoint,
-            web_radius: 2500.0,
-            web_angle: 0.0,
+            corners,
+            trail: HashMap::new(),
             lost_any: false,
             progress: HashMap::new(),
             dwell: 0,
@@ -879,7 +890,7 @@ fn run_event(world: &mut World, e: &mut Event) {
             Faction::Khan => khan(world, i, tick),
             Faction::Gorn => gorn(world, e, i, tick),
             Faction::Mirror => mirror(world, e, i, tick),
-            Faction::Tholian => tholian(world, e, i, n, ids.len(), tick),
+            Faction::Tholian => tholian(world, e, i, n, tick),
             Faction::Fesarius => fesarius(world, e, i, tick),
             Faction::Doomsday => doomsday(world, e, i, tick),
             Faction::Amoeba => amoeba(world, e, i, tick),
@@ -926,9 +937,7 @@ fn run_event(world: &mut World, e: &mut Event) {
         tribbles(world, e, tick);
     }
     if e.kind == Faction::Tholian {
-        e.web_radius = (e.web_radius + 2.5).min(9000.0);
-        e.web_angle += 0.004;
-        if tick % 12 == 0 {
+        if tick % 30 == 0 {
             spin_web(world, e);
         }
     }
@@ -1023,16 +1032,51 @@ fn mirror(world: &mut World, e: &mut Event, i: usize, tick: u32) {
     }
 }
 
-/// Tholians: circle a planet in formation, spinning a web between them.
-fn tholian(world: &mut World, e: &mut Event, i: usize, n: usize, count: usize, tick: u32) {
-    let (cx, cy) = (world.planets[e.anchor].x, world.planets[e.anchor].y);
-    let a = e.web_angle + n as f64 * TAU / count.max(1) as f64;
-    let (tx, ty) = (cx + a.cos() * e.web_radius, cy + a.sin() * e.web_radius);
-    let p = &world.players[i];
-    let d = dist(p.x, p.y, tx, ty);
-    let speed = ((d / 600.0) as i32).clamp(1, p.stats().max_speed);
-    if tick % 2 == 0 {
-        steer_to(world, i, tx, ty, speed);
+/// How long a Tholian strand lasts.
+const WEB_TTL: i32 = 60 * UPS as i32;
+/// How often (in ticks) a racing Tholian lays another strand behind it.
+const STRAND_TICKS: u32 = 10;
+
+/// Where the web's corner `k` is on a Tholian's `lap`: each lap runs a
+/// little further inside the triangle, so the web fills in.
+fn web_corner(world: &World, e: &Event, k: usize, lap: i32) -> (f64, f64) {
+    let pts: Vec<(f64, f64)> = e.corners.iter().map(|&c| (world.planets[c].x, world.planets[c].y)).collect();
+    let (gx, gy) = (pts.iter().map(|p| p.0).sum::<f64>() / 3.0, pts.iter().map(|p| p.1).sum::<f64>() / 3.0);
+    let inset = (lap % 4) as f64 * 0.18;
+    let (px, py) = pts[k];
+    (px + (gx - px) * inset, py + (gy - py) * inset)
+}
+
+/// Tholians: race flat out round a triangle of three planets, laying web
+/// strands behind them.
+fn tholian(world: &mut World, e: &mut Event, i: usize, n: usize, tick: u32) {
+    let id = i as u8;
+    if e.corners.len() < 3 {
+        return;
+    }
+    let lap = *e.progress.get(&id).unwrap_or(&0);
+    let corner = *e.goals.entry(id).or_insert(n % 3);
+    let (tx, ty) = web_corner(world, e, corner, lap);
+    let (x, y) = (world.players[i].x, world.players[i].y);
+    let max = world.players[i].stats().max_speed;
+    steer_to(world, i, tx, ty, max);
+    let lay = |world: &mut World, e: &mut Event| {
+        let (px, py) = e.trail.get(&id).copied().unwrap_or((x, y));
+        if dist(px, py, x, y) > 300.0 {
+            world.webs.push(Web { x1: px, y1: py, x2: x, y2: y, ttl: WEB_TTL, owner: id });
+        }
+        e.trail.insert(id, (x, y));
+    };
+    if dist(x, y, tx, ty) < 900.0 {
+        // Round the corner: finish this side's strand at the corner itself.
+        lay(world, e);
+        let next = (corner + 1) % 3;
+        e.goals.insert(id, next);
+        if next == n % 3 {
+            e.progress.insert(id, lap + 1);
+        }
+    } else if tick % STRAND_TICKS == (n as u32 * 3) % STRAND_TICKS {
+        lay(world, e);
     }
     if tick % 6 == 0 {
         if let Some((t, d)) = nearest_enemy(world, i, 4000.0, None) {
@@ -1046,29 +1090,21 @@ fn tholian(world: &mut World, e: &mut Event, i: usize, n: usize, count: usize, t
     }
 }
 
+/// Cross strands strung between the racing Tholians, across the web.
 fn spin_web(world: &mut World, e: &Event) {
     let alive: Vec<u8> = e.ships.iter().copied().filter(|&id| world.players[id as usize].alive()).collect();
-    let (cx, cy) = (world.planets[e.anchor].x, world.planets[e.anchor].y);
-    let add = |world: &mut World, x1: f64, y1: f64, x2: f64, y2: f64, owner: u8| {
-        if dist(x1, y1, x2, y2) < 20_000.0 {
-            world.webs.push(Web { x1, y1, x2, y2, ttl: 90 * UPS as i32, owner });
-        }
-    };
     for k in 0..alive.len() {
         let (a, b) = (alive[k] as usize, alive[(k + 1) % alive.len()] as usize);
-        if a != b {
-            let (pa, pb) = (&world.players[a], &world.players[b]);
-            let (x1, y1, x2, y2) = (pa.x, pa.y, pb.x, pb.y);
-            add(world, x1, y1, x2, y2, alive[k]);
+        if a == b {
+            continue;
         }
-        // Radial strands back to the centre every so often.
-        if world.tick % 36 == 0 {
-            let pa = &world.players[a];
-            let (x1, y1) = (pa.x, pa.y);
-            add(world, x1, y1, cx, cy, alive[k]);
+        let (pa, pb) = (&world.players[a], &world.players[b]);
+        let (x1, y1, x2, y2) = (pa.x, pa.y, pb.x, pb.y);
+        if dist(x1, y1, x2, y2) < 25_000.0 {
+            world.webs.push(Web { x1, y1, x2, y2, ttl: WEB_TTL, owner: alive[k] });
         }
     }
-    let excess = world.webs.len().saturating_sub(160);
+    let excess = world.webs.len().saturating_sub(240);
     world.webs.drain(..excess);
 }
 
@@ -3682,6 +3718,28 @@ mod tests {
     }
 
     #[test]
+    fn tholians_web_three_planets() {
+        let mut w = World::new();
+        let mut d = Director::new(AlienConfig { kinds: vec![Faction::Tholian], interval: 9999 });
+        d.spawn_kind(&mut w, Faction::Tholian, None);
+        let corners = d.events[0].corners.clone();
+        assert_eq!(corners.len(), 3);
+        for _ in 0..(UPS as u32 * 40) {
+            d.tick(&mut w);
+            w.tick();
+        }
+        let top = w.players.iter().filter(|p| p.alive() && p.faction == Some(Faction::Tholian)).map(|p| p.speed).max();
+        assert_eq!(top, Some(12), "racing at warp 12");
+        // Strands reach every one of the three planets.
+        for &k in &corners {
+            let (px, py) = (w.planets[k].x, w.planets[k].y);
+            let near = w.webs.iter().any(|s| dist(s.x1, s.y1, px, py) < 1500.0 || dist(s.x2, s.y2, px, py) < 1500.0);
+            assert!(near, "no strand at {}", w.planets[k].name);
+        }
+        assert!(w.webs.len() > 30, "{} strands", w.webs.len());
+    }
+
+    #[test]
     fn dyson_sphere_swallows_ships_and_the_jenolan_gambit() {
         let (mut w, kirk) = with_cruiser(0.0, 0.0);
         let k = kirk as usize;
@@ -3732,12 +3790,11 @@ mod tests {
             kind,
             ships: Vec::new(),
             started: 0,
-            anchor: 0,
             goals: HashMap::new(),
             holds: HashMap::new(),
             waypoint: (0.0, 0.0),
-            web_radius: 0.0,
-            web_angle: 0.0,
+            corners: Vec::new(),
+            trail: HashMap::new(),
             lost_any: false,
             progress: HashMap::new(),
             dwell: 0,

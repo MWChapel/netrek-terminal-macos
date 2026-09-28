@@ -555,7 +555,7 @@ netrek solo --aliens khan,borg,doomsday --alien-interval 90
 |---|---|
 | `khan` | **Khan Noonien Singh** seizes a planet as his Augment stronghold (40 armies, and it fires on everyone). Three augmented Reliant-style ships, faster and much tougher than stock Federation ships, hunt Federation ships first and bomb Federation worlds. |
 | `gorn` | **Gorn raiders** (four heavy hammerhead ships) go from colony to colony, orbiting and wiping out the inhabitants all the way to zero armies, and fight anyone who comes close. |
-| `tholian` | **Tholian vessels** appear around a planet and circle it in formation, spinning an ever-widening **Tholian web** between themselves and back to the centre. Any non-Tholian ship touching a strand takes damage. Strands dissolve after 90 seconds. |
+| `tholian` | **Tholian vessels** pick a planet and its two nearest neighbours and **race flat out (warp 12)** round the triangle between them, laying a strand of **Tholian web** behind them as they go and stringing more strands across between each other. Every lap runs a little further inside, so the web fills in with nested triangles until it covers all three planets. Any non-Tholian ship touching a strand takes damage, including ships orbiting those planets. Strands dissolve after 60 seconds, but the Tholians keep spinning. |
 | `fesarius` | **The Fesarius**, Balok's vast globe ship, wanders the galaxy hunting ships with heavy beams and tractoring them in. |
 | `mirror` | A rift opens and the **Terran Empire** arrives in ships identical to Starfleet's (but silver). They fight everyone, bomb planets down and **conquer** them for the Empire. |
 | `doomsday` | **The planet killer** drifts from world to world and **devours** them, leaving dead rock with no armies or resources. Its antiproton beam hits nearby ships, and anything in front of its maw is eaten. Its neutronium hull shrugs off most damage, but, as Commodore Decker showed, **a ship exploding in its maw does 8× damage**. |
@@ -653,7 +653,7 @@ infected.
 |---|---|---|---|---|---|
 | Augment ship (Khan) | 10 | 150 | 150 | torpedo 50, phaser 120 | 2 |
 | Gorn raider | 7 | 120 | 170 | torpedo 45, phaser 90 | 1.5 |
-| Tholian vessel | 8 | 70 | 80 | phaser 70, web | 1.5 |
+| Tholian vessel | 12 | 70 | 80 | phaser 70, web | 1.5 |
 | Terran Empire ships | as Starfleet CA / DD / BB | | | | 1.5 |
 | Fesarius | 3 | 1,500 | 1,500 | phaser 140, tractor | 4 |
 | Planet killer | 2 | 1,000 | 2,500 | antiproton beam 80, maw | 5 |
@@ -695,8 +695,10 @@ damage, and a Borg cube's resistance builds as it's hit.
   targets. Catch them while they're busy. They only turn to fight ships within about
   8,000 units.
 - **Tholians:** don't fly through the web. It only hurts while you're touching a strand,
-  so cross strands quickly or go around. Kill the ships from outside the web with
-  torpedoes; their hulls are thin.
+  so cross strands quickly or go around, and get your ships out of orbit at the three
+  planets it spans. The Tholians are too fast to chase, but they fly a fixed triangle:
+  wait near a corner and hit them with phasers or a torpedo spread as they come round.
+  Their hulls are thin.
 - **Fesarius:** its beams reach about 8,000 units and its tractor pulls you in, so keep
   your distance and shields up and hit it with torpedoes from long range. It moves at
   warp 3, so you can always outrun it.
@@ -1188,7 +1190,7 @@ The tests include:
   `polaron_beams_ignore_shields`, `borg_and_8472_fight_each_other`,
   `chang_fires_cloaked_until_hit`, `tribbles_spread_by_ship_and_flee_klingons`,
   `hirogen_trophy_and_bonus`, `q_champion_only_hurt_by_the_accused`, `q_tribute_trial`,
-  `ferengi_loot_is_dropped_and_recovered`,
+  `ferengi_loot_is_dropped_and_recovered`, `tholians_web_three_planets`,
   `swarm_latches_and_detonation_shakes_it_off`, `tempest_traps_ships_on_its_rim`,
   `tempest_core_is_only_exposed_when_the_web_is_clear`,
   `flippers_drag_ships_into_the_core`, `tempest_shapes`, `nomad_is_talked_to_death`,
