@@ -39,6 +39,8 @@ pub struct ClientConfig {
     pub gfx: Option<Gfx>,
     /// Start with sound effects off.
     pub mute: bool,
+    /// Connect as an observer.
+    pub observe: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -365,6 +367,9 @@ pub struct App {
     /// player-list column), otherwise on one line in the message panel.
     tech_in_controls: bool,
     sound: sound::Sound,
+    /// Watching as an observer (no ship): `slot` then tracks the ship being
+    /// followed, so the maps and gauges follow it.
+    observer: bool,
 }
 
 pub fn run(cfg: ClientConfig) -> io::Result<()> {
@@ -372,11 +377,17 @@ pub fn run(cfg: ClientConfig) -> io::Result<()> {
         .map_err(|e| io::Error::new(e.kind(), format!("cannot connect to {}:{}: {}", cfg.host, cfg.port, e)))?;
     stream.set_nodelay(true)?;
     let mut writer = BufWriter::new(stream.try_clone()?);
-    write_msg(&mut writer, &ClientMsg::Hello { name: cfg.name.clone(), version: PROTOCOL_VERSION })?;
+    let hello = if cfg.observe {
+        ClientMsg::Observe { name: cfg.name.clone(), version: PROTOCOL_VERSION }
+    } else {
+        ClientMsg::Hello { name: cfg.name.clone(), version: PROTOCOL_VERSION }
+    };
+    write_msg(&mut writer, &hello)?;
 
     let mut reader = BufReader::new(stream);
-    let (slot, motd) = match read_msg::<ServerMsg, _>(&mut reader)? {
-        ServerMsg::Welcome { slot, motd } => (slot, motd),
+    let (slot, motd, observer) = match read_msg::<ServerMsg, _>(&mut reader)? {
+        ServerMsg::Welcome { slot, motd } => (slot, motd, false),
+        ServerMsg::Observing { motd } => (u8::MAX, motd, true),
         ServerMsg::Reject(why) => return Err(io::Error::new(io::ErrorKind::Other, why)),
         _ => return Err(io::Error::new(io::ErrorKind::Other, "unexpected reply from server")),
     };
@@ -434,6 +445,7 @@ pub fn run(cfg: ClientConfig) -> io::Result<()> {
         tmux_hint,
         tech_in_controls: false,
         sound: sound::Sound::new(!cfg_mute),
+        observer,
     };
     if let Some(h) = hint {
         app.warn(h);
@@ -603,6 +615,9 @@ impl App {
     fn on_server(&mut self, m: ServerMsg) {
         match m {
             ServerMsg::Frame(f) => {
+                if self.observer {
+                    self.slot = f.me;
+                }
                 if let Some(me) = f.players.iter().find(|p| p.id == f.me) {
                     if me.state != PState::Outfit {
                         self.last_center = (me.x as f64, me.y as f64);
@@ -638,7 +653,17 @@ impl App {
                 self.closed = Some(why);
                 self.quit = true;
             }
-            ServerMsg::Welcome { .. } => {}
+            // Switching between playing and observing.
+            ServerMsg::Welcome { slot, .. } => {
+                (self.observer, self.slot, self.mode, self.popup) = (false, slot, Mode::Play, Popup::None);
+                self.redraw = true;
+                self.warn("You've left the observers' gallery. Choose a team and ship.");
+            }
+            ServerMsg::Observing { .. } => {
+                (self.observer, self.slot, self.mode, self.popup) = (true, u8::MAX, Mode::Play, Popup::None);
+                self.redraw = true;
+                self.warn("Observing: Tab / Shift-Tab to follow a ship, arrows for a free camera, J to join");
+            }
         }
     }
 
@@ -794,6 +819,9 @@ impl App {
             self.popup = Popup::None;
             return;
         }
+        if self.observer && self.mode == Mode::Play {
+            return self.observer_mouse(m);
+        }
         if self.my_state() != PState::Alive || self.mode != Mode::Play {
             return;
         }
@@ -860,6 +888,9 @@ impl App {
             self.popup = Popup::None;
             return;
         }
+        if self.observer {
+            return self.observer_key(k);
+        }
         if self.my_state() == PState::Outfit {
             return self.outfit_key(k);
         }
@@ -913,6 +944,15 @@ impl App {
                 self.cmd(ClientMsg::Tech { slot, dir });
             }
             'D' => self.cmd(ClientMsg::DetOwn),
+            // Board the enemy ship nearest the pointer.
+            'B' => {
+                let my_team = self.me().map_or(Team::Ind, |p| p.team);
+                let target = self.nearest_player_to_pointer().filter(|p| p.team != my_team || p.faction.is_some()).map(|p| p.id);
+                match target {
+                    Some(t) => self.cmd(ClientMsg::Board(t)),
+                    None => self.warn("Point at an enemy ship to board it"),
+                }
+            }
             'T' | 'y' => {
                 let pressor = c == 'y';
                 let tractoring = self.me().map_or(false, |p| p.flags & (pf::TRACTOR | pf::PRESSOR) != 0);
@@ -1035,6 +1075,7 @@ impl App {
                         if pl.flags & PL_FUEL != 0 { " • FUEL" } else { "" },
                         if pl.flags & PL_AGRI != 0 { " • AGRI" } else { "" },
                     ) + if pl.tribbles { " • TRIBBLES" } else { "" }
+                        + &pl.outpost.map_or(String::new(), |o| format!(" • {}", o.name().to_uppercase()))
                 } else {
                     format!("{} — not yet scouted", def.name)
                 }
@@ -1050,6 +1091,7 @@ impl App {
             KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => self.quit = true,
             KeyCode::Char('m') => self.mode = Mode::Compose { target: None, text: String::new() },
             KeyCode::Char('?') | KeyCode::Char('h') => self.toggle_popup(Popup::Help),
+            KeyCode::Char('W') => self.cmd(ClientMsg::Watch),
             KeyCode::Left | KeyCode::Right => {
                 let cur = self.outfit_team.unwrap_or(Team::Fed);
                 let i = Team::PLAYABLE.iter().position(|&t| t == cur).unwrap_or(0) as i32;
@@ -1082,6 +1124,96 @@ impl App {
             }
             _ => {}
         }
+    }
+
+    /// Observers: follow ships, move a free camera, talk, or join.
+    fn observer_key(&mut self, k: KeyEvent) {
+        // How far one press of an arrow moves the free camera.
+        let step = 6000.0 * self.zoom;
+        let pan = |app: &mut App, dx: f64, dy: f64| {
+            app.follow(None);
+            let (x, y) = app.last_center;
+            app.last_center = ((x + dx).clamp(0.0, GWIDTH), (y + dy).clamp(0.0, GWIDTH));
+        };
+        match k.code {
+            KeyCode::Tab => self.follow_next(1),
+            KeyCode::BackTab => self.follow_next(-1),
+            KeyCode::Left => pan(self, -step, 0.0),
+            KeyCode::Right => pan(self, step, 0.0),
+            KeyCode::Up => pan(self, 0.0, -step),
+            KeyCode::Down => pan(self, 0.0, step),
+            KeyCode::Esc => self.follow(None),
+            KeyCode::Char('J') => self.cmd(ClientMsg::Play),
+            // Observers can only talk to everyone.
+            KeyCode::Char('m') => self.mode = Mode::Compose { target: Some(MsgTarget::All), text: String::new() },
+            KeyCode::Char('L') => self.toggle_popup(Popup::Players),
+            KeyCode::Char('P') => self.toggle_popup(Popup::Planets),
+            KeyCode::Char('?') | KeyCode::Char('h') => self.toggle_popup(Popup::Help),
+            KeyCode::Char('+') | KeyCode::Char('=') => self.zoom = (self.zoom / 1.25).max(0.4),
+            KeyCode::Char('-') | KeyCode::Char('_') => self.zoom = (self.zoom * 1.25).min(4.0),
+            KeyCode::Char('i') => self.info_pointer(),
+            KeyCode::Char('g') => {
+                self.gfx = match self.gfx {
+                    Gfx::Vector => Gfx::Braille,
+                    Gfx::Braille => Gfx::Vector,
+                };
+                self.redraw = true;
+            }
+            KeyCode::Char('S') => {
+                self.sound.enabled = !self.sound.enabled && self.sound.available();
+                self.warn(if self.sound.enabled { "Sound on" } else { "Sound off" });
+            }
+            KeyCode::Char('q') | KeyCode::Char('Q') => self.mode = Mode::ConfirmQuit,
+            _ => {}
+        }
+    }
+
+    /// Observers: click a ship to follow it, or anywhere else to look there.
+    fn observer_mouse(&mut self, m: MouseEvent) {
+        match m.kind {
+            MouseEventKind::Down(MouseButton::Left) => {
+                let Some((x, y)) = self.pointer_world() else { return };
+                let near = self
+                    .nearest_player_to_pointer()
+                    .filter(|p| p.state == PState::Alive && ((p.x as f64 - x).powi(2) + (p.y as f64 - y).powi(2)).sqrt() < 3000.0 * self.zoom)
+                    .map(|p| p.id);
+                match near {
+                    Some(id) => self.follow(Some(id)),
+                    None => {
+                        self.follow(None);
+                        self.last_center = (x, y);
+                    }
+                }
+            }
+            MouseEventKind::ScrollUp => self.zoom = (self.zoom / 1.25).max(0.4),
+            MouseEventKind::ScrollDown => self.zoom = (self.zoom * 1.25).min(4.0),
+            _ => {}
+        }
+    }
+
+    fn follow(&mut self, id: Option<u8>) {
+        if !self.observer {
+            return;
+        }
+        self.slot = id.unwrap_or(u8::MAX);
+        self.cmd(ClientMsg::Follow(id));
+    }
+
+    /// Follow the next (or previous) ship in play.
+    fn follow_next(&mut self, step: i32) {
+        let Some(f) = self.frame.as_ref() else { return };
+        let mut ids: Vec<u8> = f.players.iter().filter(|p| p.state == PState::Alive).map(|p| p.id).collect();
+        ids.sort_unstable();
+        if ids.is_empty() {
+            return;
+        }
+        let at = ids.iter().position(|&id| id == self.slot);
+        let next = match at {
+            Some(k) => ids[(k as i32 + step).rem_euclid(ids.len() as i32) as usize],
+            None if step > 0 => ids[0],
+            None => ids[ids.len() - 1],
+        };
+        self.follow(Some(next));
     }
 
     fn launch(&mut self) {

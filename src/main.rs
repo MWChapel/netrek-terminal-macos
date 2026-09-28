@@ -41,9 +41,22 @@ enum Cmd {
         alien_interval: u64,
         #[command(flatten)]
         extras: Extras,
+        /// Don't let anyone watch as an observer
+        #[arg(long)]
+        no_observers: bool,
     },
     /// Connect to a server and play
     Play {
+        /// Server host name or address
+        #[arg(default_value = "localhost")]
+        host: String,
+        #[arg(short, long, default_value_t = DEFAULT_PORT)]
+        port: u16,
+        #[command(flatten)]
+        who: Who,
+    },
+    /// Connect to a server and watch as an observer (the whole galaxy, no ship)
+    Observe {
         /// Server host name or address
         #[arg(default_value = "localhost")]
         host: String,
@@ -97,7 +110,19 @@ struct Extras {
     /// Supply convoys that carry supplies home to buy empire upgrades
     #[arg(long)]
     supply: bool,
-    /// Switch on all five extras at once
+    /// Subsystem damage: hits can knock out warp, impulse, phasers, torpedoes,
+    /// shields, transporters, cloak or tractor until repaired (/fix <system>)
+    #[arg(long)]
+    subsystems: bool,
+    /// Boarding parties: beam the armies you carry onto a shieldless enemy ship to
+    /// capture it, then tow the prize home
+    #[arg(long)]
+    boarding: bool,
+    /// Build defence outposts, shipyards and sensor arrays on your planets
+    /// (/build defence|yard|sensor)
+    #[arg(long)]
+    outposts: bool,
+    /// Switch on all eight extras at once
     #[arg(long)]
     extras: bool,
     /// With ranks: don't give Captains and above their advanced tech
@@ -115,6 +140,9 @@ impl Extras {
             terrain: all || self.terrain,
             supply: all || self.supply,
             rank_tech: !self.no_rank_tech,
+            subsystems: all || self.subsystems,
+            boarding: all || self.boarding,
+            outposts: all || self.outposts,
         }
     }
 
@@ -211,7 +239,7 @@ fn player_name(who: &Who) -> String {
 fn main() {
     let cli = Cli::parse();
     let result = match cli.cmd {
-        Cmd::Server { port, bind, bots, empires, aliens, alien_interval, extras } => server::run(server::ServerConfig {
+        Cmd::Server { port, bind, bots, empires, aliens, alien_interval, extras, no_observers } => server::run(server::ServerConfig {
             bind,
             port,
             bots,
@@ -220,6 +248,7 @@ fn main() {
             alien_interval,
             features: extras.features(),
             records: extras.records(),
+            observers: !no_observers,
             quiet: false,
         }),
         Cmd::Play { host, port, who } => client::run(client::ClientConfig {
@@ -230,6 +259,17 @@ fn main() {
             ship: who.ship,
             gfx: parse_gfx(&who.gfx),
             mute: who.mute,
+            observe: false,
+        }),
+        Cmd::Observe { host, port, who } => client::run(client::ClientConfig {
+            host,
+            port,
+            name: player_name(&who),
+            team: who.team,
+            ship: who.ship,
+            gfx: parse_gfx(&who.gfx),
+            mute: who.mute,
+            observe: true,
         }),
         Cmd::Solo { bots, empires, aliens, alien_interval, extras, who } => {
             let cfg = server::ServerConfig {
@@ -241,6 +281,7 @@ fn main() {
                 alien_interval,
                 features: extras.features(),
                 records: extras.records(),
+                observers: true,
                 quiet: true,
             };
             server::spawn_background(cfg).and_then(|port| {
@@ -252,6 +293,7 @@ fn main() {
                     ship: who.ship,
                     gfx: parse_gfx(&who.gfx),
                     mute: who.mute,
+                    observe: false,
                 })
             })
         }

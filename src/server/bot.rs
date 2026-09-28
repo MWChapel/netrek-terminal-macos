@@ -147,6 +147,12 @@ impl Bot {
         });
         let enemy = raider.or(enemy);
 
+        // Building an outpost: hold orbit until it's done, unless attacked.
+        let building = world.builds.iter().any(|b| b.builder == self.id);
+        if building && !matches!(enemy, Some((.., d)) if d < 6000.0) {
+            return;
+        }
+
         // Incoming enemy torps.
         let threats = world
             .torps
@@ -167,6 +173,8 @@ impl Bot {
         let hurt = p.damage / s.max_damage;
         let low_fuel = p.fuel / s.max_fuel < 0.25;
         let hot = p.etemp / s.max_etemp > 0.8;
+        // Warp drive out, or no working weapons: limp home for repairs.
+        let crippled = p.sys_out(System::Warp) || (p.sys_out(System::Phasers) && p.sys_out(System::Torpedoes));
 
         // Pick a goal.
         let prev = self.goal;
@@ -193,7 +201,7 @@ impl Bot {
                 })
                 .unwrap_or(team.home_planet()),
         };
-        self.goal = if (hurt > 0.6 || low_fuel || (prev == Goal::Retreat && (hurt > 0.1 || p.fuel / s.max_fuel < 0.9)))
+        self.goal = if (hurt > 0.6 || low_fuel || crippled || (prev == Goal::Retreat && (hurt > 0.1 || p.fuel / s.max_fuel < 0.9)))
             && p.armies == 0
         {
             Goal::Retreat
@@ -271,11 +279,29 @@ impl Bot {
             .iter()
             .any(|pl| world.hostile(pl.owner, team) && pl.armies > 0 && dist(x, y, pl.x, pl.y) < PFIREDIST * 2.0);
         let danger = threats > 0 || hostile_planet || matches!(enemy, Some((.., d)) if d < 9000.0);
-        if danger != p.shields_up && p.fuel > 300.0 && !(self.goal == Goal::Retreat && p.orbiting.is_some()) {
+        if danger != p.shields_up && p.fuel > 300.0 && !(self.goal == Goal::Retreat && p.orbiting.is_some()) && !(danger && p.sys_out(System::Shields)) {
             cmds.push(ClientMsg::Shields);
         }
         if threats >= 3 && p.fuel > 1500.0 && rng.gen_bool(0.5) {
             cmds.push(ClientMsg::DetEnemy);
+        }
+        // Boarders aboard: fight them off.
+        if world.boardings.iter().any(|b| b.target == self.id) && p.fuel > 300.0 && rng.gen_bool(0.3) {
+            cmds.push(ClientMsg::DetEnemy);
+        }
+        // Carrying armies next to an enemy with its shields down: board it.
+        if world.features.boarding && p.armies > 0 && !p.cloaked && !world.boardings.iter().any(|b| b.attacker == self.id) {
+            let prey = world
+                .players
+                .iter()
+                .filter(|q| q.alive() && world.at_war(i, q.id as usize) && q.ship.boardable() && q.ship != ShipType::BorgCube)
+                .filter(|q| !q.shields_up || q.shield < q.stats().max_shield * 0.1)
+                // Only with the odds: more marines than it has defenders.
+                .filter(|q| p.armies as i32 > q.crew.max(0) + q.armies as i32)
+                .find(|q| dist(x, y, q.x, q.y) < super::world::BOARD_RANGE * 0.9);
+            if let Some(q) = prey {
+                cmds.push(ClientMsg::Board(q.id));
+            }
         }
 
         match self.goal {
@@ -352,6 +378,31 @@ impl Bot {
 
         for c in cmds {
             world.handle(self.id, c);
+        }
+
+        // Outposts: in orbit of one of our frontier worlds, with resources to
+        // spare and no enemy about, build one (a shipyard first).
+        let p = &world.players[i];
+        if world.features.outposts && !building && rng.gen_bool(0.15) {
+            if let Some(k) = p.orbiting {
+                let pl = &world.planets[k];
+                // Any colony, or the home world when the enemy is close to it.
+                let frontier = pl.flags & PL_HOME == 0
+                    || world.planets.iter().any(|o| Team::PLAYABLE.contains(&o.owner) && world.hostile(o.owner, team) && dist(pl.x, pl.y, o.x, o.y) < 25_000.0);
+                let spare = (world.features.supply && world.supply[team.idx()].stock >= BUILD_SUPPLIES) || p.armies >= BUILD_ARMIES;
+                let quiet = !matches!(enemy, Some((.., d)) if d < 9000.0);
+                if pl.owner == team && pl.outpost.is_none() && frontier && spare && quiet && !world.builds.iter().any(|b| b.planet == k) {
+                    let has_yard = world.planets.iter().any(|q| q.owner == team && q.outpost == Some((Outpost::Shipyard, team)));
+                    let kind = if !has_yard {
+                        Outpost::Shipyard
+                    } else if rng.gen_bool(0.6) {
+                        Outpost::Defence
+                    } else {
+                        Outpost::Sensor
+                    };
+                    world.start_build(i, kind);
+                }
+            }
         }
     }
 

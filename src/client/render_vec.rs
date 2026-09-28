@@ -182,6 +182,40 @@ fn draw_planet_icon(px: &mut Canvas, icon: PlanetIcon, cx: f32, cy: f32, s: f32,
     }
 }
 
+/// A small badge for what's been built on a planet: a gun tower (defence),
+/// a gear (shipyard) or a dish (sensor array), on a dark disc.
+fn draw_outpost(px: &mut Canvas, o: Outpost, cx: f32, cy: f32, s: f32, col: Rgb) {
+    px.disc(cx, cy, s * 0.62, [10.0, 12.0, 16.0], 1.0);
+    px.ring(cx, cy, s * 0.62, 1.2, col, 1.0);
+    let w = (s * 0.12).max(1.0);
+    match o {
+        Outpost::Defence => {
+            // A tower with a gun barrel.
+            px.fill_poly(&[(cx - s * 0.25, cy + s * 0.35), (cx + s * 0.25, cy + s * 0.35), (cx + s * 0.14, cy - s * 0.12), (cx - s * 0.14, cy - s * 0.12)], col, 1.0);
+            px.disc(cx, cy - s * 0.15, s * 0.16, col, 1.0);
+            px.line(cx, cy - s * 0.15, cx + s * 0.36, cy - s * 0.38, w * 1.3, col, 1.0, 0.0);
+        }
+        Outpost::Shipyard => {
+            // A gear.
+            for k in 0..8 {
+                let a = k as f32 / 8.0 * std::f32::consts::TAU;
+                px.line(cx + a.cos() * s * 0.22, cy + a.sin() * s * 0.22, cx + a.cos() * s * 0.42, cy + a.sin() * s * 0.42, w * 1.6, col, 1.0, 0.0);
+            }
+            px.ring(cx, cy, s * 0.26, w * 1.4, col, 1.0);
+        }
+        Outpost::Sensor => {
+            // A dish on a mast, with a signal.
+            let pts: Vec<(f32, f32)> = (0..=8).map(|k| {
+                let a = (200.0 + k as f32 * 17.5f32).to_radians();
+                (cx + a.cos() * s * 0.34, cy - s * 0.02 + a.sin() * s * 0.34)
+            }).collect();
+            px.polyline(&pts, false, w * 1.3, col, 1.0, 0.0);
+            px.line(cx, cy + s * 0.05, cx, cy + s * 0.38, w, col, 1.0, 0.0);
+            px.disc(cx + s * 0.22, cy - s * 0.3, s * 0.06, col, 1.0);
+        }
+    }
+}
+
 fn hash(x: i64, y: i64) -> u64 {
     let mut h = (x as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ (y as u64).wrapping_mul(0xC2B2_AE3D_27D4_EB4F);
     h ^= h >> 29;
@@ -260,6 +294,14 @@ impl App {
                 if info.tribbles {
                     px.ring_dashed(x, y, pr + 4.0, 1.5, faction_rgb(Faction::Tribbles), 0.9, 3.0);
                 }
+                if let Some(o) = info.outpost {
+                    draw_outpost(&mut px, o, x + pr * 0.85, y - pr * 0.85, (pr * 0.55).clamp(7.0, 22.0), col);
+                    // Our own sensor arrays show how far they see.
+                    let mine = self.me().map_or(false, |m| m.team == info.owner);
+                    if o == Outpost::Sensor && mine {
+                        px.ring_dashed(x, y, u(SENSOR_ARRAY_RANGE), 1.0, col, 0.35, 6.0);
+                    }
+                }
                 // Classic Netrek planet icons: armies, repair, fuel, farming,
                 // with the army count underneath (letters when too small).
                 let mut icons = Vec::new();
@@ -327,6 +369,38 @@ impl App {
             px.disc(x, y, r, scale(LOOT, 0.35), 1.0);
             px.ring(x, y, r, 1.3, LOOT, 1.0);
             px.text_centered(tr, x, y + fs * 0.35, &l.armies.to_string(), fs * 0.9, LOOT);
+        }
+
+        // Captured ships under tow: a dark, dashed hulk on a tow line.
+        for z in &f.prizes {
+            let (x, y) = to(z.x as f64, z.y as f64);
+            if let Some(c) = f.players.iter().find(|p| p.id == z.captor) {
+                let (cx, cy) = to(c.x as f64, c.y as f64);
+                px.line(cx, cy, x, y, 1.0, rgb(0x60ff90), 0.6, 3.0);
+            }
+            let sr = u(ship_size_units(z.ship).max(500.0)).clamp(4.0, 60.0);
+            let a = z.dir as f32 * std::f32::consts::TAU / 256.0;
+            let (sa, ca) = (a.sin(), a.cos());
+            let rot = |lx: f32, ly: f32| (x + (lx * ca - ly * sa) * sr, y + (lx * sa + ly * ca) * sr);
+            let edge = scale(team_rgb(z.team), 0.7);
+            for part in ship_parts(z.team, z.ship, None) {
+                match part {
+                    Part::Poly { pts, .. } | Part::Hole { pts } => {
+                        let pts: Vec<(f32, f32)> = pts.iter().map(|&(lx, ly)| rot(lx, ly)).collect();
+                        px.fill_poly(&pts, [20.0, 22.0, 26.0], 0.9);
+                        px.polyline(&pts, true, 1.0, edge, 0.8, 2.5);
+                    }
+                    Part::Circle { c, r, .. } => {
+                        let (cx, cy) = rot(c.0, c.1);
+                        px.ring_dashed(cx, cy, r * sr, 1.0, edge, 0.8, 2.5);
+                    }
+                    Part::Line { a, b } => {
+                        let (a, b) = (rot(a.0, a.1), rot(b.0, b.1));
+                        px.line(a.0, a.1, b.0, b.1, 1.0, edge, 0.8, 2.5);
+                    }
+                }
+            }
+            px.text_centered(tr, x, y + sr + fs * 1.1, "PRIZE", fs * 0.8, LOOT);
         }
 
         // Tractor / pressor beams.
@@ -733,6 +807,12 @@ impl App {
             if let Some(l) = &mi.lock {
                 status += &format!("  lock {}", l);
             }
+            for (flag, name) in [(pf::BOARDING, "BOARDING"), (pf::BOARDED, "BOARDED!"), (pf::TOWING, "TOWING PRIZE")] {
+                if me.flags & flag != 0 {
+                    status += "  ";
+                    status += name;
+                }
+            }
             // Wrapped if the panel is narrow, with the clock on the right.
             let secs = f.tick / UPS as u32;
             let clock = format!("{:02}:{:02}:{:02}", secs / 3600, secs / 60 % 60, secs % 60);
@@ -743,12 +823,40 @@ impl App {
                 c.text(tr, pad, sy + k as f32 * fs * 1.3, line, sfs, team_rgb(me.team));
             }
             c.text_right(tr, w - pad, sy, &clock, sfs, label_col);
+            let mut below = sy + status_lines.len().max(1) as f32 * fs * 1.3;
+            // Ship systems (with --subsystems): green working, yellow
+            // damaged, red out; * marks the one being fixed first.
+            if let Some(sys) = mi.systems {
+                if below < h - 2.0 {
+                    let mut x = pad;
+                    c.text(tr, x, below, "Systems", sfs, label_col);
+                    x += tr.width("Systems ", sfs);
+                    for (k, sy) in System::ALL.iter().enumerate() {
+                        let hl = sys[k];
+                        let mark = if mi.fix_first == Some(*sy) { "*" } else { "" };
+                        let pct = if (1..100).contains(&hl) { format!(" {}", hl) } else { String::new() };
+                        let txt = format!("{}{}{}", mark, sy.abbr(), pct);
+                        let tw = tr.width(&txt, sfs);
+                        if x + tw > w - pad {
+                            break;
+                        }
+                        if hl == 0 {
+                            c.round_rect(x - 3.0, below - sfs * 0.95, tw + 6.0, sfs * 1.3, 3.0, red, 1.0, None);
+                            c.text(tr, x, below, &txt, sfs, [0.0, 0.0, 0.0]);
+                        } else {
+                            c.text(tr, x, below, &txt, sfs, if hl < 75 { yellow } else { green });
+                        }
+                        x += tw + tr.width("  ", sfs);
+                    }
+                    below += fs * 1.3;
+                }
+            }
             // Special or relic ship and advanced tech, under a divider.
             let tech = self.tech_lines();
             let ship = self.ship_lines();
             if self.tech_in_controls && (!tech.is_empty() || !ship.is_empty()) {
                 let lh = (fs * 1.45).round();
-                let mut ty = sy + status_lines.len().max(1) as f32 * fs * 1.3;
+                let mut ty = below;
                 c.line(pad, ty - fs * 0.5, w - pad, ty - fs * 0.5, 1.0, rgb(0x3a404c), 1.0, 0.0);
                 ty += fs * 0.6;
                 for (k, (text, col)) in ship.iter().enumerate() {
@@ -937,6 +1045,7 @@ impl App {
                     for (flag, ch) in [(PL_REPAIR, 'R'), (PL_FUEL, 'F'), (PL_AGRI, 'A')] {
                         tags.push(if info.flags & flag != 0 { ch } else { ' ' });
                     }
+                    tags.push(info.outpost.map_or(' ', |o| o.letter()));
                     if info.tribbles {
                         tags.push('T');
                     }
@@ -953,7 +1062,7 @@ impl App {
         let tr = &self.text;
         let (fs, lh) = self.panel_font();
         // Squeeze the rows (down to the font size) so everyone fits.
-        let n = f.players.iter().filter(|p| p.state != PState::Outfit).count() as f32;
+        let n = f.players.iter().filter(|p| p.state != PState::Outfit).count() as f32 + if f.observers.is_empty() { 0.0 } else { 1.0 };
         let lh = lh.min(((ph as f32 - 12.0) / (n + 1.5)).max(fs + 1.0));
         let mut c = Canvas::new(pw, ph, [0.0, 0.0, 0.0]);
         let (w, h) = (pw as f32, ph as f32);
@@ -1032,6 +1141,12 @@ impl App {
             };
             if show_status {
                 c.text(tr, x_status, y, status, fs * 0.9, scale(col, 0.75));
+            }
+        }
+        if !f.observers.is_empty() {
+            let y = line_y + 2.0 + ps.len() as f32 * lh + lh * 0.75;
+            if y < h {
+                c.text(tr, x_tag, y, &format!("Observers: {}", f.observers.join(", ")), fs * 0.9, GREY);
             }
         }
         c

@@ -23,8 +23,11 @@ that runs entirely inside a terminal window on macOS.
   Kzinti arrive with a Ringworld that stays until they lose it.
 - **Extras** (optional, each its own server option): career ranks and service records,
   personal orders from command, treaties between empires, 21 kinds of space terrain (10
-  in any one galaxy),
-  and supply convoys that buy upgrades for your empire.
+  in any one galaxy), supply convoys that buy upgrades for your empire, subsystem damage,
+  boarding parties that capture enemy ships, and outposts (defences, shipyards and
+  sensor arrays) built on your planets.
+- **Observers:** watch any game without flying, with the whole galaxy revealed, following
+  any ship.
 - **Sound:** synthesized retro sound effects, with no audio libraries required.
 - **Mouse and keyboard:** aim and steer with the mouse, with the classic Netrek key bindings.
 
@@ -36,6 +39,7 @@ that runs entirely inside a terminal window on macOS.
 - [Build and install](#build-and-install)
 - [Quick start](#quick-start)
 - [Command-line reference](#command-line-reference)
+  - [Observers](#observers)
 - [Terminal setup and graphics modes](#terminal-setup-and-graphics-modes)
 - [The screen](#the-screen)
 - [Controls](#controls)
@@ -53,6 +57,9 @@ that runs entirely inside a terminal window on macOS.
   - [Diplomacy](#diplomacy)
   - [Space terrain](#space-terrain)
   - [Supply convoys and upgrades](#supply-convoys-and-upgrades)
+  - [Subsystem damage](#subsystem-damage)
+  - [Boarding parties](#boarding-parties)
+  - [Outposts](#outposts)
 - [Sound](#sound)
 - [Hosting a server](#hosting-a-server)
 - [Troubleshooting](#troubleshooting)
@@ -114,11 +121,19 @@ Add Star Trek villains to the mix:
 netrek solo --empires all --bots 15 --aliens
 ```
 
+Switch on every extra (ranks, orders, diplomacy, terrain, supplies, subsystem damage,
+boarding parties and outposts):
+
+```sh
+netrek solo --empires all --bots 12 --aliens --extras
+```
+
 To play with friends, one person runs a server and everyone else connects:
 
 ```sh
 netrek server --bots 4            # on the host machine
 netrek play host.example.com      # everyone else
+netrek observe host.example.com   # or just watch
 ```
 
 ## Command-line reference
@@ -129,6 +144,7 @@ netrek <COMMAND>
   server   Run a game server
   solo     Start a private local server with robots and play on it
   play     Connect to a server and play
+  observe  Connect to a server and watch as an observer
 ```
 
 ### `netrek server`
@@ -146,8 +162,12 @@ netrek <COMMAND>
 | `--diplomacy` | off | Treaties between empires |
 | `--terrain` | off | Space terrain: 10 of 21 kinds per galaxy (nebulae, a black hole, minefields, a galactic barrier...) |
 | `--supply` | off | Supply convoys and empire upgrades |
-| `--extras` | off | All five of the above |
+| `--subsystems` | off | [Subsystem damage](#subsystem-damage): hits can knock out warp, phasers, shields and more |
+| `--boarding` | off | [Boarding parties](#boarding-parties): capture enemy ships with the armies you carry |
+| `--outposts` | off | [Outposts](#outposts): build defence outposts, shipyards and sensor arrays on your planets |
+| `--extras` | off | All eight of the above |
 | `--no-rank-tech` | off | With ranks: don't give Captains and above their [advanced tech](#advanced-tech) |
+| `--no-observers` | off | Don't let anyone [watch as an observer](#observers) |
 
 The server logs connections, joins, kills and planet captures to stdout.
 
@@ -161,7 +181,7 @@ Starts a server on a random localhost port in the background and connects to it.
 | `-e, --empires <LIST>` | `fed,rom` | Empires the robots play for: `all`, or a comma list |
 | `--aliens [LIST]` | off | Alien incursions (all, or a list such as `khan,borg`) |
 | `--alien-interval <SECS>` | `150` | Average seconds between incursions |
-| `--ranks [FILE]`, `--orders`, `--diplomacy`, `--terrain`, `--supply`, `--extras` | off | The same [extras](#extras) as `server` |
+| `--ranks [FILE]`, `--orders`, `--diplomacy`, `--terrain`, `--supply`, `--subsystems`, `--boarding`, `--outposts`, `--extras` | off | The same [extras](#extras) as `server` |
 | `-n, --name <NAME>` | `$USER` | Your callsign |
 | `-t, --team <TEAM>` | `fed` | Preferred team: `fed`, `rom`, `kli`, `ori` |
 | `-s, --ship <SHIP>` | `CA` | Preferred ship: `SC`, `DD`, `CA`, `BB`, `AS`, `SB` |
@@ -178,6 +198,37 @@ Starts a server on a random localhost port in the background and connects to it.
 
 The team and ship options only preselect choices on the outfit screen. You still press
 Enter to launch.
+
+### `netrek observe [HOST]`
+
+Watch a game without flying: see [Observers](#observers).
+
+| Option | Default | Meaning |
+|---|---|---|
+| `HOST` | `localhost` | Server host name or address |
+| `-p, --port <PORT>` | `2592` | Server port |
+| `-n`, `-g`, `--mute` | | Your name, graphics and sound, as for `solo` |
+
+### Observers
+
+Observers watch the game without a ship. Start with `netrek observe HOST`, or press **W**
+on the outfit screen to switch from playing to watching (your player slot is freed).
+Press **J** at any time to take a slot and join the game.
+
+- **Everything is visible.** Every planet is shown scouted, with its armies. Cloaked ships,
+  ships hidden in nebulae, Talosian illusions and Changelings all appear as they really
+  are, and so do the armies aboard every ship.
+- **Following a ship.** `Tab` / `Shift-Tab` step through the ships in play, or click one.
+  The maps follow it, and the gauges and status line show its fuel, shields and damage.
+- **Free camera.** The arrow keys pan (a click on empty space looks there), and `Esc`
+  stops following. `+` / `-` or the mouse wheel zoom.
+- **Talking.** `m` sends a message to everyone, shown as `Name (obs)`. Observers hear
+  everything said to all, but not team or private messages, and can't use slash commands.
+- **Everything else:** `L` / `P` lists, `i` info, `g` graphics, `S` sound, `?` help, `q` quit.
+
+Observers never take a player slot, so they don't crowd out robots or aliens. Up to 8 can
+watch at once, and the player list shows who's watching. Servers allow observers unless
+started with `--no-observers`.
 
 ## Terminal setup and graphics modes
 
@@ -307,6 +358,7 @@ map. With no mouse, they fire along your current heading.
 | `s` or `u` | Shields up / down |
 | `c` | Cloak on / off (drains fuel; you can't fire while cloaked) |
 | `d` | Detonate enemy torpedoes near you (costs fuel) |
+| `B` | Board the enemy ship nearest the pointer (with `--boarding`): see [Boarding parties](#boarding-parties) |
 | `v` / `e` / `j` | Use your [advanced tech](#advanced-tech) (Commodore / Rear Admiral / Admiral, with `--ranks`), aimed at the pointer |
 | `w` | **Overwatch** on / off, **in orbit only**: automatically fire at the nearest enemy that comes into weapons range (also `/overwatch`) |
 | `D` | Detonate your own torpedoes |
@@ -813,8 +865,8 @@ damage, and a Borg cube's resistance builds as it's hit.
 
 ## Extras
 
-Five optional additions that go beyond fighting. Each is its own server option and all
-are off by default. `--extras` switches on all five. The same options work with `solo`.
+Eight optional additions that go beyond fighting. Each is its own server option and all
+are off by default. `--extras` switches on all eight. The same options work with `solo`.
 
 ```sh
 netrek server --empires all --bots 12 --extras
@@ -835,6 +887,8 @@ one. `/help` lists the commands the server accepts.
 | `/treaties` | `--diplomacy` | List the treaties in force |
 | `/supplies` | `--supply` | Your empire's stockpile and upgrade levels |
 | `/upgrade <name>` | `--supply` | Buy the next level of an upgrade |
+| `/build defence\|yard\|sensor` | `--outposts` | Build an outpost on the planet you're orbiting |
+| `/fix <system>` | `--subsystems` | Have damage control repair that system first (`/fix` alone: all evenly) |
 
 ### Ranks and service records
 
@@ -1042,6 +1096,94 @@ buy automatically, and so do empires with players once the stockpile passes 60.
 
 Your stockpile and upgrade levels (S, R, T, P, E) show above the message log.
 
+### Subsystem damage
+
+With `--subsystems`, hits that get through your shields to the hull can knock out one of
+your ship's **eight systems**. Each has its own health, from 100% down to out:
+
+| System | Lamp | Damaged | Out |
+|---|---|---|---|
+| Warp drive | `WRP` | Lower top speed | Impulse only: warp 3 at most |
+| Impulse engines | `IMP` | Slower to accelerate and turn | Barely manoeuvres |
+| Phasers | `PHA` | Weaker, shorter beams | Can't fire |
+| Torpedo tubes | `TOR` | Torpedoes misfire | Can't fire torpedoes or plasma |
+| Shield generators | `SHD` | Shields recharge slowly | Shields drop and can't be raised |
+| Transporters | `TRN` | Armies beam slowly | Can't beam armies |
+| Cloaking device | `CLK` | | Can't cloak (and you decloak) |
+| Tractor beam | `TRC` | | Can't tractor or pressor (and lets go) |
+
+The bigger the hit, the likelier it is to damage a system and the worse the damage. With
+shields up, most hits never reach the hull. A row of lamps under your status line shows
+each system: **green** working, **yellow** damaged (with its health), **red** out. You're
+told when a system is damaged, knocked out or back online.
+
+**Damage control** repairs every system over time, like the hull: faster in repair mode
+(`R`), faster again in orbit of a repair planet, and faster with the repair upgrade. Use
+`/fix <system>` (`/fix warp`, `/fix phasers`, `/fix shd`...) to repair one first, marked
+`*`; it gets three times the crew while the rest wait. A new ship starts with every
+system working.
+
+Robots limp home for repairs when their warp drive is out or they have no working
+weapons, and overwatch doesn't try to fire weapons that are out. Aliens don't have
+subsystems: their ships work by their own rules.
+
+### Boarding parties
+
+With `--boarding`, the armies you carry can storm an enemy ship. Point at it and press
+**`B`**. You need to be within 1,500 units, carrying armies, uncloaked and with working
+transporters, and **its shields must be down** (or below 10%). Knock them down first.
+
+- **The fight.** Your marines beam across two at a time, and more follow every second
+  while the target's shields stay down. Each round a marine or a defender falls: the
+  more of you, the better your odds. Defenders are the ship's **crew** (scout 2,
+  destroyer 3, cruiser 4, assault ship 5, battleship 6) plus any armies aboard. Both
+  sides see the count each round, and the status line shows **BOARDING** or
+  **BOARDED!**. Equal numbers are about a coin toss; twice as many marines almost always
+  win.
+- **Fighting back.** Raise shields to stop reinforcements (the marines already aboard
+  keep fighting), and detonate (`d`) to kill a boarder with each blast.
+- **The prize.** Take an empire ship and its pilot bails out (and respawns as normal).
+  You get the kill plus a bonus kill, and the hull is yours to **tow home**: it follows
+  on a tow line, labelled PRIZE, and holds you to warp 6. Orbit a repair world or your
+  home world and its crew joins the garrison (2 to 6 armies, by class), with 10 supplies
+  with `--supply` and another kill. Lose your ship on the way and the prize is lost.
+- **Aliens.** Crewed alien ships can be boarded too: Khan's augments, the Gorn, the
+  Tholians, the Jem'Hadar, Chang, the Hirogen, Q's champion, the Ferengi, the
+  Changelings, the Pakleds and the Kzinti. They're taken (no prize), with the usual kill
+  credit plus one. A Ferengi's stolen armies spill out and a Pakled gives back what it
+  took, just as if it were destroyed. **Don't board a Borg cube**: your marines are
+  assimilated.
+- Starbases, freighters, monsters and anything weapons can't hurt can't be boarded.
+
+Robots fight boarders off with detonations, and board a shieldless ship themselves when
+they're carrying more armies than it has defenders.
+
+### Outposts
+
+With `--outposts`, empires can build on the planets they hold. Orbit one of your planets
+and type **`/build defence`**, **`/build yard`** or **`/build sensor`**:
+
+| Outpost | Marker | What it does |
+|---|---|---|
+| **Defence outpost** | gun tower, `D` | The planet fires 50% further and harder, and is bombed at half speed |
+| **Shipyard** | gear, `Y` | Your empire's ships launch from the shipyard nearest where they were lost (instead of home), and can refit there |
+| **Sensor array** | dish, `S` | Cloaked ships, and ships hidden in nebulae or ion storms, within 12,000 units show up for your empire (and your allies). Your own arrays draw their range as a faint ring |
+
+- **Building** takes **30 seconds**, and you must stay in orbit: leave, or lose the planet,
+  and the work is abandoned. Your status panel shows the time left.
+- **Cost:** **15 supplies** from your empire's stockpile (with `--supply`), or, when the
+  stockpile is short or supplies are off, **3 of the armies you're carrying**, who stay
+  on as the builders. You pay when it's finished.
+- **One per planet.** Building another type replaces the old one.
+- **Lost with the planet:** an outpost is destroyed when its planet changes hands
+  (including sections of the Ringworld, or when the ring jumps away).
+- Outposts show as a small badge on the planet in vector mode, as a letter after the
+  planet's tags in braille, in the planet list (`P`) and in a planet's info (`i`).
+
+Robots build too: while in orbit of one of their colonies (or a home world near the
+front) with the supplies or armies to spare and no enemy about, they put up a shipyard
+first, then defence outposts and the odd sensor array.
+
 ## Sound
 
 Sound effects are synthesized when the client starts (square waves, sweeps and filtered
@@ -1070,6 +1212,8 @@ netrek server --port 2592 --bots 6
 
 - **Players:** up to **32** at once, in slots `0`–`9` and `a`–`v`. If the galaxy is full
   when a human connects, a robot gives up its slot.
+- **Observers:** up to **8** more can watch (`netrek observe`) without taking a player
+  slot. Start the server with `--no-observers` to turn them away.
 - **Game speed:** the server runs at **10 updates per second** (the original Netrek
   rate) and sends every client its own view of the world each update. Cloaked enemies
   are fuzzed and unscouted planets hidden, so clients can't cheat by reading the
@@ -1140,8 +1284,9 @@ This is a from-scratch reimplementation, not a port of the original C code:
   - starbases can't be docked with
   - there's no self-destruct countdown or ghostbusting
 - **Additions:** alien incursions (`--aliens`), the extras (`--orders`, `--diplomacy`,
-  `--terrain`, `--supply`, and this version's take on ranks), per-empire Star Trek ship
-  designs and sound effects aren't part of classic Netrek.
+  `--terrain`, `--supply`, `--subsystems`, `--boarding`, `--outposts`, and this version's
+  take on ranks), overwatch, per-empire Star Trek ship designs and sound effects aren't
+  part of classic Netrek. Observers are, though these ones see the whole galaxy.
 - **What matches the original:** the core numbers (ship stats, weapon damage and range,
   explosion radii, orbit distances, fuel and heat costs, turn rates, the planet table)
   come from the original server.
@@ -1231,6 +1376,15 @@ The tests include:
   `scouting_orders_pay_off` and `careers_persist_and_promote`.
 - **`extras_game`:** a 20-minute four-empire robot war with every extra and every alien
   switched on, two robots standing in for human players.
+- **`outposts_are_built_and_do_their_jobs`** and **`outpost_builds_need_the_builder_in_orbit`:**
+  each outpost's effect, the cost, and losing them.
+- **`boarding_party_captures_a_ship_and_tows_it_home`** and **`boarders_can_be_repelled`:**
+  capture, the prize towed home, detonations and the Borg.
+- **`subsystems_knocked_out_and_repaired`** and **`hull_hits_damage_systems`:** each
+  system's effect when out, damage control and `/fix`, and that it's all off without
+  `--subsystems`.
+- **`observers_over_the_wire`** and **`observers_see_everything`:** observers get the whole
+  galaxy, follow ships, talk to everyone, and switch between watching and playing.
 - **`extras_over_the_wire`:** starts a server with every extra and checks, over a real
   connection, that terrain, supplies and the service record arrive and slash commands
   are answered.

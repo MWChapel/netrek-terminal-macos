@@ -35,11 +35,16 @@ pub struct ServerConfig {
     pub features: Features,
     /// Where service records are kept (with ranks; None = memory only).
     pub records: Option<std::path::PathBuf>,
+    /// Let people connect to watch as observers.
+    pub observers: bool,
     pub quiet: bool,
 }
 
+/// Most observers watching at once.
+pub const MAX_OBSERVERS: usize = 8;
+
 enum Event {
-    Connect { conn: u64, name: String, out: SyncSender<Arc<Vec<u8>>> },
+    Connect { conn: u64, name: String, out: SyncSender<Arc<Vec<u8>>>, observe: bool },
     Cmd { conn: u64, msg: ClientMsg },
     Disconnect { conn: u64 },
 }
@@ -47,6 +52,14 @@ enum Event {
 struct Conn {
     slot: u8,
     out: SyncSender<Arc<Vec<u8>>>,
+}
+
+/// Someone watching as an observer: no ship, no player slot.
+struct Watcher {
+    name: String,
+    out: SyncSender<Arc<Vec<u8>>>,
+    /// The ship they're following (None = free camera).
+    follow: Option<u8>,
 }
 
 /// Bind and run the server on the current thread (blocks forever).
@@ -77,7 +90,7 @@ fn serve(listener: TcpListener, cfg: ServerConfig) -> io::Result<()> {
             println!("alien incursions every ~{}s: {}", cfg.alien_interval, kinds.join(", "));
         }
         let f = cfg.features;
-        let on: Vec<&str> = [(f.ranks, "ranks"), (f.orders, "orders"), (f.diplomacy, "diplomacy"), (f.terrain, "terrain"), (f.supply, "supply")]
+        let on: Vec<&str> = [(f.ranks, "ranks"), (f.orders, "orders"), (f.diplomacy, "diplomacy"), (f.terrain, "terrain"), (f.supply, "supply"), (f.subsystems, "subsystems"), (f.boarding, "boarding"), (f.outposts, "outposts")]
             .into_iter()
             .filter(|x| x.0)
             .map(|x| x.1)
@@ -121,9 +134,10 @@ fn handle_conn(conn: u64, stream: TcpStream, tx: Sender<Event>) {
     let Ok(write_half) = stream.try_clone() else { return };
     let mut reader = BufReader::new(stream);
     let _ = reader.get_ref().set_read_timeout(Some(Duration::from_secs(15)));
-    let name = match read_msg::<ClientMsg, _>(&mut reader) {
-        Ok(ClientMsg::Hello { name, version }) if version == PROTOCOL_VERSION => name,
-        Ok(ClientMsg::Hello { .. }) => {
+    let (name, observe) = match read_msg::<ClientMsg, _>(&mut reader) {
+        Ok(ClientMsg::Hello { name, version }) if version == PROTOCOL_VERSION => (name, false),
+        Ok(ClientMsg::Observe { name, version }) if version == PROTOCOL_VERSION => (name, true),
+        Ok(ClientMsg::Hello { .. } | ClientMsg::Observe { .. }) => {
             let mut w = write_half;
             let _ = write_msg(&mut w, &ServerMsg::Reject("Client version mismatch".into()));
             return;
@@ -147,7 +161,7 @@ fn handle_conn(conn: u64, stream: TcpStream, tx: Sender<Event>) {
         }
     });
 
-    if tx.send(Event::Connect { conn, name, out: out_tx }).is_err() {
+    if tx.send(Event::Connect { conn, name, out: out_tx, observe }).is_err() {
         return;
     }
     loop {
@@ -170,6 +184,7 @@ fn send(c: &Conn, msg: &ServerMsg) -> bool {
 fn game_loop(rx: Receiver<Event>, cfg: ServerConfig) {
     let mut world = World::with_features(cfg.features);
     let mut conns: HashMap<u64, Conn> = HashMap::new();
+    let mut watchers: HashMap<u64, Watcher> = HashMap::new();
     let mut bots: Vec<bot::Bot> = Vec::new();
     let mut director = aliens::Director::new(aliens::AlienConfig { kinds: cfg.aliens.clone(), interval: cfg.alien_interval });
     let mut logistics = supply::Logistics::new();
@@ -187,34 +202,75 @@ fn game_loop(rx: Receiver<Event>, cfg: ServerConfig) {
         // Network events.
         while let Ok(ev) = rx.try_recv() {
             match ev {
-                Event::Connect { conn, name, out } => {
-                    // Make room by retiring a robot if the galaxy is full.
-                    if world.players.iter().all(|p| p.in_use) {
-                        if let Some(b) = bots.pop() {
-                            world.remove_player(b.id);
-                        }
+                Event::Connect { conn, name, out, observe: true } => match start_watching(&cfg, &mut world, &watchers, &name) {
+                    Ok(()) => {
+                        let _ = out.try_send(Arc::new(encode(&ServerMsg::Observing { motd: observer_motd() })));
+                        log(format!("{} is observing", name));
+                        watchers.insert(conn, Watcher { name, out, follow: None });
                     }
-                    match world.add_player(&name, false) {
-                        Some(slot) => {
-                            let c = Conn { slot, out };
-                            send(
-                                &c,
-                                &ServerMsg::Welcome {
-                                    slot,
-                                    motd: vec![
-                                        "Welcome to Netrek!".into(),
-                                        "Conquer the galaxy for your empire.".into(),
-                                    ],
-                                },
-                            );
-                            log(format!("{} joined as slot {}", name, slot_char(slot)));
-                            conns.insert(conn, c);
-                        }
-                        None => {
-                            let _ = out.try_send(Arc::new(encode(&ServerMsg::Reject("Galaxy is full".into()))));
+                    Err(why) => {
+                        let _ = out.try_send(Arc::new(encode(&ServerMsg::Reject(why))));
+                    }
+                },
+                Event::Connect { conn, name, out, observe: false } => match take_slot(&mut world, &mut bots, &name) {
+                    Some(slot) => {
+                        let c = Conn { slot, out };
+                        send(&c, &ServerMsg::Welcome { slot, motd: player_motd() });
+                        log(format!("{} joined as slot {}", name, slot_char(slot)));
+                        conns.insert(conn, c);
+                    }
+                    None => {
+                        let _ = out.try_send(Arc::new(encode(&ServerMsg::Reject("Galaxy is full".into()))));
+                    }
+                },
+                // A player on the outfit screen switches to watching.
+                Event::Cmd { conn, msg: ClientMsg::Watch } if conns.contains_key(&conn) => {
+                    let slot = conns[&conn].slot;
+                    let name = world.players[slot as usize].name.clone();
+                    if world.players[slot as usize].state != PState::Outfit {
+                        world.warn(slot, "You can only switch to observing from the outfit screen");
+                    } else {
+                        match start_watching(&cfg, &mut world, &watchers, &name) {
+                            Ok(()) => {
+                                let c = conns.remove(&conn).unwrap();
+                                world.remove_player(slot);
+                                let _ = c.out.try_send(Arc::new(encode(&ServerMsg::Observing { motd: observer_motd() })));
+                                log(format!("{} is now observing", name));
+                                watchers.insert(conn, Watcher { name, out: c.out, follow: None });
+                            }
+                            Err(why) => world.warn(slot, why),
                         }
                     }
                 }
+                Event::Cmd { conn, msg } if watchers.contains_key(&conn) => match msg {
+                    ClientMsg::Follow(f) => watchers.get_mut(&conn).unwrap().follow = f,
+                    ClientMsg::Message { text, .. } if text.trim_start().starts_with('/') => {
+                        let w = &watchers[&conn];
+                        let _ = w.out.try_send(Arc::new(encode(&ServerMsg::Warning("Observers can't use commands".into()))));
+                    }
+                    ClientMsg::Message { text, .. } => {
+                        let name = watchers[&conn].name.clone();
+                        world.observer_says(&name, &text);
+                    }
+                    // An observer takes a slot and heads for the outfit screen.
+                    ClientMsg::Play => {
+                        let name = watchers[&conn].name.clone();
+                        match take_slot(&mut world, &mut bots, &name) {
+                            Some(slot) => {
+                                let w = watchers.remove(&conn).unwrap();
+                                let c = Conn { slot, out: w.out };
+                                send(&c, &ServerMsg::Welcome { slot, motd: player_motd() });
+                                log(format!("{} stopped observing and joined as slot {}", name, slot_char(slot)));
+                                conns.insert(conn, c);
+                            }
+                            None => {
+                                let w = &watchers[&conn];
+                                let _ = w.out.try_send(Arc::new(encode(&ServerMsg::Warning("The galaxy is full".into()))));
+                            }
+                        }
+                    }
+                    _ => {}
+                },
                 Event::Cmd { conn, msg } => {
                     if let Some(c) = conns.get(&conn) {
                         world.handle(c.slot, msg);
@@ -224,6 +280,9 @@ fn game_loop(rx: Receiver<Event>, cfg: ServerConfig) {
                     if let Some(c) = conns.remove(&conn) {
                         log(format!("slot {} disconnected", slot_char(c.slot)));
                         world.remove_player(c.slot);
+                    }
+                    if let Some(w) = watchers.remove(&conn) {
+                        log(format!("{} stopped observing", w.name));
                     }
                 }
             }
@@ -258,6 +317,10 @@ fn game_loop(rx: Receiver<Event>, cfg: ServerConfig) {
             if let ServerMsg::Msg(m) = &msg {
                 if matches!(out.dest, Dest::All) {
                     log(format!("[{}] {}", m.from, m.text));
+                    // Observers hear everything said to all.
+                    for w in watchers.values() {
+                        let _ = w.out.try_send(Arc::new(encode(&msg)));
+                    }
                 }
             }
         }
@@ -268,8 +331,21 @@ fn game_loop(rx: Receiver<Event>, cfg: ServerConfig) {
             }
         }
 
-        // Send each client its view of the world.
-        conns.retain(|_, c| send(c, &ServerMsg::Frame(Box::new(world.frame_for(c.slot)))));
+        // Send each client its view of the world (observers see all of it).
+        let names: Vec<String> = watchers.values().map(|w| w.name.clone()).collect();
+        conns.retain(|_, c| {
+            let mut f = world.frame_for(c.slot);
+            f.observers = names.clone();
+            send(c, &ServerMsg::Frame(Box::new(f)))
+        });
+        watchers.retain(|_, w| {
+            if w.follow.map_or(false, |f| !world.players[f as usize].in_use) {
+                w.follow = None;
+            }
+            let mut f = world.frame_for_observer(w.follow);
+            f.observers = names.clone();
+            !matches!(w.out.try_send(Arc::new(encode(&ServerMsg::Frame(Box::new(f))))), Err(TrySendError::Disconnected(_)))
+        });
 
         next += tick_len;
         let now = Instant::now();
@@ -279,6 +355,36 @@ fn game_loop(rx: Receiver<Event>, cfg: ServerConfig) {
             next = now;
         }
     }
+}
+
+fn player_motd() -> Vec<String> {
+    vec!["Welcome to Netrek!".into(), "Conquer the galaxy for your empire.".into()]
+}
+
+fn observer_motd() -> Vec<String> {
+    vec!["You are observing.".into(), "Tab / Shift-Tab: follow a ship • arrows: free camera • J: join the game".into()]
+}
+
+/// A player slot for a new player, retiring a robot if the galaxy is full.
+fn take_slot(world: &mut World, bots: &mut Vec<bot::Bot>, name: &str) -> Option<u8> {
+    if world.players.iter().all(|p| p.in_use) {
+        if let Some(b) = bots.pop() {
+            world.remove_player(b.id);
+        }
+    }
+    world.add_player(name, false)
+}
+
+/// Whether someone may start observing.
+fn start_watching(cfg: &ServerConfig, world: &mut World, watchers: &HashMap<u64, Watcher>, name: &str) -> Result<(), String> {
+    if !cfg.observers {
+        return Err("This server doesn't allow observers".into());
+    }
+    if watchers.len() >= MAX_OBSERVERS {
+        return Err(format!("There are already {} observers", MAX_OBSERVERS));
+    }
+    world.god(format!("{} is now observing", name));
+    Ok(())
 }
 
 /// Player slots kept free for alien incursions (when they're on).
@@ -469,7 +575,7 @@ mod tests {
     /// robots standing in for human players so they get orders and careers.
     #[test]
     fn extras_game() {
-        let features = Features { ranks: true, orders: true, diplomacy: true, terrain: true, supply: true, rank_tech: true };
+        let features = Features { ranks: true, orders: true, diplomacy: true, terrain: true, supply: true, rank_tech: true, subsystems: true, boarding: true, outposts: true };
         let mut world = World::with_features(features);
         let mut bots = Vec::new();
         let all = Team::PLAYABLE;
@@ -535,8 +641,9 @@ mod tests {
             empires: vec![Team::Fed, Team::Rom],
             aliens: Vec::new(),
             alien_interval: 150,
-            features: Features { ranks: true, orders: true, diplomacy: true, terrain: true, supply: true, rank_tech: true },
+            features: Features { ranks: true, orders: true, diplomacy: true, terrain: true, supply: true, rank_tech: true, subsystems: true, boarding: true, outposts: true },
             records: Some(records.clone()),
+            observers: true,
             quiet: true,
         };
         let port = spawn_background(cfg).unwrap();
@@ -564,6 +671,67 @@ mod tests {
         }
         let _ = std::fs::remove_file(&records);
         assert!(terrain && supply && service && reply, "terrain {} supply {} service {} reply {}", terrain, supply, service, reply);
+    }
+
+    /// Observers over a real connection: they get the whole galaxy, follow
+    /// a ship, talk to everyone, and can switch to playing and back without
+    /// ever holding a ship while watching.
+    #[test]
+    fn observers_over_the_wire() {
+        let cfg = ServerConfig {
+            bind: "127.0.0.1".into(),
+            port: 0,
+            bots: 4,
+            empires: vec![Team::Fed, Team::Rom],
+            aliens: Vec::new(),
+            alien_interval: 150,
+            features: Features::default(),
+            records: None,
+            observers: true,
+            quiet: true,
+        };
+        let port = spawn_background(cfg).unwrap();
+        let open = |hello: ClientMsg| {
+            let stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+            stream.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+            let mut w = stream.try_clone().unwrap();
+            write_msg(&mut w, &hello).unwrap();
+            (w, BufReader::new(stream))
+        };
+        // Read until `want` says yes (or give up).
+        fn until(r: &mut BufReader<TcpStream>, mut want: impl FnMut(&ServerMsg) -> bool) -> bool {
+            (0..300).any(|_| want(&read_msg::<ServerMsg, _>(r).unwrap()))
+        }
+        let (mut ow, mut or) = open(ClientMsg::Observe { name: "Watcher".into(), version: PROTOCOL_VERSION });
+        assert!(matches!(read_msg::<ServerMsg, _>(&mut or).unwrap(), ServerMsg::Observing { .. }));
+        // The whole galaxy, following nobody.
+        let mut robot = None;
+        assert!(until(&mut or, |m| match m {
+            ServerMsg::Frame(f) if f.me == u8::MAX && f.planets.iter().all(|p| p.known) => {
+                robot = f.players.iter().find(|p| p.state == PState::Alive).map(|p| p.id);
+                robot.is_some() && f.observers == vec!["Watcher".to_string()]
+            }
+            _ => false,
+        }));
+        // Follow a robot: its view, its gauges.
+        let robot = robot.unwrap();
+        write_msg(&mut ow, &ClientMsg::Follow(Some(robot))).unwrap();
+        assert!(until(&mut or, |m| matches!(m, ServerMsg::Frame(f) if f.me == robot && f.me_info.fuel > 0)));
+        // A player hears the observer, and the observer holds no slot.
+        let (mut pw, mut pr) = open(ClientMsg::Hello { name: "Player".into(), version: PROTOCOL_VERSION });
+        let ServerMsg::Welcome { slot, .. } = read_msg::<ServerMsg, _>(&mut pr).unwrap() else { panic!("no welcome") };
+        write_msg(&mut ow, &ClientMsg::Message { to: MsgTarget::All, text: "go team".into() }).unwrap();
+        assert!(until(&mut pr, |m| matches!(m, ServerMsg::Msg(c) if c.from.contains("Watcher (obs)") && c.text == "go team")));
+        assert!(until(&mut pr, |m| matches!(m, ServerMsg::Frame(f) if !f.players.iter().any(|p| p.name == "Watcher"))));
+        // The player switches to watching (from the outfit screen), and their slot is freed.
+        write_msg(&mut pw, &ClientMsg::Watch).unwrap();
+        assert!(until(&mut pr, |m| matches!(m, ServerMsg::Observing { .. })));
+        assert!(until(&mut or, |m| matches!(m, ServerMsg::Frame(f) if !f.players.iter().any(|p| p.id == slot && p.name == "Player") && f.observers.len() == 2)));
+        // And the first observer joins the game.
+        write_msg(&mut ow, &ClientMsg::Play).unwrap();
+        assert!(until(&mut or, |m| matches!(m, ServerMsg::Welcome { .. })));
+        write_msg(&mut ow, &ClientMsg::Join { team: Team::Fed, ship: ShipType::Cruiser }).unwrap();
+        assert!(until(&mut or, |m| matches!(m, ServerMsg::Frame(f) if f.players.iter().any(|p| p.id == f.me && p.name == "Watcher" && p.state == PState::Alive))));
     }
 
     /// A crowded server (25 robots, supply freighters, a human) with only

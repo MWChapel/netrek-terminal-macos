@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 pub const DEFAULT_PORT: u16 = 2592; // the traditional Netrek port
-pub const PROTOCOL_VERSION: u32 = 17;
+pub const PROTOCOL_VERSION: u32 = 21;
 
 pub const UPS: u64 = 10; // server updates per second, like the original
 pub const GWIDTH: f64 = 100_000.0;
@@ -576,8 +576,155 @@ impl ShipType {
         )
     }
 
+    /// Its crew, who fight off boarding parties.
+    pub fn crew(self) -> i32 {
+        match self {
+            ShipType::Scout | ShipType::SwarmShip | ShipType::ChangelingShip => 2,
+            ShipType::Destroyer | ShipType::FerengiMarauder | ShipType::HirogenHunter | ShipType::JemHadarFighter | ShipType::TholianVessel | ShipType::KzintiStriker => 3,
+            ShipType::Assault | ShipType::Augment | ShipType::GornRaider => 5,
+            ShipType::Battleship | ShipType::KzintiDreadnought => 6,
+            _ => 4,
+        }
+    }
+
+    /// Whether a boarding party can take it: crewed ships, not starbases,
+    /// freighters, monsters or things weapons can't touch. (A Borg cube can
+    /// be boarded, but it assimilates the boarders.)
+    pub fn boardable(self) -> bool {
+        match self {
+            ShipType::Starbase | ShipType::Freighter => false,
+            s if !s.is_alien() => true,
+            ShipType::Augment
+            | ShipType::GornRaider
+            | ShipType::TholianVessel
+            | ShipType::BorgCube
+            | ShipType::JemHadarFighter
+            | ShipType::BirdOfPrey
+            | ShipType::HirogenHunter
+            | ShipType::QChampion
+            | ShipType::FerengiMarauder
+            | ShipType::ChangelingShip
+            | ShipType::PakledClunker
+            | ShipType::KzintiDreadnought
+            | ShipType::KzintiCruiser
+            | ShipType::KzintiStriker => true,
+            // Special and relic ships are flown by players.
+            s => s.is_special() || s.is_relic(),
+        }
+    }
+
     pub fn is_alien(self) -> bool {
         !ShipType::ALL.contains(&self)
+    }
+}
+
+/// What an empire can build on one of its planets (the --outposts option).
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug, Hash)]
+pub enum Outpost {
+    /// The planet fires further and harder, and is bombed at half speed.
+    Defence,
+    /// Ships launch here (and refit here).
+    Shipyard,
+    /// Reveals cloaked and hidden enemy ships nearby.
+    Sensor,
+}
+
+impl Outpost {
+    pub fn name(self) -> &'static str {
+        match self {
+            Outpost::Defence => "defence outpost",
+            Outpost::Shipyard => "shipyard",
+            Outpost::Sensor => "sensor array",
+        }
+    }
+
+    /// One-letter tag for planet lists.
+    pub fn letter(self) -> char {
+        match self {
+            Outpost::Defence => 'D',
+            Outpost::Shipyard => 'Y',
+            Outpost::Sensor => 'S',
+        }
+    }
+
+    /// For /build: "defence", "defense", "outpost", "yard", "sensor"...
+    pub fn from_word(s: &str) -> Option<Outpost> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "defence" | "defense" | "outpost" | "def" | "d" => Some(Outpost::Defence),
+            "yard" | "shipyard" | "y" => Some(Outpost::Shipyard),
+            "sensor" | "sensors" | "array" | "s" => Some(Outpost::Sensor),
+            _ => None,
+        }
+    }
+}
+
+/// How far a sensor array sees.
+pub const SENSOR_ARRAY_RANGE: f64 = 12_000.0;
+/// Seconds it takes to build an outpost.
+pub const BUILD_SECS: u32 = 30;
+/// What an outpost costs: supplies (with --supply) or armies carried.
+pub const BUILD_SUPPLIES: u32 = 15;
+pub const BUILD_ARMIES: u32 = 3;
+
+/// Ship systems that hits can knock out (the --subsystems option).
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug, Hash)]
+pub enum System {
+    Warp,
+    Impulse,
+    Phasers,
+    Torpedoes,
+    Shields,
+    Transporters,
+    Cloak,
+    Tractor,
+}
+
+impl System {
+    pub const ALL: [System; 8] = [
+        System::Warp,
+        System::Impulse,
+        System::Phasers,
+        System::Torpedoes,
+        System::Shields,
+        System::Transporters,
+        System::Cloak,
+        System::Tractor,
+    ];
+
+    /// Three-letter lamp label.
+    pub fn abbr(self) -> &'static str {
+        match self {
+            System::Warp => "WRP",
+            System::Impulse => "IMP",
+            System::Phasers => "PHA",
+            System::Torpedoes => "TOR",
+            System::Shields => "SHD",
+            System::Transporters => "TRN",
+            System::Cloak => "CLK",
+            System::Tractor => "TRC",
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            System::Warp => "Warp drive",
+            System::Impulse => "Impulse engines",
+            System::Phasers => "Phasers",
+            System::Torpedoes => "Torpedo tubes",
+            System::Shields => "Shield generators",
+            System::Transporters => "Transporters",
+            System::Cloak => "Cloaking device",
+            System::Tractor => "Tractor beam",
+        }
+    }
+
+    /// For /fix: "warp", "phasers", "tor", "shd"...
+    pub fn from_word(s: &str) -> Option<System> {
+        let s = s.trim().to_ascii_lowercase();
+        if s.len() < 3 {
+            return None;
+        }
+        System::ALL.into_iter().find(|sy| sy.abbr().eq_ignore_ascii_case(&s[..3]) || sy.name().to_ascii_lowercase().starts_with(&s))
     }
 }
 

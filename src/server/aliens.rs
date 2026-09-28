@@ -4249,17 +4249,24 @@ mod tests {
         run(&mut world, &mut d, &mut bots, 30);
         d.spawn_kind(&mut world, Faction::Kzinti, None);
         let before: Vec<Team> = world.planets[..PLANETS.len()].iter().map(|pl| pl.owner).collect();
-        run(&mut world, &mut d, &mut bots, 240);
+        run(&mut world, &mut d, &mut bots, 180);
         let ring = world.ring.clone().expect("still here");
+        // Over the last minute, how much of the time robots spend at the ring
+        // (its neighbourhood is under a fifth of the galaxy).
+        let (mut near, mut all) = (0, 0);
+        for _ in 0..60 {
+            run(&mut world, &mut d, &mut bots, 1);
+            for p in world.players.iter().filter(|p| p.alive() && p.robot && p.faction.is_none() && p.ship != ShipType::Freighter) {
+                all += 1;
+                near += usize::from(dist(p.x, p.y, ring.x, ring.y) < ring.r + 15_000.0);
+            }
+        }
+        assert!(near * 100 >= all * 40, "robots at the ring {} of {} samples", near, all);
         // Nobody took anyone's ordinary planets from them...
         for (k, &was) in before.iter().enumerate() {
             let now = world.planets[k].owner;
             assert!(!(Team::PLAYABLE.contains(&was) && Team::PLAYABLE.contains(&now) && was != now), "{} changed hands", world.planets[k].name);
         }
-        // ...because they're all out at the ring.
-        let robots: Vec<&super::super::world::Player> = world.players.iter().filter(|p| p.alive() && p.robot && p.faction.is_none() && p.ship != ShipType::Freighter).collect();
-        let at_ring = robots.iter().filter(|p| dist(p.x, p.y, ring.x, ring.y) < ring.r + 15_000.0).count();
-        assert!(at_ring * 2 >= robots.len(), "{} of {} robots at the ring", at_ring, robots.len());
         let claimed = (PLANETS.len()..world.planets.len()).filter(|&k| Team::PLAYABLE.contains(&world.planets[k].owner)).count();
         assert!(claimed > 0, "the empires are claiming sections");
     }

@@ -149,7 +149,7 @@ impl App {
             scr.text(2, 1, "Waiting for the server...", Color::Grey, false);
             return;
         }
-        let in_game = self.my_state() != PState::Outfit;
+        let in_game = self.observer || self.my_state() != PState::Outfit;
         if in_game {
             self.draw_game(scr);
         } else {
@@ -179,7 +179,8 @@ impl App {
             Popup::Help => (76, HELP.len() as i32 + 3, "Help — press ? or Esc to close"),
             Popup::Players => {
                 let n = self.frame.as_ref().map_or(0, |f| f.players.iter().filter(|p| p.state != PState::Outfit).count());
-                (64, n as i32 + 3, "Players — L or Esc to close")
+                let watching = self.frame.as_ref().map_or(false, |f| !f.observers.is_empty());
+                (64, n as i32 + 3 + i32::from(watching), "Players — L or Esc to close")
             }
             Popup::Planets => {
                 let n = self.frame.as_ref().map_or(40, |f| f.planets.len());
@@ -211,7 +212,17 @@ impl App {
     pub(super) fn status_lines(&self) -> Vec<(String, [f32; 3])> {
         let mut out = Vec::new();
         let Some(f) = self.frame.as_ref() else { return out };
+        if self.observer {
+            let who = match self.me() {
+                Some(p) => format!("Observing {} ({})", p.name, super::palette::callsign(p)),
+                None => "Observing: free camera".to_string(),
+            };
+            out.push((format!("{} • Tab / Shift-Tab: follow a ship • arrows: pan • J: join", who), [150.0, 220.0, 255.0]));
+        }
         let mi = &f.me_info;
+        if let Some((kind, k, secs)) = mi.building {
+            out.push((format!("Building a {} on {}: {}s (stay in orbit)", kind.name(), super::planet_name(f, k as usize), secs), [255.0, 200.0, 90.0]));
+        }
         if let Some(o) = &mi.order {
             out.push((format!("Orders: {}", o), [255.0, 200.0, 90.0]));
         }
@@ -559,6 +570,9 @@ impl App {
                 if info.tribbles {
                     tag.push('T');
                 }
+                if let Some(o) = info.outpost {
+                    tag.push(o.letter());
+                }
                 labels.push((lx - tag.len() as i32 / 2, ly + 1, tag, DIM, false));
             }
         }
@@ -575,6 +589,24 @@ impl App {
             let (lx, ly) = to_dot(l.x as f64, l.y as f64);
             b.circle(lx, ly, 2.0, Color::Yellow, 3);
             labels.push(((lx / 2.0) as i32 + 1, (ly / 4.0) as i32, format!("+{}", l.armies), Color::Yellow, true));
+        }
+
+        // Captured ships under tow: a dashed hulk on a line to its captor.
+        for z in &f.prizes {
+            let (zx, zy) = to_dot(z.x as f64, z.y as f64);
+            if let Some(c) = f.players.iter().find(|p| p.id == z.captor) {
+                let (cx, cy) = to_dot(c.x as f64, c.y as f64);
+                b.line_pattern(cx, cy, zx, zy, DIM, 3, 3);
+            }
+            let sr = (400.0 / upd).max(2.0);
+            let a = z.dir as f64 * std::f64::consts::TAU / 256.0;
+            let (sa, ca) = (a.sin(), a.cos());
+            let pts: Vec<(f64, f64)> = ship_shape(z.ship).iter().map(|&(px, py)| (zx + (px * ca - py * sa) * sr, zy + (px * sa + py * ca) * sr)).collect();
+            for k in 0..pts.len() {
+                let (p0, p1) = (pts[k], pts[(k + 1) % pts.len()]);
+                b.line_pattern(p0.0, p0.1, p1.0, p1.1, team_color(z.team), 5, 2);
+            }
+            labels.push(((zx / 2.0) as i32 + 2, (zy / 4.0) as i32, "PRIZE".into(), Color::Yellow, false));
         }
 
         // Phasers.
@@ -829,6 +861,9 @@ impl App {
             (pf::HUNTED, "HUNTED"),
             (pf::TRIBBLES, "TRIBBLES"),
             (pf::NANITES, "NANITES"),
+            (pf::BOARDING, "BOARDING"),
+            (pf::BOARDED, "BOARDED!"),
+            (pf::TOWING, "TOWING PRIZE"),
         ] {
             if me.flags & flag != 0 {
                 line += "  ";
@@ -841,9 +876,34 @@ impl App {
                 scr.text_clip(r.x, r.y + 3 + k as i32, part, Color::Grey, false, maxx);
             }
         }
+        // Ship systems (with --subsystems): green working, yellow damaged,
+        // red out; * marks the one damage control is fixing first.
+        let mut sys_rows = 0;
+        if let Some(sys) = mi.systems {
+            let y = r.y + 3 + status.len() as i32;
+            if y < r.y + r.h {
+                let mut x = r.x;
+                scr.text_clip(x, y, "Sys", DIM, false, maxx);
+                x += 4;
+                for (k, sy) in System::ALL.iter().enumerate() {
+                    let h = sys[k];
+                    let col = match h {
+                        0 => Color::Red,
+                        1..=74 => Color::Yellow,
+                        _ => Color::Green,
+                    };
+                    let mark = if mi.fix_first == Some(*sy) { "*" } else { "" };
+                    let pct = if (1..100).contains(&h) { h.to_string() } else { String::new() };
+                    let txt = format!("{}{}{}", mark, sy.abbr(), pct);
+                    scr.text_clip(x, y, &txt, col, h < 100, maxx);
+                    x += txt.chars().count() as i32 + 1;
+                }
+                sys_rows = 1;
+            }
+        }
         // Special or relic ship, then advanced tech, below the status line.
         if self.tech_in_controls {
-            let mut ty = r.y + 4 + status.len() as i32;
+            let mut ty = r.y + 4 + status.len() as i32 + sys_rows;
             for (k, (text, col)) in self.ship_lines().into_iter().enumerate() {
                 for part in wrap_chars(&text, (r.w - 1).max(1) as usize) {
                     if ty < r.y + r.h {
@@ -953,6 +1013,10 @@ impl App {
             let col = if p.state == PState::Alive { self.player_color(p) } else { DIM };
             scr.text_clip(r.x, y, &line, col, p.id == self.slot, maxx);
         }
+        let y = r.y + 1 + ps.len() as i32;
+        if !f.observers.is_empty() && y < r.y + r.h {
+            scr.text_clip(r.x, y, &format!("Observers: {}", f.observers.join(", ")), DIM, false, maxx);
+        }
     }
 
     fn draw_messages(&self, scr: &mut Screen, r: Rect) {
@@ -1008,12 +1072,13 @@ impl App {
             }
             Mode::Refit => ("Refit to: [s]cout [d]estroyer [c]ruiser [b]attleship [a]ssault [x] starbase [e] special [u] relic".into(), yellow),
             Mode::ConfirmQuit => ("Really quit Netrek? (y/n)".into(), red),
+            Mode::Play if self.observer => ("Observing. Press m to talk to everyone, J to join the game, ? for help.".into(), red),
             Mode::Play => ("Talk to everyone: press m, then A and type. Press ? for help.".into(), red),
         }
     }
 
     fn draw_input_line(&self, scr: &mut Screen, x: i32, y: i32, maxx: i32) {
-        let in_game = self.my_state() != PState::Outfit;
+        let in_game = self.observer || self.my_state() != PState::Outfit;
         match &self.mode {
             Mode::Compose { target: None, .. } => {
                 scr.text_clip(x, y, "Send to: [A]ll [T]eam [F/R/K/O] a team [0-9a-v] a player (Esc cancels)", Color::Yellow, true, maxx);
@@ -1041,6 +1106,9 @@ impl App {
             Mode::ConfirmQuit => {
                 scr.text_clip(x, y, "Really quit Netrek? (y/n)", Color::Red, true, maxx);
             }
+            Mode::Play if self.observer => {
+                scr.text_clip(x, y, "Observing. Press m to talk to everyone, J to join the game, ? for help.", Color::Red, false, maxx);
+            }
             Mode::Play if in_game => {
                 scr.text_clip(x, y, "Talk to everyone: press m, then A and type. Press ? for help.", Color::Red, false, maxx);
             }
@@ -1051,7 +1119,7 @@ impl App {
                         return;
                     }
                 }
-                let hint = "f/r/k/o team • s/d/c/b/a/x ship • Enter launch • m message • ? help • q quit";
+                let hint = "f/r/k/o team • s/d/c/b/a/x ship • Enter launch • W watch • m message • ? help • q quit";
                 scr.text_clip(x, y, hint, DIM, false, maxx);
             }
         }
@@ -1176,7 +1244,7 @@ impl App {
             y += 1;
         }
         y += 1;
-        let help = "Choose a team (f r k o) and a ship (s d c b a x, e special, u relic), then press Enter.";
+        let help = "Choose a team (f r k o) and a ship (s d c b a x, e special, u relic), then press Enter (or W to watch).";
         scr.text((w - help.len() as i32).max(0) / 2, y, help, Color::White, true);
         y += 1;
         if let Some(sv) = &f.me_info.service {
@@ -1255,13 +1323,14 @@ impl App {
                     let info = &f.planets[k];
                     let line = if info.known {
                         format!(
-                            "{:<15}{} {:>3} {}{}{}",
+                            "{:<15}{} {:>3} {}{}{}{}",
                             def.name,
                             info.owner.letter(),
                             info.armies,
                             if info.flags & PL_REPAIR != 0 { 'R' } else { ' ' },
                             if info.flags & PL_FUEL != 0 { 'F' } else { ' ' },
-                            if info.flags & PL_AGRI != 0 { 'A' } else { ' ' }
+                            if info.flags & PL_AGRI != 0 { 'A' } else { ' ' },
+                            info.outpost.map_or(' ', |o| o.letter())
                         )
                     } else {
                         format!("{:<15}?   ?", def.name)
@@ -1334,6 +1403,7 @@ pub(super) const HELP: &[(&str, &str)] = &[
     ("R", "repair mode (stop, shields down, repair faster)"),
     ("T / y", "tractor / pressor beam on the ship nearest the pointer"),
     ("d / D", "detonate nearby enemy torps / your own torps"),
+    ("B", "board the enemy ship nearest the pointer (armies aboard, its shields down; with --boarding)"),
     ("w", "overwatch (in orbit): auto-fire at any enemy that comes into weapons range"),
     ("v / e / j", "advanced tech (Commodore / Rear Admiral / Admiral, with ranks); /tech lists yours"),
     ("r", "refit to another ship (orbiting your home planet)"),
@@ -1343,9 +1413,11 @@ pub(super) const HELP: &[(&str, &str)] = &[
     ("+ / -", "zoom tactical view (or mouse wheel)"),
     ("g", "switch graphics: vector / braille"),
     ("S", "sound effects on / off"),
-    ("/", "server command, e.g. /record /orders /treaty rom /upgrade torps (when enabled)"),
+    ("/", "server command, e.g. /record /orders /treaty rom /upgrade torps /fix warp /build yard (when enabled)"),
     ("Ctrl-L", "redraw screen"),
     ("q", "quit"),
+    ("W", "on the outfit screen: watch as an observer instead of flying"),
+    ("Tab", "observers: follow the next ship (Shift-Tab previous, click a ship, arrows or Esc for a free camera, J to join)"),
     ("", ""),
     ("How to win", "Kill enemies to earn kills. Kills let you carry armies (2 per kill)."),
     ("", "Bomb enemy planets down to 4 armies, pick up armies from your own"),

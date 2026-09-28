@@ -42,6 +42,16 @@ pub enum ClientMsg {
     Refit(ShipType),
     Message { to: MsgTarget, text: String },
     Quit,
+    /// Open a connection as an observer (instead of `Hello`).
+    Observe { name: String, version: u32 },
+    /// Stop playing and watch instead (from the outfit screen).
+    Watch,
+    /// Observers: the ship to follow (None = free camera).
+    Follow(Option<u8>),
+    /// Observers: take a player slot and join the game.
+    Play,
+    /// Send a boarding party (armies aboard) onto this ship (with --boarding).
+    Board(u8),
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
@@ -98,6 +108,12 @@ pub mod pf {
     pub const ZAPPER: u32 = 524288;
     /// Infected with nanites.
     pub const NANITES: u32 = 1048576;
+    /// Has a boarding party fighting aboard an enemy ship.
+    pub const BOARDING: u32 = 2097152;
+    /// Enemy boarders are fighting aboard.
+    pub const BOARDED: u32 = 4194304;
+    /// Towing a captured prize home.
+    pub const TOWING: u32 = 8388608;
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -168,6 +184,8 @@ pub struct PlanetInfo {
     pub alien: Option<Faction>,
     /// Infested with tribbles.
     pub tribbles: bool,
+    /// What its owner has built there (with --outposts).
+    pub outpost: Option<crate::consts::Outpost>,
 }
 
 /// Space terrain (the --terrain option).
@@ -402,6 +420,19 @@ pub struct RingSectionInfo {
     pub y: i32,
 }
 
+/// A captured ship being towed home.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct PrizeInfo {
+    pub x: i32,
+    pub y: i32,
+    pub dir: u8,
+    pub ship: ShipType,
+    /// The empire it was taken from.
+    pub team: Team,
+    /// Who's towing it.
+    pub captor: u8,
+}
+
 /// Armies dropped by a destroyed Ferengi marauder, free for anyone to pick up.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct LootInfo {
@@ -447,6 +478,12 @@ pub struct SelfInfo {
     pub techs: Vec<(Tech, u16)>,
     /// Ablative armor left (with that tech).
     pub armor: u16,
+    /// Health of each ship system (in System::ALL order), with --subsystems.
+    pub systems: Option<[u8; 8]>,
+    /// The system damage control is fixing first.
+    pub fix_first: Option<crate::consts::System>,
+    /// An outpost you're building: what, where, and seconds to go.
+    pub building: Option<(crate::consts::Outpost, u8, u16)>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -471,6 +508,10 @@ pub struct Frame {
     pub zones: Vec<ZoneInfo>,
     /// The Ringworld, once the Kzinti have brought it.
     pub ring: Option<RingInfo>,
+    /// The names of everyone watching as an observer.
+    pub observers: Vec<String>,
+    /// Captured ships under tow.
+    pub prizes: Vec<PrizeInfo>,
     /// Teams that are currently allowed to be joined.
     pub open_teams: Vec<Team>,
     /// Planets held by Fed, Rom, Kli, Ori (public knowledge, like the team window).
@@ -489,6 +530,8 @@ pub enum ServerMsg {
     Msg(ChatMsg),
     /// Result of a join/refit attempt that failed.
     Warning(String),
+    /// You're now an observer: frames show the whole galaxy.
+    Observing { motd: Vec<String> },
 }
 
 pub fn encode<T: Serialize>(msg: &T) -> Vec<u8> {

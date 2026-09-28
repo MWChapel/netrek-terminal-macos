@@ -125,6 +125,16 @@ pub struct Player {
     pub swell: f64,
     /// Infected with nanites.
     pub nanites: bool,
+    /// Health of each ship system, 0 (out) to 100 (with --subsystems).
+    pub systems: [f64; 8],
+    /// The system damage control is fixing first (/fix).
+    pub fix_first: Option<System>,
+    /// Crew left to fight off boarders.
+    pub crew: i32,
+    /// Towing a captured prize (top speed 6).
+    pub towing: bool,
+    /// Where the ship was last destroyed (to launch from the nearest shipyard).
+    pub last_death: Option<(f64, f64)>,
 }
 
 impl Player {
@@ -205,6 +215,11 @@ impl Player {
             zapped: false,
             swell: 0.0,
             nanites: false,
+            systems: [100.0; 8],
+            fix_first: None,
+            crew: 4,
+            towing: false,
+            last_death: None,
         }
     }
 
@@ -231,7 +246,23 @@ impl Player {
     pub fn max_speed_now(&self) -> i32 {
         let s = self.stats();
         let m = (s.max_speed + 2) as f64 - (s.max_speed + 1) as f64 * (self.damage / s.max_damage);
-        (m as i32).clamp(0, s.max_speed)
+        let m = (m as i32).clamp(0, s.max_speed);
+        // Towing a prize holds you to warp 6.
+        let m = if self.towing { m.min(6) } else { m };
+        // A damaged warp drive can't reach top speed; with it out, impulse only.
+        match self.sys(System::Warp) {
+            w if w <= 0.0 => m.min(3),
+            w => ((m as f64 * (0.5 + 0.5 * w)).round() as i32).clamp(m.min(1), m),
+        }
+    }
+
+    /// How well a system is working, 0.0 (out) to 1.0.
+    pub fn sys(&self, s: System) -> f64 {
+        self.systems[s as usize] / 100.0
+    }
+
+    pub fn sys_out(&self, s: System) -> bool {
+        self.systems[s as usize] <= 0.0
     }
 
     pub fn max_armies_now(&self) -> u32 {
@@ -290,6 +321,8 @@ pub struct Planet {
     pub tribbles: bool,
     /// Supplies waiting for a convoy (with --supply).
     pub supply: u32,
+    /// An outpost, and the empire that built it (lost if the planet changes hands).
+    pub outpost: Option<(Outpost, Team)>,
 }
 
 /// The Tempest's web (an alien incursion): ships that touch its rim are
@@ -368,6 +401,47 @@ pub struct RingSection {
 /// Kzin's garrison when the Ringworld arrives (and after a galaxy reset).
 pub const KZIN_ARMIES: i32 = 30;
 
+/// An outpost under construction.
+#[derive(Clone, Copy, Debug)]
+pub struct Build {
+    pub builder: u8,
+    pub planet: usize,
+    pub kind: Outpost,
+    pub done_at: u32,
+}
+
+/// How close a ship must be to send a boarding party.
+pub const BOARD_RANGE: f64 = 1500.0;
+/// Ticks between rounds of a boarding action.
+pub const BOARD_ROUND: u32 = 8;
+/// Marines the transporters send across each round.
+pub const BOARD_WAVE: u32 = 2;
+/// How far behind its captor a prize is towed.
+pub const PRIZE_TETHER: f64 = 1100.0;
+
+/// Marines fighting aboard an enemy ship.
+#[derive(Clone, Copy, Debug)]
+pub struct Boarding {
+    pub attacker: u8,
+    pub target: u8,
+    pub troops: i32,
+    /// Tick of the next round.
+    pub next: u32,
+}
+
+/// A captured ship under tow.
+#[derive(Clone, Debug)]
+pub struct Prize {
+    pub x: f64,
+    pub y: f64,
+    pub dir: f64,
+    pub ship: ShipType,
+    /// The empire it was taken from.
+    pub from: Team,
+    pub captor: u8,
+    pub captor_team: Team,
+}
+
 /// The biggest the Armus slick can swell to (added to its base size).
 pub const ARMUS_MAX_SWELL: f64 = 6000.0;
 
@@ -388,6 +462,12 @@ pub struct Features {
     pub supply: bool,
     /// Senior officers (Captain and up) get advanced tech (with ranks).
     pub rank_tech: bool,
+    /// Hits can knock out a ship's systems (warp, phasers, shields...).
+    pub subsystems: bool,
+    /// Boarding parties: capture ships with the armies you carry.
+    pub boarding: bool,
+    /// Build defence outposts, shipyards and sensor arrays on your planets.
+    pub outposts: bool,
 }
 
 /// Things that happened this tick, for the career and orders systems.
@@ -500,6 +580,12 @@ pub struct World {
     pub leaders: Vec<LeaderInfo>,
     /// The Tempest's web, while that incursion is on.
     pub tempest: Option<TempestWeb>,
+    /// Boarding actions under way.
+    pub boardings: Vec<Boarding>,
+    /// Captured ships being towed home.
+    pub prizes: Vec<Prize>,
+    /// Outposts under construction.
+    pub builds: Vec<Build>,
     /// Patches of space marked out by alien incursions (redrawn every tick).
     pub zones: Vec<ZoneInfo>,
     /// Chat sent this tick (Nomad listens for it), cleared by `tick`.
@@ -533,6 +619,9 @@ impl World {
             terrain: Vec::new(),
             leaders: Vec::new(),
             tempest: None,
+            boardings: Vec::new(),
+            prizes: Vec::new(),
+            builds: Vec::new(),
             zones: Vec::new(),
             chatter: Vec::new(),
             ring: None,
@@ -583,6 +672,7 @@ impl World {
                 silenced_until: 0,
                 tribbles: false,
                 supply: 0,
+                outpost: None,
             })
             .collect();
         for team in Team::PLAYABLE {
@@ -645,6 +735,7 @@ impl World {
                 silenced_until: 0,
                 tribbles: false,
                 supply: 0,
+                outpost: None,
             });
         }
     }
@@ -768,14 +859,26 @@ impl World {
         } else {
             self.planets.iter().position(|p| p.owner == team).unwrap_or(home)
         };
+        // With shipyards, launch from the one nearest where you were lost.
+        let (dx, dy) = self.players[i].last_death.unwrap_or((self.planets[start].x, self.planets[start].y));
+        let yard = (0..self.planets.len())
+            .filter(|&k| self.planets[k].owner == team && self.planets[k].outpost == Some((Outpost::Shipyard, team)))
+            .min_by(|&a, &b| {
+                let (pa, pb) = (&self.planets[a], &self.planets[b]);
+                ((pa.x - dx).powi(2) + (pa.y - dy).powi(2)).total_cmp(&((pb.x - dx).powi(2) + (pb.y - dy).powi(2)))
+            });
+        let (start, spread) = match yard {
+            Some(k) => (k, 1500.0),
+            None => (start, 5000.0),
+        };
         let (px, py) = (self.planets[start].x, self.planets[start].y);
         let s = ship.stats();
         let p = &mut self.players[i];
         p.team = team;
         p.ship = ship;
         p.state = PState::Alive;
-        p.x = (px + rng.gen_range(-5000.0..5000.0)).clamp(1000.0, GWIDTH - 1000.0);
-        p.y = (py + rng.gen_range(-5000.0..5000.0)).clamp(1000.0, GWIDTH - 1000.0);
+        p.x = (px + rng.gen_range(-spread..spread)).clamp(1000.0, GWIDTH - 1000.0);
+        p.y = (py + rng.gen_range(-spread..spread)).clamp(1000.0, GWIDTH - 1000.0);
         p.dir = rng.gen_range(0.0..256.0);
         p.desired_dir = p.dir;
         p.speed = 0;
@@ -784,6 +887,11 @@ impl World {
         p.fuel = s.max_fuel;
         p.shield = s.max_shield;
         p.damage = 0.0;
+        // A new ship: every system working, a full crew.
+        p.systems = [100.0; 8];
+        p.fix_first = None;
+        p.crew = ship.crew();
+        p.towing = false;
         p.wtemp = 0.0;
         p.etemp = 0.0;
         p.w_overheat = 0;
@@ -831,6 +939,7 @@ impl World {
         p.shield = s.max_shield;
         p.shields_up = s.max_shield > 0.0;
         p.bounty = bounty;
+        p.crew = ship.crew();
         Some(id)
     }
 
@@ -876,6 +985,9 @@ impl World {
                 if !self.players[i].shields_up && self.tick < self.players[i].jammed_until {
                     return self.warn(id, "Shields jammed by a graviton pulse!");
                 }
+                if !self.players[i].shields_up && self.players[i].sys_out(System::Shields) {
+                    return self.warn(id, "Shield generators are out! (/fix shields)");
+                }
                 let p = &mut self.players[i];
                 p.shields_up = !p.shields_up;
                 if p.shields_up {
@@ -883,6 +995,9 @@ impl World {
                 }
             }
             ClientMsg::Cloak => {
+                if !self.players[i].cloaked && self.players[i].sys_out(System::Cloak) {
+                    return self.warn(id, "The cloaking device is out! (/fix cloak)");
+                }
                 let p = &mut self.players[i];
                 p.cloaked = !p.cloaked;
             }
@@ -900,6 +1015,7 @@ impl World {
             ClientMsg::DetEnemy => self.det_enemy(i),
             ClientMsg::Overwatch => self.toggle_overwatch(i),
             ClientMsg::Tech { slot, dir } => self.use_tech(i, slot as usize, dir as f64),
+            ClientMsg::Board(t) => self.board(i, t as usize),
             ClientMsg::DetOwn => {
                 for t in self.torps.iter_mut() {
                     if t.owner == id && t.explode == 0 && t.kind == TorpKind::Photon {
@@ -933,7 +1049,14 @@ impl World {
                 // Self-destruct, like Netrek's 'Q'.
                 self.kill(i, None, "self-destructed".into());
             }
-            ClientMsg::Hello { .. } | ClientMsg::Join { .. } | ClientMsg::Message { .. } => {}
+            // Connection-level messages (joining, observing) are handled by the server loop.
+            ClientMsg::Hello { .. }
+            | ClientMsg::Join { .. }
+            | ClientMsg::Message { .. }
+            | ClientMsg::Observe { .. }
+            | ClientMsg::Watch
+            | ClientMsg::Follow(_)
+            | ClientMsg::Play => {}
         }
     }
 
@@ -962,6 +1085,15 @@ impl World {
             }
         }
         self.outbox.push(Outgoing { dest, msg });
+    }
+
+    /// An observer says something to everyone.
+    pub fn observer_says(&mut self, name: &str, text: &str) {
+        let text: String = text.chars().filter(|c| !c.is_control()).take(MAX_MESSAGE).collect();
+        if text.trim().is_empty() {
+            return;
+        }
+        self.outbox.push(Outgoing { dest: Dest::All, msg: ChatMsg { kind: MsgKind::All, from: format!("{} (obs)->ALL", name), text } });
     }
 
     fn set_speed(&mut self, i: usize, s: i32) {
@@ -993,6 +1125,14 @@ impl World {
         }
         if self.kelvan_field(i) {
             return self.warn(id, "Kelvan neural field: your torpedo crews are paralysed");
+        }
+        // Damaged tubes misfire; with them out, nothing fires.
+        let tubes = p.sys(System::Torpedoes);
+        if tubes <= 0.0 {
+            return self.warn(id, "Torpedo tubes are out! (/fix torpedoes)");
+        }
+        if tubes < 1.0 && rand::thread_rng().gen_bool((1.0 - tubes) * 0.5) {
+            return self.warn(id, "Torpedo misfire! The tubes are damaged");
         }
         let p = &self.players[i];
         let quantum = kind == TorpKind::Photon && p.techs.contains(&Tech::QuantumTorps);
@@ -1087,6 +1227,9 @@ impl World {
         if p.in_storm {
             return self.warn(id, "Ion interference: phasers are offline in the storm");
         }
+        if p.sys_out(System::Phasers) {
+            return self.warn(id, "Phasers are out! (/fix phasers)");
+        }
         if self.tick < p.phased_until {
             return self.warn(id, "Out of phase: weapons can't fire");
         }
@@ -1094,7 +1237,8 @@ impl World {
         if p.fuel < s.phaser_cost {
             return self.warn(id, "Not enough fuel for phaser");
         }
-        let phaser_damage = s.phaser_damage * (1.0 + 0.1 * self.upgrade(p.team, UPGRADE_PHASERS));
+        // Damaged phaser banks fire weaker, shorter beams.
+        let phaser_damage = s.phaser_damage * (1.0 + 0.1 * self.upgrade(p.team, UPGRADE_PHASERS)) * (0.5 + 0.5 * p.sys(System::Phasers));
         let range = PHASEDIST * phaser_damage / 100.0 * if overcharge { 1.25 } else { 1.0 };
         let (vx, vy) = dir_vec(dir);
         let (x, y, team) = (p.x, p.y, p.team);
@@ -1748,7 +1892,7 @@ impl World {
             && p.fuel - s.plasma_cost >= s.max_fuel * 0.25
             && !self.torps.iter().any(|t| t.owner == i as u8 && t.kind == TorpKind::Plasma);
         let plasma_aim = dir_to(x, y, qx, qy);
-        if can_plasma && d < plasma_range {
+        if can_plasma && d < plasma_range && !self.players[i].sys_out(System::Torpedoes) {
             self.fire_torp(i, plasma_aim, TorpKind::Plasma);
             return;
         }
@@ -1757,12 +1901,12 @@ impl World {
             return;
         }
         let p = &self.players[i];
-        if d < phaser_range * 0.7 && p.phaser_timer == 0 && !p.in_storm && s.phaser_damage > 0.0 {
+        if d < phaser_range * 0.7 && p.phaser_timer == 0 && !p.in_storm && s.phaser_damage > 0.0 && !p.sys_out(System::Phasers) {
             self.fire_phaser(i, straight);
             return;
         }
         let out = self.torps.iter().filter(|t| t.owner == i as u8 && t.kind == TorpKind::Photon).count();
-        if d < torp_range && s.torp_damage > 0.0 && out < self.players[i].ship.max_torps() && (tick + i as u32) % 5 == 0 {
+        if d < torp_range && s.torp_damage > 0.0 && out < self.players[i].ship.max_torps() && (tick + i as u32) % 5 == 0 && !self.players[i].sys_out(System::Torpedoes) {
             let spread = ((tick % 7) as f64 - 3.0) * 0.8;
             self.fire_torp(i, (aim + spread).rem_euclid(256.0), TorpKind::Photon);
         }
@@ -1852,6 +1996,9 @@ impl World {
         let Some(k) = p.orbiting else {
             return self.warn(id, "Must be orbiting to beam armies");
         };
+        if p.sys_out(System::Transporters) {
+            return self.warn(id, "Transporters are out! (/fix transporters)");
+        }
         if up {
             if self.planets[k].owner != p.team {
                 return self.warn(id, "Can only beam up armies from your own planets");
@@ -1880,6 +2027,9 @@ impl World {
         let ti = t as usize;
         if ti >= MAXPLAYER || ti == i || !self.players[ti].alive() {
             return;
+        }
+        if self.players[i].sys_out(System::Tractor) {
+            return self.warn(id, "The tractor beam emitter is out! (/fix tractor)");
         }
         let p = &self.players[i];
         let range = TRACTDIST * p.stats().tract_range;
@@ -1921,6 +2071,10 @@ impl World {
         for j in swarm {
             self.kill(j, Some(id), "was shaken off".into());
         }
+        // Fighting off boarders: each blast takes one down.
+        for b in self.boardings.iter_mut().filter(|b| b.target == id && b.troops > 0) {
+            b.troops -= 1;
+        }
         // ...and the shock wave fries nanites, ours and those of ships close by.
         let cured: Vec<usize> = (0..MAXPLAYER)
             .filter(|&j| self.players[j].alive() && self.players[j].nanites)
@@ -1946,10 +2100,10 @@ impl World {
         let id = i as u8;
         let p = &self.players[i];
         let ok = p.orbiting.map_or(false, |k| {
-            self.planets[k].owner == p.team && self.planets[k].flags & PL_HOME != 0
+            self.planets[k].owner == p.team && (self.planets[k].flags & PL_HOME != 0 || self.planets[k].outpost == Some((Outpost::Shipyard, p.team)))
         });
         if !ok {
-            return self.warn(id, "You must orbit your home planet to refit");
+            return self.warn(id, "You must orbit your home planet (or a shipyard) to refit");
         }
         if p.armies > 0 {
             return self.warn(id, "Beam your armies down before refitting");
@@ -2157,9 +2311,322 @@ impl World {
         p.armor -= soak;
         p.damage += hull - soak;
         p.repair_mode = false;
+        // Hits that get through to the hull can knock out a system.
+        let hit = hull - soak;
+        if self.features.subsystems && hit >= 3.0 && p.faction.is_none() && p.fighter_of.is_none() {
+            let mut rng = rand::thread_rng();
+            if rng.gen_bool((hit / 30.0).min(0.9)) {
+                let sy = System::ALL[rng.gen_range(0..System::ALL.len())];
+                self.damage_system(i, sy, hit * 2.5);
+            }
+        }
+        let p = &mut self.players[i];
         if p.damage >= p.stats().max_damage {
             self.kill(i, killer, how);
         }
+    }
+
+    /// Start building an outpost on the planet ship `i` is orbiting.
+    pub fn start_build(&mut self, i: usize, kind: Outpost) {
+        let id = i as u8;
+        let p = &self.players[i];
+        let Some(k) = p.orbiting.filter(|&k| self.planets[k].owner == p.team) else {
+            return self.warn(id, "Orbit a planet you own to build on it");
+        };
+        if self.planets[k].outpost.map(|o| o.0) == Some(kind) {
+            return self.warn(id, format!("{} already has a {}", self.planets[k].name, kind.name()));
+        }
+        if self.builds.iter().any(|b| b.planet == k) {
+            return self.warn(id, format!("Something is already being built on {}", self.planets[k].name));
+        }
+        if let Err(why) = self.build_cost(i, false) {
+            return self.warn(id, why);
+        }
+        self.builds.retain(|b| b.builder != id);
+        self.builds.push(Build { builder: id, planet: k, kind, done_at: self.tick + BUILD_SECS * UPS as u32 });
+        let replacing = self.planets[k].outpost.map_or(String::new(), |o| format!(" (replacing the {})", o.0.name()));
+        self.warn(id, format!("Building a {} on {}{}: stay in orbit for {} seconds", kind.name(), self.planets[k].name, replacing, BUILD_SECS));
+    }
+
+    /// Check (and, with `pay`, take) what an outpost costs ship `i`:
+    /// supplies from its empire's stockpile (with --supply), or failing that
+    /// armies it carries, who stay on as the builders.
+    fn build_cost(&mut self, i: usize, pay: bool) -> Result<(), String> {
+        let team = self.players[i].team;
+        if self.features.supply && self.supply[team.idx()].stock >= BUILD_SUPPLIES {
+            if pay {
+                self.supply[team.idx()].stock -= BUILD_SUPPLIES;
+            }
+            return Ok(());
+        }
+        let p = &mut self.players[i];
+        if p.armies < BUILD_ARMIES {
+            return Err(if self.features.supply {
+                format!("An outpost takes {} supplies (your empire has {}) or {} armies aboard as builders", BUILD_SUPPLIES, self.supply[team.idx()].stock, BUILD_ARMIES)
+            } else {
+                format!("An outpost takes {} armies as builders; carry them here", BUILD_ARMIES)
+            });
+        }
+        if pay {
+            p.armies -= BUILD_ARMIES;
+        }
+        Ok(())
+    }
+
+    /// Construction (the builder must stay in orbit), and outposts lost
+    /// when their planets change hands.
+    fn outpost_tick(&mut self) {
+        let tick = self.tick;
+        let mut k = 0;
+        while k < self.builds.len() {
+            let b = self.builds[k];
+            let p = &self.players[b.builder as usize];
+            if !p.alive() || p.orbiting != Some(b.planet) || self.planets[b.planet].owner != p.team {
+                self.builds.remove(k);
+                if self.players[b.builder as usize].in_use {
+                    self.warn(b.builder, format!("Construction of the {} abandoned", b.kind.name()));
+                }
+                continue;
+            }
+            if tick < b.done_at {
+                k += 1;
+                continue;
+            }
+            self.builds.remove(k);
+            let i = b.builder as usize;
+            if let Err(why) = self.build_cost(i, true) {
+                self.warn(b.builder, why);
+                continue;
+            }
+            let team = self.players[i].team;
+            self.planets[b.planet].outpost = Some((b.kind, team));
+            let (who, name) = (self.players[i].label(), self.planets[b.planet].name);
+            self.team_msg(team, format!("{} has built a {} on {}", who, b.kind.name(), name));
+            self.events.push(GameEvent::Honour { player: b.builder, text: format!("Built a {}", b.kind.name()) });
+        }
+        for pl in self.planets.iter_mut() {
+            if let Some((o, t)) = pl.outpost {
+                if pl.owner != t {
+                    pl.outpost = None;
+                    let text = format!("The {} on {} is destroyed", o.name(), pl.name);
+                    self.outbox.push(Outgoing { dest: Dest::All, msg: ChatMsg { kind: MsgKind::System, from: "GOD".into(), text } });
+                }
+            }
+        }
+    }
+
+    /// Send a boarding party onto ship `t`: its shields must be down, and
+    /// ours close, uncloaked, with armies aboard and transporters working.
+    fn board(&mut self, i: usize, t: usize) {
+        let id = i as u8;
+        if !self.features.boarding {
+            return self.warn(id, "Boarding parties are off on this server (--boarding)");
+        }
+        if t >= MAXPLAYER || t == i || !self.players[t].alive() || !self.at_war(i, t) {
+            return self.warn(id, "No enemy ship there to board");
+        }
+        let (p, q) = (&self.players[i], &self.players[t]);
+        let d = ((p.x - q.x).powi(2) + (p.y - q.y).powi(2)).sqrt();
+        let why = if !q.ship.boardable() {
+            Some("That can't be boarded")
+        } else if d > BOARD_RANGE {
+            Some("Too far to board: get within 1,500")
+        } else if p.armies == 0 {
+            Some("You need armies aboard to send a boarding party")
+        } else if p.cloaked {
+            Some("Decloak first")
+        } else if p.sys_out(System::Transporters) {
+            Some("Transporters are out! (/fix transporters)")
+        } else if q.shields_up && q.shield >= q.stats().max_shield * 0.1 {
+            Some("Their shields are up: knock them down first")
+        } else if self.tick < q.phased_until || self.tick < p.phased_until {
+            Some("Out of phase: the transporters can't lock on")
+        } else if self.boardings.iter().any(|b| b.attacker == id && b.target == t as u8) {
+            Some("Your marines are already aboard")
+        } else {
+            None
+        };
+        if let Some(why) = why {
+            return self.warn(id, why);
+        }
+        let (me, them) = (self.players[i].label(), self.players[t].label());
+        // Resistance is futile.
+        if self.players[t].ship == ShipType::BorgCube {
+            let n = self.players[i].armies;
+            self.players[i].armies = 0;
+            self.warn(id, format!("Your boarding party of {} has been assimilated by the Borg!", n));
+            self.alert(format!("{} sends marines aboard a Borg cube. They are assimilated.", me));
+            return;
+        }
+        let n = self.players[i].armies.min(BOARD_WAVE);
+        self.players[i].armies -= n;
+        self.boardings.push(Boarding { attacker: id, target: t as u8, troops: n as i32, next: self.tick + BOARD_ROUND });
+        self.warn(id, format!("Boarding party away! Marines beaming aboard {}", them));
+        self.warn(t as u8, format!("Enemy boarders aboard from {}! Raise shields to stop more coming, or detonate (d) to fight them", me));
+    }
+
+    /// Boarding actions: reinforcements while the target's shields are down,
+    /// then a round of fighting, every BOARD_ROUND ticks. Prizes follow their
+    /// captors and are delivered at home.
+    fn boarding_tick(&mut self) {
+        let tick = self.tick;
+        let mut rng = rand::thread_rng();
+        let mut k = 0;
+        while k < self.boardings.len() {
+            let b = self.boardings[k];
+            let (a, t) = (b.attacker as usize, b.target as usize);
+            if !self.players[t].alive() || b.troops <= 0 {
+                self.boardings.remove(k);
+                if b.troops <= 0 && self.players[t].alive() {
+                    self.warn(b.attacker, format!("Your boarding party aboard {} has been wiped out", self.players[t].label()));
+                    self.warn(b.target, "The boarders have been fought off!");
+                }
+                continue;
+            }
+            if tick < b.next {
+                k += 1;
+                continue;
+            }
+            self.boardings[k].next = tick + BOARD_ROUND;
+            // Reinforcements, while the shields stay down.
+            let (p, q) = (&self.players[a], &self.players[t]);
+            let close = ((p.x - q.x).powi(2) + (p.y - q.y).powi(2)).sqrt() < BOARD_RANGE * 1.5;
+            let open = !q.shields_up || q.shield < q.stats().max_shield * 0.1;
+            if p.alive() && p.armies > 0 && close && open && !p.sys_out(System::Transporters) {
+                let n = p.armies.min(BOARD_WAVE);
+                self.players[a].armies -= n;
+                self.boardings[k].troops += n as i32;
+            }
+            // A round of fighting: the armies aboard defend first, then the crew.
+            let troops = self.boardings[k].troops;
+            let q = &mut self.players[t];
+            let defenders = q.crew.max(0) + q.armies as i32;
+            if defenders > 0 {
+                if rng.gen_bool(troops as f64 / (troops + defenders) as f64) {
+                    if q.armies > 0 {
+                        q.armies -= 1;
+                    } else {
+                        q.crew -= 1;
+                    }
+                } else {
+                    self.boardings[k].troops -= 1;
+                }
+            }
+            let q = &self.players[t];
+            let (troops, defenders) = (self.boardings[k].troops, q.crew.max(0) + q.armies as i32);
+            if defenders <= 0 && troops > 0 {
+                self.boardings.remove(k);
+                self.capture(a, t);
+                continue;
+            }
+            let name = self.players[t].label();
+            self.warn(b.attacker, format!("Boarding {}: {} marines vs {} defenders", name, troops, defenders));
+            self.warn(b.target, format!("Boarders: {} enemy marines vs {} of your crew", troops, defenders));
+            k += 1;
+        }
+        // Prizes follow their captors home.
+        let mut z = 0;
+        while z < self.prizes.len() {
+            let pz = self.prizes[z].clone();
+            let c = &self.players[pz.captor as usize];
+            if !c.alive() || c.team != pz.captor_team {
+                self.prizes.remove(z);
+                if self.players[pz.captor as usize].in_use {
+                    self.players[pz.captor as usize].towing = false;
+                }
+                self.god(format!("The captured {} is lost", pz.ship.stats().name));
+                continue;
+            }
+            let (vx, vy) = dir_vec(c.dir);
+            let (x, y, dir) = (c.x - vx * PRIZE_TETHER, c.y - vy * PRIZE_TETHER, c.dir);
+            let home = c.orbiting.filter(|&k| self.planets[k].owner == c.team && self.planets[k].flags & (PL_REPAIR | PL_HOME) != 0);
+            let pr = &mut self.prizes[z];
+            (pr.x, pr.y, pr.dir) = (x.clamp(0.0, GWIDTH), y.clamp(0.0, GWIDTH), dir);
+            let Some(k) = home else {
+                z += 1;
+                continue;
+            };
+            // Delivered: the prize crew joins the garrison.
+            self.prizes.remove(z);
+            let ci = pz.captor as usize;
+            let armies = pz.ship.crew();
+            self.planets[k].armies += armies;
+            let team = self.players[ci].team;
+            let supplies = if self.features.supply {
+                self.supply[team.idx()].stock += 10;
+                " and 10 supplies"
+            } else {
+                ""
+            };
+            let p = &mut self.players[ci];
+            p.towing = false;
+            p.kills += 1.0;
+            p.total_kills += 1.0;
+            let who = p.label();
+            self.events.push(GameEvent::Honour { player: pz.captor, text: "Brought home a prize".into() });
+            self.god(format!(
+                "{} brings the captured {} home to {}: {} armies{} (+1 kill)",
+                who,
+                pz.ship.stats().name,
+                self.planets[k].name,
+                armies,
+                supplies
+            ));
+        }
+    }
+
+    /// Boarders have taken ship `t`: its pilot bails out, and (for an empire
+    /// ship) the hull becomes a prize to tow home. Aliens are simply taken.
+    fn capture(&mut self, a: usize, t: usize) {
+        let captor = self.players[a].in_use.then_some(a as u8);
+        let (who, victim, ship, from) = (self.players[a].label(), self.players[t].label(), self.players[t].ship, self.players[t].team);
+        let (x, y, dir) = (self.players[t].x, self.players[t].y, self.players[t].dir);
+        let alien = self.players[t].faction.is_some();
+        self.kill(t, captor, format!("was captured by a boarding party from {}", who));
+        // Taken intact: no explosion.
+        self.players[t].just_exploded = false;
+        let Some(c) = captor.map(|c| c as usize) else { return };
+        let p = &mut self.players[c];
+        p.kills += 1.0;
+        p.total_kills += 1.0;
+        let honour = if alien { format!("Captured a {}", ship.stats().name) } else { "Captured an enemy ship".to_string() };
+        self.events.push(GameEvent::Honour { player: c as u8, text: honour });
+        if alien || !self.players[c].alive() || self.players[c].towing {
+            self.alert(format!("{}'s boarding party captures {}! (+1 kill)", who, victim));
+            return;
+        }
+        let captor_team = self.players[c].team;
+        self.prizes.push(Prize { x, y, dir, ship, from, captor: c as u8, captor_team });
+        self.players[c].towing = true;
+        self.god(format!("{}'s boarding party captures {}! (+1 kill)", who, victim));
+        self.warn(c as u8, format!("Prize taken! Tow the {} to a repair planet or your home world (warp 6 while towing)", ship.stats().name));
+    }
+
+    /// Knock `amount` points off one of ship `i`'s systems, with the
+    /// consequences if it goes out.
+    pub fn damage_system(&mut self, i: usize, sy: System, amount: f64) {
+        let id = i as u8;
+        let p = &mut self.players[i];
+        let was = p.systems[sy as usize];
+        if was <= 0.0 {
+            return;
+        }
+        let now = (was - amount).max(0.0);
+        p.systems[sy as usize] = now;
+        if now > 0.0 {
+            if was >= 50.0 && now < 50.0 {
+                self.warn(id, format!("{} damaged!", sy.name()));
+            }
+            return;
+        }
+        match sy {
+            System::Shields => p.shields_up = false,
+            System::Cloak => p.cloaked = false,
+            System::Tractor => p.tractor = None,
+            System::Transporters => (p.beam_up, p.beam_down) = (false, false),
+            _ => {}
+        }
+        self.warn(id, format!("{} knocked out! (/fix {})", sy.name(), sy.abbr().to_ascii_lowercase()));
     }
 
     pub fn kill(&mut self, i: usize, killer: Option<u8>, how: String) {
@@ -2195,6 +2662,7 @@ impl World {
             p.trapped = false;
             p.nanites = false;
             p.overwatch = false;
+            p.last_death = Some((p.x, p.y));
         }
         let with_armies = if victim_armies > 0 { format!(" (carrying {} armies)", victim_armies) } else { String::new() };
         if self.players[i].ship == ShipType::Freighter && self.players[i].cargo > 0 {
@@ -2344,6 +2812,12 @@ impl World {
             }
         }
         self.tempest_trap();
+        if self.features.boarding {
+            self.boarding_tick();
+        }
+        if self.features.outposts {
+            self.outpost_tick();
+        }
         for i in 0..MAXPLAYER {
             if self.players[i].overwatch && self.players[i].alive() {
                 // Overwatch is a sentry post: it only holds while in orbit
@@ -2454,8 +2928,13 @@ impl World {
         if p.desired_speed > max {
             p.desired_speed = max;
         }
+        // Damaged impulse engines accelerate and turn sluggishly.
+        let agile = match p.sys(System::Impulse) {
+            m if m <= 0.0 => 0.25,
+            m => 0.4 + 0.6 * m,
+        };
         if p.speed < p.desired_speed {
-            p.sub_speed += s.acc;
+            p.sub_speed += (s.acc as f64 * agile) as i32;
             while p.sub_speed >= 1000 && p.speed < p.desired_speed {
                 p.speed += 1;
                 p.sub_speed -= 1000;
@@ -2485,7 +2964,7 @@ impl World {
                 p.dir = p.desired_dir;
                 p.sub_dir = 0.0;
             } else {
-                p.sub_dir += s.turns / (p.speed * p.speed) as f64;
+                p.sub_dir += s.turns * agile / (p.speed * p.speed) as f64;
                 let steps = (p.sub_dir / 1000.0).floor();
                 p.sub_dir -= steps * 1000.0;
                 let diff = dir_diff(p.dir, p.desired_dir);
@@ -2587,9 +3066,40 @@ impl World {
             smul += 2.0;
             dmul += 1.0;
         }
+        // Damaged shield generators recharge slowly.
+        smul *= p.sys(System::Shields);
         if p.shield < s.max_shield {
             p.shield = (p.shield + s.repair * fix * smul / 1000.0).min(s.max_shield);
         }
+        // Damage control: systems come back, the /fix one first.
+        if self.features.subsystems {
+            let first = p.fix_first.filter(|&f| p.systems[f as usize] < 100.0);
+            let mut back = Vec::new();
+            for sy in System::ALL {
+                let h = &mut p.systems[sy as usize];
+                if *h >= 100.0 {
+                    continue;
+                }
+                let focus = match first {
+                    Some(f) if f == sy => 3.0,
+                    Some(_) => 0.5,
+                    None => 1.0,
+                };
+                let was = *h;
+                *h = (*h + 0.15 * fix * dmul * focus).min(100.0);
+                if was <= 0.0 && *h > 0.0 {
+                    back.push(sy);
+                }
+            }
+            if first.is_some() && p.fix_first.map_or(false, |f| p.systems[f as usize] >= 100.0) {
+                p.fix_first = None;
+            }
+            let id = p.id;
+            for sy in back {
+                self.warn(id, format!("{} back online", sy.name()));
+            }
+        }
+        let p = &mut self.players[i];
         if p.damage > 0.0 {
             p.damage = (p.damage - s.repair * fix * dmul / 1000.0).max(0.0);
         }
@@ -2608,6 +3118,8 @@ impl World {
             let husnock = p.ship == ShipType::HusnockWarship;
             let floor = if husnock { 1 } else { 4 };
             let beam_every = if p.ship == ShipType::VothCityShip { 4 } else { 8 };
+            // Damaged transporters beam slowly.
+            let beam_every = (beam_every as f64 / p.sys(System::Transporters).max(0.25)).round() as i32;
             let team = p.team;
             let shielded = self.sheliak_shield(k, team);
             let p = &mut self.players[i];
@@ -2619,7 +3131,7 @@ impl World {
                 } else if shielded {
                     p.bombing = false;
                     self.warn(id, "A Sheliak shield protects this planet from bombing");
-                } else if rng.gen_bool(0.6) {
+                } else if rng.gen_bool(if self.planets[k].outpost.map_or(false, |o| o.0 == Outpost::Defence) { 0.3 } else { 0.6 }) {
                     let n = if husnock { 3 } else if p.ship == ShipType::Assault { 2 } else { 1 };
                     let n = n.min(self.planets[k].armies - floor);
                     self.planets[k].armies -= n;
@@ -2939,6 +3451,27 @@ impl World {
                 self.reply(id, format!("{} supplies. Upgrades: {}. Buy with /upgrade <name>.", s.stock, levels.join(", ")));
             }
             "overwatch" | "ow" => self.toggle_overwatch(id as usize),
+            "build" if self.features.outposts => match Outpost::from_word(&arg) {
+                Some(o) => self.start_build(id as usize, o),
+                None => self.warn(id, "Usage: /build defence|yard|sensor (while orbiting a planet you own)"),
+            },
+            "fix" if self.features.subsystems => {
+                let p = &mut self.players[id as usize];
+                if arg.is_empty() {
+                    p.fix_first = None;
+                    self.reply(id, "Damage control: repairing all systems evenly.");
+                } else if let Some(sy) = System::from_word(&arg) {
+                    let health = p.systems[sy as usize].round();
+                    if health >= 100.0 {
+                        self.reply(id, format!("Damage control: nothing to fix on the {}.", sy.name().to_lowercase()));
+                    } else {
+                        p.fix_first = Some(sy);
+                        self.reply(id, format!("Damage control: {} first ({}%).", sy.name(), health));
+                    }
+                } else {
+                    self.warn(id, "Usage: /fix warp|impulse|phasers|torpedoes|shields|transporters|cloak|tractor");
+                }
+            }
             "tech" => {
                 let p = &self.players[id as usize];
                 let text = if p.techs.is_empty() {
@@ -2961,6 +3494,12 @@ impl World {
                 }
                 if self.features.supply {
                     cmds.extend(["/supplies", "/upgrade <name>"]);
+                }
+                if self.features.subsystems {
+                    cmds.push("/fix <system>");
+                }
+                if self.features.outposts {
+                    cmds.push("/build defence|yard|sensor");
                 }
                 self.reply(id, format!("Commands: {}", cmds.join("  ")));
             }
@@ -3169,15 +3708,17 @@ impl World {
             if armies == 0 {
                 continue;
             }
+            // A defence outpost fires further and harder.
+            let def = if self.planets[k].outpost.map_or(false, |o| o.0 == Outpost::Defence) { 1.5 } else { 1.0 };
             for i in 0..MAXPLAYER {
                 let p = &self.players[i];
                 if !p.alive() || !self.hostile(p.team, owner) {
                     continue;
                 }
-                if (p.x - px).powi(2) + (p.y - py).powi(2) > PFIREDIST * PFIREDIST {
+                if (p.x - px).powi(2) + (p.y - py).powi(2) > (PFIREDIST * def).powi(2) {
                     continue;
                 }
-                let dmg = (armies / 10 + 2) as f64;
+                let dmg = (armies / 10 + 2) as f64 * def;
                 self.inflict(i, dmg, None, format!("killed by {} ({})", name, owner.letter()));
             }
         }
@@ -3216,6 +3757,22 @@ impl World {
     // views
 
     pub fn frame_for(&self, me: u8) -> Frame {
+        self.frame_view(me, false)
+    }
+
+    /// An observer's view: the whole galaxy with nothing hidden or
+    /// disguised, centred on the ship being followed (if any).
+    pub fn frame_for_observer(&self, follow: Option<u8>) -> Frame {
+        let follow = follow.filter(|&f| (f as usize) < MAXPLAYER && self.players[f as usize].in_use);
+        let mut f = self.frame_view(follow.unwrap_or(0), true);
+        if follow.is_none() {
+            f.me = u8::MAX;
+            f.me_info = SelfInfo::default();
+        }
+        f
+    }
+
+    fn frame_view(&self, me: u8, omniscient: bool) -> Frame {
         let mp = &self.players[me as usize];
         let my_team = mp.team;
         let mut rng = rand::thread_rng();
@@ -3224,7 +3781,7 @@ impl World {
             .iter()
             .filter(|p| p.in_use)
             .map(|p| {
-                let friendly = p.team == my_team || p.id == me || self.allied(p.team, my_team);
+                let friendly = omniscient || p.team == my_team || p.id == me || self.allied(p.team, my_team);
                 // Terrain: nebulae and ion storms hide ships from all but close range.
                 let far = (p.x - mp.x).powi(2) + (p.y - mp.y).powi(2) > 3000.0 * 3000.0;
                 // A tachyon sweep by us (or an ally) shows everything near the sweeper.
@@ -3235,9 +3792,15 @@ impl World {
                             || (s.sweep_until > self.tick
                                 && (s.x - p.x).powi(2) + (s.y - p.y).powi(2) < SWEEP_RANGE * SWEEP_RANGE))
                 });
-                let fuzzy = ((p.cloaked && !p.detected) || (p.hidden && far)) && !friendly && !swept;
+                // Our sensor arrays see through cloaks and nebulae nearby.
+                let arrayed = self.planets.iter().any(|pl| {
+                    matches!(pl.outpost, Some((Outpost::Sensor, t)) if t == pl.owner && (t == my_team || self.allied(t, my_team)))
+                        && (pl.x - p.x).powi(2) + (pl.y - p.y).powi(2) < SENSOR_ARRAY_RANGE * SENSOR_ARRAY_RANGE
+                });
+                let fuzzy = ((p.cloaked && !p.detected) || (p.hidden && far)) && !friendly && !swept && !arrayed && !omniscient;
                 let illusion = p.ship == ShipType::TalosianShip
                     && !friendly
+                    && !omniscient
                     && p.alive()
                     && (p.x - mp.x).powi(2) + (p.y - mp.y).powi(2) > 2000.0f64.powi(2);
                 let (x, y) = if fuzzy {
@@ -3279,13 +3842,16 @@ impl World {
                 set(&mut flags, p.trapped, pf::TRAPPED);
                 set(&mut flags, p.trapped && !p.zapped && friendly, pf::ZAPPER);
                 set(&mut flags, p.nanites, pf::NANITES);
+                set(&mut flags, self.boardings.iter().any(|b| b.attacker == p.id), pf::BOARDING);
+                set(&mut flags, self.boardings.iter().any(|b| b.target == p.id), pf::BOARDED);
+                set(&mut flags, p.towing, pf::TOWING);
                 // An Excalbian shapeshifter looks like one of your own cruisers from afar.
                 let disguised = p.ship == ShipType::ExcalbianShip
                     && !friendly
                     && p.alive()
                     && (p.x - mp.x).powi(2) + (p.y - mp.y).powi(2) > 3000.0f64.powi(2);
                 // A Changeling looks like one of your own ships until a hit exposes it.
-                let changeling = p.ship == ShipType::ChangelingShip && p.alive() && self.tick >= p.revealed_until && my_team != Team::Ind;
+                let changeling = p.ship == ShipType::ChangelingShip && p.alive() && self.tick >= p.revealed_until && my_team != Team::Ind && !omniscient;
                 let disguised = disguised || changeling;
                 PlayerInfo {
                     id: p.id,
@@ -3323,7 +3889,7 @@ impl World {
             .planets
             .iter()
             .map(|pl| {
-                let known = my_team != Team::Ind && pl.known[my_team.idx()];
+                let known = omniscient || (my_team != Team::Ind && pl.known[my_team.idx()]);
                 PlanetInfo {
                     owner: if known { pl.owner } else { Team::Ind },
                     armies: if known { pl.armies as u16 } else { 0 },
@@ -3331,6 +3897,7 @@ impl World {
                     known,
                     alien: if known { pl.alien } else { None },
                     tribbles: known && pl.tribbles,
+                    outpost: if known { pl.outpost.map(|o| o.0) } else { None },
                 }
             })
             .collect();
@@ -3369,6 +3936,13 @@ impl World {
                 })
                 .collect(),
             armor: mp.armor.ceil() as u16,
+            systems: self.features.subsystems.then(|| mp.systems.map(|h| h.ceil() as u8)),
+            fix_first: mp.fix_first,
+            building: self
+                .builds
+                .iter()
+                .find(|b| b.builder == mp.id)
+                .map(|b| (b.kind, b.planet as u8, (b.done_at.saturating_sub(self.tick) / UPS as u32).min(u16::MAX as u32) as u16)),
         };
         Frame {
             tick: self.tick,
@@ -3401,6 +3975,12 @@ impl World {
                 sections: r.sections.iter().map(|s| RingSectionInfo { name: s.name.to_string(), x: s.x as i32, y: s.y as i32 }).collect(),
                 kzin: r.kzin as u8,
             }),
+            observers: Vec::new(),
+            prizes: self
+                .prizes
+                .iter()
+                .map(|z| PrizeInfo { x: z.x as i32, y: z.y as i32, dir: z.dir as u8, ship: z.ship, team: z.from, captor: z.captor })
+                .collect(),
             open_teams: self.open_teams(),
             team_planets: [Team::Fed, Team::Rom, Team::Kli, Team::Ori].map(|t| self.team_planet_count(t) as u8),
             starbase_teams: Team::PLAYABLE.into_iter().filter(|&t| self.has_starbase(t, me)).collect(),
@@ -3550,6 +4130,281 @@ mod tests {
         assert!(w.join(id, Team::Fed, ShipType::Starbase).is_err());
         w.players[id as usize].rank = Some(STARBASE_RANK);
         assert!(w.join(id, Team::Fed, ShipType::Starbase).is_ok());
+    }
+
+    /// Knocked-out systems stop what they do until damage control gets them
+    /// back, and /fix puts one first.
+    #[test]
+    fn subsystems_knocked_out_and_repaired() {
+        let mut w = World::with_features(Features { subsystems: true, ..Features::default() });
+        let kirk = pilot(&mut w, "Kirk", Team::Fed, 50_000.0, 50_000.0);
+        let tal = pilot(&mut w, "Tal", Team::Rom, 52_000.0, 50_000.0);
+        let k = kirk as usize;
+        let full = w.players[k].max_speed_now();
+        // Warp out: impulse only. Impulse out: sluggish, but still moving.
+        w.damage_system(k, System::Warp, 100.0);
+        assert_eq!(w.players[k].max_speed_now(), 3.min(full));
+        // Weapons out.
+        w.damage_system(k, System::Phasers, 100.0);
+        w.damage_system(k, System::Torpedoes, 100.0);
+        let dir = dir_to(50_000.0, 50_000.0, 52_000.0, 50_000.0) as u8;
+        w.handle(kirk, ClientMsg::Phaser(dir));
+        w.handle(kirk, ClientMsg::Torp(dir));
+        assert!(w.phasers.is_empty() && w.torps.is_empty(), "nothing fires");
+        // Shields drop and won't come back up; no cloak, no tractor.
+        assert!(w.players[k].shields_up);
+        w.damage_system(k, System::Shields, 100.0);
+        assert!(!w.players[k].shields_up);
+        w.handle(kirk, ClientMsg::Shields);
+        assert!(!w.players[k].shields_up);
+        w.damage_system(k, System::Cloak, 100.0);
+        w.handle(kirk, ClientMsg::Cloak);
+        assert!(!w.players[k].cloaked);
+        w.damage_system(k, System::Tractor, 100.0);
+        w.handle(kirk, ClientMsg::Tractor { target: Some(tal), pressor: false });
+        assert!(w.players[k].tractor.is_none());
+        // The frame reports it all.
+        let f = w.frame_for(kirk);
+        let sys = f.me_info.systems.unwrap();
+        assert_eq!(sys[System::Phasers as usize], 0);
+        assert_eq!(sys[System::Impulse as usize], 100);
+        // Damage control, phasers first.
+        w.handle(kirk, ClientMsg::Message { to: MsgTarget::All, text: "/fix phasers".into() });
+        assert_eq!(w.players[k].fix_first, Some(System::Phasers));
+        w.players[k].repair_mode = true;
+        for _ in 0..200 {
+            w.players[k].repair_mode = true;
+            w.tick();
+        }
+        let (pha, tor) = (w.players[k].systems[System::Phasers as usize], w.players[k].systems[System::Torpedoes as usize]);
+        assert!(pha == 100.0 && tor < 100.0, "phasers first: {} vs {}", pha, tor);
+        assert!(!w.players[k].sys_out(System::Phasers), "phasers back online");
+        // A new ship starts with everything working.
+        w.kill(k, None, "test".into());
+        for _ in 0..20 {
+            w.tick();
+        }
+        w.players[k].state = PState::Outfit;
+        w.join(kirk, Team::Fed, ShipType::Cruiser).unwrap();
+        assert!(w.players[k].systems.iter().all(|&h| h == 100.0));
+    }
+
+    /// Hull hits knock out systems only with --subsystems on.
+    #[test]
+    fn hull_hits_damage_systems() {
+        for on in [true, false] {
+            let mut w = World::with_features(Features { subsystems: on, ..Features::default() });
+            let kirk = pilot(&mut w, "Kirk", Team::Fed, 50_000.0, 50_000.0) as usize;
+            w.players[kirk].shields_up = false;
+            for _ in 0..40 {
+                w.inflict(kirk, 10.0, None, "test".into());
+                w.players[kirk].damage = 0.0;
+            }
+            let hurt = w.players[kirk].systems.iter().any(|&h| h < 100.0);
+            assert_eq!(hurt, on, "subsystems {}", on);
+            assert_eq!(w.frame_for(kirk as u8).me_info.systems.is_some(), on);
+        }
+    }
+
+    /// A boarding party takes a shieldless ship; the prize is towed home.
+    #[test]
+    fn boarding_party_captures_a_ship_and_tows_it_home() {
+        let mut w = World::with_features(Features { boarding: true, ..Features::default() });
+        let kirk = pilot(&mut w, "Kirk", Team::Fed, 50_000.0, 50_000.0);
+        let tal = pilot(&mut w, "Tal", Team::Rom, 51_000.0, 50_000.0);
+        let (k, t) = (kirk as usize, tal as usize);
+        w.players[k].armies = 12;
+        // Shields up: no way aboard.
+        w.handle(kirk, ClientMsg::Board(tal));
+        assert!(w.boardings.is_empty(), "their shields are up");
+        w.players[t].shields_up = false;
+        w.handle(kirk, ClientMsg::Board(tal));
+        assert_eq!(w.boardings.len(), 1);
+        assert!(w.frame_for(tal).players.iter().find(|p| p.id == tal).unwrap().flags & pf::BOARDED != 0);
+        let kills = w.players[k].kills;
+        for _ in 0..600 {
+            (w.players[k].x, w.players[k].y) = (50_000.0, 50_000.0);
+            // Beaten back? Send another party while there are armies left.
+            if w.boardings.is_empty() && w.players[t].alive() && w.players[k].armies > 0 {
+                w.handle(kirk, ClientMsg::Board(tal));
+            }
+            w.tick();
+            if !w.players[t].alive() {
+                break;
+            }
+        }
+        assert!(!w.players[t].alive(), "captured");
+        assert!(w.players[k].alive(), "no explosion hurt the boarding ship");
+        assert!(w.players[k].kills >= kills + 2.0, "kill plus the capture: {}", w.players[k].kills);
+        assert_eq!(w.prizes.len(), 1);
+        assert!(w.players[k].towing && w.players[k].max_speed_now() <= 6);
+        // Tow it home to Earth (a repair world).
+        let earth = Team::Fed.home_planet();
+        let armies = w.planets[earth].armies;
+        (w.players[k].x, w.players[k].y) = (w.planets[earth].x, w.planets[earth].y + ORBDIST);
+        w.players[k].orbiting = Some(earth);
+        w.tick();
+        assert!(w.prizes.is_empty(), "delivered");
+        assert!(!w.players[k].towing);
+        assert!(w.planets[earth].armies >= armies + ShipType::Cruiser.crew(), "the prize crew joins the garrison");
+    }
+
+    /// Detonating fights boarders off; the Borg assimilate them; and with
+    /// the option off there's no boarding at all.
+    #[test]
+    fn boarders_can_be_repelled() {
+        let mut w = World::with_features(Features { boarding: true, ..Features::default() });
+        let kirk = pilot(&mut w, "Kirk", Team::Fed, 50_000.0, 50_000.0);
+        let tal = pilot(&mut w, "Tal", Team::Rom, 51_000.0, 50_000.0);
+        let (k, t) = (kirk as usize, tal as usize);
+        w.players[k].armies = 2;
+        w.players[t].shields_up = false;
+        w.handle(kirk, ClientMsg::Board(tal));
+        assert_eq!(w.boardings.len(), 1);
+        w.handle(tal, ClientMsg::DetEnemy);
+        w.players[t].fuel = 5000.0;
+        w.handle(tal, ClientMsg::DetEnemy);
+        w.tick();
+        assert!(w.boardings.is_empty(), "fought off");
+        assert!(w.players[t].alive());
+        // The Borg.
+        let b = w.spawn_alien("Borg", Faction::Borg, ShipType::BorgCube, 51_000.0, 49_000.0, 30.0).unwrap();
+        w.players[b as usize].shields_up = false;
+        w.players[k].armies = 5;
+        w.handle(kirk, ClientMsg::Board(b));
+        assert!(w.boardings.is_empty() && w.players[k].armies == 0, "assimilated");
+        // Off.
+        let mut w = World::new();
+        let kirk = pilot(&mut w, "Kirk", Team::Fed, 50_000.0, 50_000.0);
+        let tal = pilot(&mut w, "Tal", Team::Rom, 51_000.0, 50_000.0);
+        w.players[kirk as usize].armies = 3;
+        w.players[tal as usize].shields_up = false;
+        w.handle(kirk, ClientMsg::Board(tal));
+        assert!(w.boardings.is_empty());
+    }
+
+    /// Put ship `i` in orbit of planet `k`.
+    fn orbit_at(w: &mut World, i: usize, k: usize) {
+        (w.players[i].x, w.players[i].y) = (w.planets[k].x, w.planets[k].y + ORBDIST);
+        w.players[i].orbiting = Some(k);
+        (w.players[i].speed, w.players[i].desired_speed) = (0, 0);
+    }
+
+    fn build(w: &mut World, id: u8, what: &str) {
+        w.handle(id, ClientMsg::Message { to: MsgTarget::All, text: format!("/build {}", what) });
+        for _ in 0..(BUILD_SECS * UPS as u32 + 2) {
+            w.tick();
+        }
+    }
+
+    /// Outposts: built in orbit, paid for in armies (or supplies), and each
+    /// does its job: a shipyard to launch and refit from, a defence outpost
+    /// that shoots further, a sensor array that sees cloaked ships.
+    #[test]
+    fn outposts_are_built_and_do_their_jobs() {
+        let mut w = World::with_features(Features { outposts: true, ..Features::default() });
+        let kirk = pilot(&mut w, "Kirk", Team::Fed, 0.0, 0.0);
+        let k = kirk as usize;
+        let colony = Team::Fed.home_planet() + 4;
+        w.planets[colony].owner = Team::Fed;
+        orbit_at(&mut w, k, colony);
+        // Builders needed.
+        build(&mut w, kirk, "yard");
+        assert!(w.planets[colony].outpost.is_none(), "no armies aboard, no outpost");
+        w.players[k].armies = 5;
+        build(&mut w, kirk, "yard");
+        assert_eq!(w.planets[colony].outpost, Some((Outpost::Shipyard, Team::Fed)));
+        assert_eq!(w.players[k].armies, 5 - BUILD_ARMIES);
+        // Lost near the yard: relaunch there, not at home.
+        (w.players[k].x, w.players[k].y) = (w.planets[colony].x + 3000.0, w.planets[colony].y);
+        w.players[k].orbiting = None;
+        w.kill(k, None, "test".into());
+        for _ in 0..20 {
+            w.tick();
+        }
+        w.players[k].state = PState::Outfit;
+        w.join(kirk, Team::Fed, ShipType::Cruiser).unwrap();
+        let (px, py) = (w.planets[colony].x, w.planets[colony].y);
+        assert!(((w.players[k].x - px).powi(2) + (w.players[k].y - py).powi(2)).sqrt() < 2500.0, "launched from the shipyard");
+        // Refit there too.
+        orbit_at(&mut w, k, colony);
+        w.handle(kirk, ClientMsg::Refit(ShipType::Destroyer));
+        assert_eq!(w.players[k].ship, ShipType::Destroyer, "refit at the shipyard");
+        // A defence outpost reaches further.
+        w.players[k].armies = 3;
+        build(&mut w, kirk, "defence");
+        assert_eq!(w.planets[colony].outpost, Some((Outpost::Defence, Team::Fed)), "replaces the yard");
+        w.planets[colony].armies = 20;
+        let tal = pilot(&mut w, "Tal", Team::Rom, px + PFIREDIST * 1.3, py);
+        w.players[tal as usize].shields_up = false;
+        for _ in 0..20 {
+            (w.players[tal as usize].x, w.players[tal as usize].y) = (px + PFIREDIST * 1.3, py);
+            w.tick();
+        }
+        assert!(w.players[tal as usize].damage > 0.0, "fired on from beyond normal range");
+        // A sensor array sees cloaked ships near it, even from far away.
+        w.players[k].armies = 3;
+        build(&mut w, kirk, "sensor");
+        w.players[tal as usize].cloaked = true;
+        w.players[k].orbiting = None;
+        (w.players[k].x, w.players[k].y) = (px + 40_000.0, py);
+        let f = w.frame_for(kirk);
+        let t = f.players.iter().find(|p| p.id == tal).unwrap();
+        assert!(!t.fuzzy, "the array sees the cloaked warbird");
+        assert_eq!(f.planets[colony].outpost, Some(Outpost::Sensor));
+        // Lose the planet and the outpost goes with it.
+        w.planets[colony].owner = Team::Rom;
+        w.tick();
+        assert!(w.planets[colony].outpost.is_none());
+    }
+
+    /// Leaving orbit abandons a build; with --supply it costs supplies.
+    #[test]
+    fn outpost_builds_need_the_builder_in_orbit() {
+        let mut w = World::with_features(Features { outposts: true, supply: true, ..Features::default() });
+        let kirk = pilot(&mut w, "Kirk", Team::Fed, 0.0, 0.0);
+        let k = kirk as usize;
+        let colony = Team::Fed.home_planet() + 4;
+        w.planets[colony].owner = Team::Fed;
+        orbit_at(&mut w, k, colony);
+        w.supply[Team::Fed.idx()].stock = 20;
+        w.handle(kirk, ClientMsg::Message { to: MsgTarget::All, text: "/build sensor".into() });
+        assert_eq!(w.builds.len(), 1);
+        w.handle(kirk, ClientMsg::Course(0));
+        w.tick();
+        assert!(w.builds.is_empty(), "abandoned");
+        orbit_at(&mut w, k, colony);
+        build(&mut w, kirk, "sensor");
+        assert_eq!(w.planets[colony].outpost, Some((Outpost::Sensor, Team::Fed)));
+        assert_eq!(w.supply[Team::Fed.idx()].stock, 20 - BUILD_SUPPLIES);
+    }
+
+    /// An observer's view hides nothing: cloaked ships, disguises, unscouted
+    /// planets and armies aboard are all shown as they are.
+    #[test]
+    fn observers_see_everything() {
+        let mut w = World::new();
+        let kirk = pilot(&mut w, "Kirk", Team::Fed, 50_000.0, 50_000.0);
+        let tal = pilot(&mut w, "Tal", Team::Rom, 80_000.0, 50_000.0);
+        w.players[tal as usize].cloaked = true;
+        w.players[tal as usize].armies = 3;
+        let c = w.spawn_alien("Changeling", Faction::Changeling, ShipType::ChangelingShip, 60_000.0, 50_000.0, 8.0).unwrap();
+        // A player sees a blur, a friendly cruiser, and planets they haven't scouted.
+        let pf = w.frame_for(kirk);
+        assert!(pf.players.iter().find(|p| p.id == tal).unwrap().fuzzy);
+        assert_eq!(pf.players.iter().find(|p| p.id == c).unwrap().faction, None);
+        assert!(pf.planets.iter().any(|p| !p.known));
+        // An observer sees it all.
+        let of = w.frame_for_observer(None);
+        assert_eq!(of.me, u8::MAX);
+        let t = of.players.iter().find(|p| p.id == tal).unwrap();
+        assert!(!t.fuzzy && t.armies == 3 && t.x == 80_000);
+        assert_eq!(of.players.iter().find(|p| p.id == c).unwrap().faction, Some(Faction::Changeling));
+        assert!(of.planets.iter().all(|p| p.known));
+        // Following a ship gives its gauges.
+        let of = w.frame_for_observer(Some(kirk));
+        assert_eq!(of.me, kirk);
+        assert_eq!(of.me_info.fuel, w.players[kirk as usize].fuel as u32);
     }
 
     /// Overwatch fires at enemies that come into range, and only them.
