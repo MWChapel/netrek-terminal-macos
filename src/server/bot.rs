@@ -133,6 +133,19 @@ impl Bot {
             .map(|q| (q, dist(x, y, q.x, q.y)))
             .min_by(|a, b| a.1.total_cmp(&b.1))
             .map(|(q, d)| (q.id, q.x, q.y, q.dir, q.speed, d));
+        // In a ring frenzy, an enemy raiding one of our sections comes first.
+        let raider = frenzy.and_then(|_| {
+            world
+                .players
+                .iter()
+                .filter(|q| q.alive() && world.hostile(q.team, team) && (!q.cloaked || q.detected) && !q.ship.pointless_target())
+                .filter(|q| q.orbiting.map_or(false, |k| k >= PLANETS.len() && world.planets[k].owner == team))
+                .map(|q| (q, dist(x, y, q.x, q.y)))
+                .filter(|&(_, d)| d < 20_000.0)
+                .min_by(|a, b| a.1.total_cmp(&b.1))
+                .map(|(q, d)| (q.id, q.x, q.y, q.dir, q.speed, d))
+        });
+        let enemy = raider.or(enemy);
 
         // Incoming enemy torps.
         let threats = world
@@ -157,7 +170,13 @@ impl Bot {
 
         // Pick a goal.
         let prev = self.goal;
-        let fight_range = 18000.0 * self.aggression;
+        // In a ring frenzy conquest comes first: only fight what's close, or
+        // raiding our sections.
+        let fight_range = match (frenzy, raider) {
+            (Some(_), Some(_)) => 20_000.0,
+            (Some(_), None) => 6000.0,
+            (None, _) => 18000.0 * self.aggression,
+        };
         // With nothing to do, patrol: in a ring frenzy, guard our nearest
         // section of the ring (or the world of ours closest to it).
         let patrol = match frenzy {
@@ -183,7 +202,10 @@ impl Bot {
         } else if p.armies > 0 && (p.armies >= p.max_armies_now() || !matches!(prev, Goal::Pickup(_))) {
             // Invade: prefer a planet we can take outright, otherwise wear
             // down the weakest one so teammates can finish it.
-            match self.pick_planet(world, x, y, |k, pl| ring_only(k) && is_target(pl.owner) && (pl.armies as u32) < p.armies) {
+            let takeable = |k: usize, pl: &super::world::Planet| ring_only(k) && is_target(pl.owner) && (pl.armies as u32) < p.armies;
+            // Ring frenzy: new, unclaimed sections before enemy-held ones.
+            let fresh = frenzy.and_then(|_| self.pick_planet(world, x, y, |k, pl| takeable(k, pl) && pl.owner == Team::Ind && pl.alien.is_none()));
+            match fresh.or_else(|| self.pick_planet(world, x, y, takeable)) {
                 Some(k) => Goal::Invade(k),
                 None => {
                     let weakest = world
@@ -204,12 +226,40 @@ impl Bot {
                 }
             }
         } else if p.max_armies_now() > p.armies {
-            match self.pick_planet(world, x, y, |_, pl| pl.owner == team && pl.armies > 5) {
+            let depot = match frenzy {
+                // Ring frenzy: armies from whichever of our worlds makes the shortest trip to the ring.
+                Some((rx, ry, _)) => (0..world.planets.len())
+                    .filter(|&k| world.planets[k].owner == team && world.planets[k].armies > 5)
+                    .min_by(|&a, &b| {
+                        let trip = |k: usize| {
+                            let pl = &world.planets[k];
+                            dist(x, y, pl.x, pl.y) + dist(pl.x, pl.y, rx, ry)
+                        };
+                        trip(a).total_cmp(&trip(b))
+                    }),
+                None => self.pick_planet(world, x, y, |_, pl| pl.owner == team && pl.armies > 5),
+            };
+            match depot {
                 Some(k) => Goal::Pickup(k),
                 None => Goal::Patrol(patrol),
             }
         } else {
-            match self.pick_planet(world, x, y, |k, pl| ring_only(k) && is_target(pl.owner) && pl.armies > 4) {
+            let target = match frenzy {
+                // Ring frenzy: bomb the enemy's sections (and the Kzinti's),
+                // the best defended first, so they can be taken.
+                Some(_) => (PLANETS.len()..world.planets.len())
+                    .filter(|&k| {
+                        let pl = &world.planets[k];
+                        is_target(pl.owner) && pl.armies > 4 && (pl.owner != Team::Ind || pl.alien.is_some())
+                    })
+                    .max_by(|&a, &b| {
+                        let score = |k: usize| world.planets[k].armies as f64 * 2000.0 - dist(x, y, world.planets[k].x, world.planets[k].y);
+                        score(a).total_cmp(&score(b))
+                    })
+                    .or_else(|| self.pick_planet(world, x, y, |k, pl| ring_only(k) && is_target(pl.owner) && pl.armies > 4)),
+                None => self.pick_planet(world, x, y, |_, pl| is_target(pl.owner) && pl.armies > 4),
+            };
+            match target {
                 Some(k) => Goal::Bomb(k),
                 None => Goal::Patrol(patrol),
             }
