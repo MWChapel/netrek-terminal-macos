@@ -723,6 +723,47 @@ fn alien(f: Faction, ship: ShipType) -> Vec<Part> {
             v.push(capsule((0.0, -0.45), (0.0, -0.75), 0.18));
             v.push(Circle { c: (0.0, -0.85), r: 0.15, fill: true });
         }
+        // From a galaxy far, far away.
+        Faction::GalacticEmpire => match ship {
+            ShipType::DeathStar => {
+                // A battle station the size of a moon: the superlaser dish
+                // faces its target, the equatorial trench runs across, and
+                // the thermal exhaust port is at the stern.
+                v.push(circle((0.0, 0.0), 1.0));
+                v.push(line((-1.0, 0.04), (1.0, 0.04)));
+                v.push(line((-0.99, 0.12), (0.99, 0.12)));
+                for &y in &[-0.6f32, 0.55] {
+                    let w = (1.0 - y * y).sqrt();
+                    v.push(line((-w, y), (w, y)));
+                }
+                v.push(Circle { c: (0.32, -0.42), r: 0.27, fill: false });
+                v.push(Circle { c: (0.32, -0.42), r: 0.07, fill: true });
+                v.push(Circle { c: (0.0, 0.88), r: 0.06, fill: true });
+            }
+            ShipType::StarDestroyer => {
+                // The dagger-shaped hull, with the bridge tower and its two
+                // shield-generator domes near the stern.
+                v.push(sym(&[(0.0, -1.0), (0.62, 0.8), (0.62, 0.95), (0.0, 0.95)]));
+                v.push(line((0.0, -0.9), (0.0, 0.4)));
+                v.extend(pair(|s| line((s * 0.1, -0.5), (s * 0.4, 0.6))));
+                v.push(Poly { pts: vec![(-0.22, 0.48), (0.22, 0.48), (0.22, 0.78), (-0.22, 0.78)], fill: true });
+                v.extend(pair(|s| Circle { c: (s * 0.13, 0.42), r: 0.06, fill: true }));
+            }
+            ShipType::TieAdvanced => {
+                // Vader's: bent wings and a longer cockpit.
+                v.extend(pair(|s| Poly { pts: vec![(s * 0.55, -0.95), (s * 0.95, -0.35), (s * 0.95, 0.35), (s * 0.55, 0.95), (s * 0.72, 0.0)], fill: true }));
+                v.extend(pair(|s| line((s * 0.2, 0.0), (s * 0.72, 0.0))));
+                v.push(capsule((0.0, -0.25), (0.0, 0.35), 0.4));
+                v.push(Circle { c: (0.0, -0.2), r: 0.1, fill: false });
+            }
+            _ => {
+                // A ball cockpit between two hexagonal wings.
+                v.extend(pair(|s| Poly { pts: vec![(s * 0.72, -0.95), (s * 0.9, -0.55), (s * 0.9, 0.55), (s * 0.72, 0.95)], fill: true }));
+                v.extend(pair(|s| line((s * 0.3, 0.0), (s * 0.72, 0.0))));
+                v.push(circle((0.0, 0.0), 0.32));
+                v.push(Circle { c: (0.0, 0.0), r: 0.13, fill: false });
+            }
+        },
         // Nanites never fly a ship of their own.
         Faction::Nanites => {
             v.push(Circle { c: (0.0, 0.0), r: 0.3, fill: true });
@@ -743,6 +784,14 @@ pub fn engine_points(team: Team, ship: ShipType, faction: Option<Faction>) -> Ve
         Some(Faction::Hirogen) => return vec![(0.3, 0.95), (-0.3, 0.95)],
         Some(Faction::Ferengi) => return vec![(0.0, 0.3)],
         Some(Faction::Kzinti) => return vec![(0.35, 0.9), (-0.35, 0.9)],
+        Some(Faction::GalacticEmpire) => {
+            return match ship {
+                ShipType::StarDestroyer => vec![(0.3, 1.0), (-0.3, 1.0), (0.0, 1.0)],
+                ShipType::TieFighter => vec![(0.0, 0.3)],
+                ShipType::TieAdvanced => vec![(0.12, 0.4), (-0.12, 0.4)],
+                _ => vec![],
+            }
+        }
         Some(_) => return vec![],
         None => {}
     }
@@ -784,7 +833,7 @@ mod tests {
     #[test]
     fn gallery() {
         let (cell, r) = (120.0f32, 44.0f32);
-        let mut c = Canvas::new(8 * cell as i32, 12 * cell as i32, [0.0, 0.0, 0.0]);
+        let mut c = Canvas::new(8 * cell as i32, 13 * cell as i32, [0.0, 0.0, 0.0]);
         let mut rows: Vec<Vec<(Team, ShipType, Option<Faction>)>> = Team::PLAYABLE
             .iter()
             .map(|&t| ShipType::ALL.iter().map(|&s| (t, s, None)).collect())
@@ -858,6 +907,12 @@ mod tests {
             (Team::Ind, ShipType::KzintiDreadnought, Some(Faction::Kzinti)),
             (Team::Ind, ShipType::KzintiCruiser, Some(Faction::Kzinti)),
             (Team::Ind, ShipType::KzintiStriker, Some(Faction::Kzinti)),
+        ]);
+        rows.push(vec![
+            (Team::Ind, ShipType::DeathStar, Some(Faction::GalacticEmpire)),
+            (Team::Ind, ShipType::StarDestroyer, Some(Faction::GalacticEmpire)),
+            (Team::Ind, ShipType::TieFighter, Some(Faction::GalacticEmpire)),
+            (Team::Ind, ShipType::TieAdvanced, Some(Faction::GalacticEmpire)),
         ]);
         for (row, ships) in rows.iter().enumerate() {
             for (col, &(team, ship, faction)) in ships.iter().enumerate() {

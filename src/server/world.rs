@@ -2228,6 +2228,25 @@ impl World {
         if p.ship == ShipType::SulibanCell && rand::thread_rng().gen_bool(0.35) {
             return;
         }
+        // Vader has the Force: a quarter of hits miss him.
+        if p.ship == ShipType::TieAdvanced && rand::thread_rng().gen_bool(0.25) {
+            return;
+        }
+        // The Death Star's one weakness: a torpedo down the thermal exhaust
+        // port, from a small ship in the trench behind it.
+        if p.ship == ShipType::DeathStar && kind == HitKind::Photon {
+            if let Some(k) = killer.map(|k| k as usize).filter(|&k| super::aliens::in_trench(&self.players[i], &self.players[k])) {
+                let who = self.players[k].label();
+                self.alert(format!("{} puts a torpedo straight down the Death Star's exhaust port! A chain reaction races through the battle station...", who));
+                self.kill(i, Some(k as u8), "was destroyed by a torpedo down its exhaust port".into());
+                return;
+            }
+        }
+        // Star Destroyers are weak astern, where their great engines are.
+        let p = &self.players[i];
+        let astern = p.ship == ShipType::StarDestroyer
+            && killer.map(|k| &self.players[k as usize]).map_or(false, |q| dir_diff(dir_to(p.x, p.y, q.x, q.y), p.dir + 128.0).abs() < 48.0);
+        let p = &mut self.players[i];
         p.last_hit = tick;
         // Any hit on Chang's Bird-of-Prey lights up its exhaust.
         if p.ship == ShipType::BirdOfPrey {
@@ -2272,6 +2291,9 @@ impl World {
             ShipType::Bioship => amount * 0.1,
             // Neutronium hull: ordinary weapons barely scratch it.
             ShipType::PlanetKiller => amount * 0.4,
+            // That's no moon: anything but the exhaust port barely scratches it.
+            ShipType::DeathStar => amount * 0.02,
+            ShipType::StarDestroyer if astern => amount * 2.0,
             // The Borg adapt to whatever hits them.
             ShipType::BorgCube => {
                 let before = p.adapt;

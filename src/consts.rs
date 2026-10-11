@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 pub const DEFAULT_PORT: u16 = 2592; // the traditional Netrek port
-pub const PROTOCOL_VERSION: u32 = 21;
+pub const PROTOCOL_VERSION: u32 = 22;
 
 pub const UPS: u64 = 10; // server updates per second, like the original
 pub const GWIDTH: f64 = 100_000.0;
@@ -148,10 +148,11 @@ pub enum Faction {
     SphereBuilders,
     Dyson,
     Kzinti,
+    GalacticEmpire,
 }
 
 impl Faction {
-    pub const ALL: [Faction; 32] = [
+    pub const ALL: [Faction; 33] = [
         Faction::Khan,
         Faction::Gorn,
         Faction::Tholian,
@@ -184,6 +185,7 @@ impl Faction {
         Faction::SphereBuilders,
         Faction::Dyson,
         Faction::Kzinti,
+        Faction::GalacticEmpire,
     ];
 
     /// Name used on the command line.
@@ -221,6 +223,7 @@ impl Faction {
             Faction::SphereBuilders => "spheres",
             Faction::Dyson => "dyson",
             Faction::Kzinti => "kzinti",
+            Faction::GalacticEmpire => "empire",
         }
     }
 
@@ -258,6 +261,7 @@ impl Faction {
             Faction::SphereBuilders => "the Sphere Builders",
             Faction::Dyson => "the Dyson sphere",
             Faction::Kzinti => "the Kzinti",
+            Faction::GalacticEmpire => "the Galactic Empire",
         }
     }
 
@@ -296,6 +300,7 @@ impl Faction {
             Faction::SphereBuilders => "Sphere",
             Faction::Dyson => "Dyson",
             Faction::Kzinti => "Kzinti",
+            Faction::GalacticEmpire => "Imperial",
         }
     }
 
@@ -334,6 +339,7 @@ impl Faction {
             Faction::SphereBuilders => "SB",
             Faction::Dyson => "DY",
             Faction::Kzinti => "KZ",
+            Faction::GalacticEmpire => "GE",
         }
     }
 
@@ -418,6 +424,12 @@ pub enum ShipType {
     KzintiDreadnought,
     KzintiCruiser,
     KzintiStriker,
+    // The Galactic Empire, from a galaxy far, far away.
+    DeathStar,
+    StarDestroyer,
+    TieFighter,
+    /// Darth Vader's own TIE fighter.
+    TieAdvanced,
 }
 
 impl ShipType {
@@ -557,6 +569,8 @@ impl ShipType {
             ShipType::DarkMatterAnomaly => 2000.0,
             ShipType::CaretakerArray => 1300.0,
             ShipType::DelphicSphere => 1400.0,
+            ShipType::DeathStar => 2200.0,
+            ShipType::StarDestroyer => 650.0,
             _ => EXPDIST,
         }
     }
@@ -579,10 +593,11 @@ impl ShipType {
     /// Its crew, who fight off boarding parties.
     pub fn crew(self) -> i32 {
         match self {
+            ShipType::TieFighter | ShipType::TieAdvanced => 1,
             ShipType::Scout | ShipType::SwarmShip | ShipType::ChangelingShip => 2,
             ShipType::Destroyer | ShipType::FerengiMarauder | ShipType::HirogenHunter | ShipType::JemHadarFighter | ShipType::TholianVessel | ShipType::KzintiStriker => 3,
             ShipType::Assault | ShipType::Augment | ShipType::GornRaider => 5,
-            ShipType::Battleship | ShipType::KzintiDreadnought => 6,
+            ShipType::Battleship | ShipType::KzintiDreadnought | ShipType::StarDestroyer => 6,
             _ => 4,
         }
     }
@@ -607,7 +622,8 @@ impl ShipType {
             | ShipType::PakledClunker
             | ShipType::KzintiDreadnought
             | ShipType::KzintiCruiser
-            | ShipType::KzintiStriker => true,
+            | ShipType::KzintiStriker
+            | ShipType::StarDestroyer => true,
             // Special and relic ships are flown by players.
             s => s.is_special() || s.is_relic(),
         }
@@ -763,7 +779,7 @@ pub struct ShipStats {
     pub tract_str: f64,
 }
 
-pub static SHIPS: [ShipStats; 60] = [
+pub static SHIPS: [ShipStats; 64] = [
     ShipStats {
         name: "Scout", abbr: "SC", max_speed: 12, max_shield: 75.0, max_damage: 75.0,
         max_fuel: 5000.0, max_armies: 2, torp_damage: 25.0, torp_speed: 16.0, torp_fuse: 16,
@@ -1303,6 +1319,42 @@ pub static SHIPS: [ShipStats; 60] = [
         recharge: 16.0, repair: 120.0, warp_cost: 3.0, cloak_cost: 24.0, shield_cost: 2.0,
         turns: 380000.0, acc: 300, dec: 300, wpn_cool: 2.5, egn_cool: 7.0,
         max_etemp: 1400.0, max_wtemp: 1200.0, mass: 1200.0, tract_range: 1.0, tract_str: 3000.0,
+    },
+    ShipStats {
+        name: "Death Star", abbr: "DS", max_speed: 3, max_shield: 0.0, max_damage: 3000.0,
+        max_fuel: 1_000_000.0, max_armies: 0, torp_damage: 0.0, torp_speed: 10.0, torp_fuse: 30,
+        torp_cost: 0.0, phaser_damage: 0.0, phaser_cost: 0.0,
+        plasma_damage: 0.0, plasma_speed: 0.0, plasma_fuse: 0, plasma_cost: 0.0,
+        recharge: 500.0, repair: 100.0, warp_cost: 0.0, cloak_cost: 0.0, shield_cost: 0.0,
+        turns: 20_000.0, acc: 60, dec: 150, wpn_cool: 50.0, egn_cool: 50.0,
+        max_etemp: 100_000.0, max_wtemp: 100_000.0, mass: 1_000_000.0, tract_range: 1.0, tract_str: 1.0,
+    },
+    ShipStats {
+        name: "Star Destroyer", abbr: "SD", max_speed: 6, max_shield: 250.0, max_damage: 350.0,
+        max_fuel: 1_000_000.0, max_armies: 0, torp_damage: 45.0, torp_speed: 12.0, torp_fuse: 40,
+        torp_cost: 0.0, phaser_damage: 110.0, phaser_cost: 0.0,
+        plasma_damage: 0.0, plasma_speed: 0.0, plasma_fuse: 0, plasma_cost: 0.0,
+        recharge: 500.0, repair: 80.0, warp_cost: 0.0, cloak_cost: 0.0, shield_cost: 0.0,
+        turns: 50_000.0, acc: 80, dec: 150, wpn_cool: 50.0, egn_cool: 50.0,
+        max_etemp: 100_000.0, max_wtemp: 100_000.0, mass: 20_000.0, tract_range: 1.2, tract_str: 6000.0,
+    },
+    ShipStats {
+        name: "TIE fighter", abbr: "TF", max_speed: 12, max_shield: 0.0, max_damage: 40.0,
+        max_fuel: 1_000_000.0, max_armies: 0, torp_damage: 15.0, torp_speed: 18.0, torp_fuse: 14,
+        torp_cost: 0.0, phaser_damage: 0.0, phaser_cost: 0.0,
+        plasma_damage: 0.0, plasma_speed: 0.0, plasma_fuse: 0, plasma_cost: 0.0,
+        recharge: 500.0, repair: 0.0, warp_cost: 0.0, cloak_cost: 0.0, shield_cost: 0.0,
+        turns: 600_000.0, acc: 400, dec: 400, wpn_cool: 50.0, egn_cool: 50.0,
+        max_etemp: 100_000.0, max_wtemp: 100_000.0, mass: 600.0, tract_range: 1.0, tract_str: 1.0,
+    },
+    ShipStats {
+        name: "TIE Advanced", abbr: "TA", max_speed: 12, max_shield: 80.0, max_damage: 110.0,
+        max_fuel: 1_000_000.0, max_armies: 0, torp_damage: 25.0, torp_speed: 18.0, torp_fuse: 16,
+        torp_cost: 0.0, phaser_damage: 0.0, phaser_cost: 0.0,
+        plasma_damage: 0.0, plasma_speed: 0.0, plasma_fuse: 0, plasma_cost: 0.0,
+        recharge: 500.0, repair: 60.0, warp_cost: 0.0, cloak_cost: 0.0, shield_cost: 0.0,
+        turns: 650_000.0, acc: 400, dec: 400, wpn_cool: 50.0, egn_cool: 50.0,
+        max_etemp: 100_000.0, max_wtemp: 100_000.0, mass: 800.0, tract_range: 1.0, tract_str: 1.0,
     },
 ];
 

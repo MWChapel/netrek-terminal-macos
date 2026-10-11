@@ -416,7 +416,12 @@ impl App {
         let k = (fs / 13.0).clamp(0.8, 2.2);
         for ph in &f.phasers {
             let owner = f.players.iter().find(|p| p.id == ph.owner);
-            let col = owner.map_or(WHITE, player_rgb);
+            let col = match owner {
+                // The Death Star's superlaser (and its turbolasers) are green.
+                Some(p) if p.ship == ShipType::DeathStar => rgb(0x40ff60),
+                Some(p) => player_rgb(p),
+                None => WHITE,
+            };
             let (a, b) = (to(ph.x1 as f64, ph.y1 as f64), to(ph.x2 as f64, ph.y2 as f64));
             let age = self.phaser_age.get(&super::phaser_key(ph)).copied().unwrap_or(0);
             let seed = hash(ph.x2 as i64 ^ ph.owner as i64, ph.y2 as i64);

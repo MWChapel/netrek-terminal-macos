@@ -40,7 +40,8 @@ fn ship_shape(s: ShipType) -> &'static [(f64, f64)] {
         | ShipType::MetronPresence
         | ShipType::DarkMatterAnomaly
         | ShipType::CaretakerArray
-        | ShipType::DelphicSphere => &[
+        | ShipType::DelphicSphere
+        | ShipType::DeathStar => &[
             (0.0, -1.0), (0.7, -0.7), (1.0, 0.0), (0.7, 0.7), (0.0, 1.0), (-0.7, 0.7), (-1.0, 0.0), (-0.7, -0.7),
         ],
         ShipType::BorgCube => &[(-0.75, -0.75), (0.75, -0.75), (0.75, 0.75), (-0.75, 0.75)],
@@ -72,6 +73,12 @@ fn ship_shape(s: ShipType) -> &'static [(f64, f64)] {
         ShipType::KzintiCruiser => &[(0.0, -1.0), (0.3, -0.5), (0.75, 0.0), (0.95, 0.7), (0.0, 0.75), (-0.95, 0.7), (-0.75, 0.0), (-0.3, -0.5)],
         ShipType::KzintiStriker => &[(0.0, -1.0), (0.25, -0.2), (0.85, 0.55), (0.0, 0.7), (-0.85, 0.55), (-0.25, -0.2)],
         ShipType::DysonHatch => &[(-0.9, -0.5), (0.9, -0.5), (0.9, 0.5), (-0.9, 0.5)],
+        ShipType::StarDestroyer => &[(0.0, -1.0), (0.62, 0.8), (0.62, 0.95), (-0.62, 0.95), (-0.62, 0.8)],
+        // Seen face on, as everyone remembers them: |o|
+        ShipType::TieFighter | ShipType::TieAdvanced => &[
+            (-0.9, -0.85), (-0.7, -0.85), (-0.7, -0.1), (0.7, -0.1), (0.7, -0.85), (0.9, -0.85),
+            (0.9, 0.85), (0.7, 0.85), (0.7, 0.1), (-0.7, 0.1), (-0.7, 0.85), (-0.9, 0.85),
+        ],
         ShipType::PakledClunker => &[(0.0, -0.9), (0.8, -0.5), (0.8, 0.9), (-0.8, 0.9), (-0.8, -0.5)],
         ShipType::Horta => &[(0.0, -0.8), (0.6, -0.4), (0.8, 0.3), (0.3, 0.8), (-0.4, 0.7), (-0.8, 0.1), (-0.5, -0.5)],
         ShipType::ChangelingShip => &[(0.0, -1.0), (0.35, -0.4), (0.6, 0.3), (0.4, 0.85), (0.0, 0.95), (-0.4, 0.85), (-0.6, 0.3), (-0.35, -0.4)],
@@ -612,7 +619,13 @@ impl App {
         // Phasers.
         for ph in &f.phasers {
             let owner = f.players.iter().find(|p| p.id == ph.owner);
-            let col = if ph.owner == self.slot { Color::White } else { owner.map_or(Color::White, |p| self.player_color(p)) };
+            let col = match owner {
+                _ if ph.owner == self.slot => Color::White,
+                // The Death Star's superlaser (and its turbolasers) are green.
+                Some(p) if p.ship == ShipType::DeathStar => Color::Green,
+                Some(p) => self.player_color(p),
+                None => Color::White,
+            };
             let (ax, ay) = to_dot(ph.x1 as f64, ph.y1 as f64);
             let (bx, by) = to_dot(ph.x2 as f64, ph.y2 as f64);
             b.line_pattern(ax, ay, bx, by, col, 6, if ph.hit { 1 } else { 2 });

@@ -7,7 +7,7 @@
 
 use super::bot::lead;
 use super::terrain::Terrain;
-use super::world::{is_tempest_minion, Dest, GameEvent, Lock, Loot, Outgoing, PhaserShot, RingSection, Ringworld, TempestWeb, Web, World, KZIN_ARMIES};
+use super::world::{is_tempest_minion, Dest, GameEvent, Lock, Loot, Outgoing, PhaserShot, Player, RingSection, Ringworld, TempestWeb, Web, World, KZIN_ARMIES};
 use crate::consts::*;
 use crate::proto::{ChatMsg, ClientMsg, MsgKind, PState, PhaserInfo, TempestShape, TerrainKind, ZoneInfo, ZoneKind};
 use rand::seq::SliceRandom;
@@ -126,7 +126,7 @@ fn announce(world: &mut World, text: impl Into<String>) {
 
 fn duration(kind: Faction) -> u32 {
     let mins = match kind {
-        Faction::Khan | Faction::Gorn | Faction::Mirror | Faction::Tholian => 6,
+        Faction::Khan | Faction::Gorn | Faction::Mirror | Faction::Tholian | Faction::GalacticEmpire => 6,
         Faction::Borg | Faction::Vger | Faction::Species8472 | Faction::Tribbles | Faction::Hirogen => 5,
         Faction::TenC | Faction::SphereBuilders | Faction::Dyson => 5,
         _ => 4,
@@ -236,6 +236,14 @@ impl Director {
                 }
                 Faction::Metrons => end_duel(world, &mut e),
                 Faction::Pakleds => recover(world, &mut e),
+                // With the Death Star gone, the rest of the fleet jumps to hyperspace.
+                Faction::GalacticEmpire => {
+                    for &id in &e.ships {
+                        if world.players[id as usize].faction == Some(Faction::GalacticEmpire) {
+                            world.remove_player(id);
+                        }
+                    }
+                }
                 // Anomalies (and the Jenolan's wreck) go with whatever made them.
                 Faction::SphereBuilders | Faction::Dyson => {
                     let players = &world.players;
@@ -280,6 +288,8 @@ impl Director {
         let need = match kind {
             Faction::Khan | Faction::Tholian | Faction::Species8472 => 3,
             Faction::Gorn | Faction::Mirror => 4,
+            // The Death Star and its three Star Destroyers; TIE fighters as fit.
+            Faction::GalacticEmpire => 4,
             Faction::JemHadar => 5,
             // As many as fit (up to eight).
             Faction::Swarm => 4,
@@ -319,6 +329,7 @@ impl Director {
         let mut waypoint = (ax, ay);
         let mut inside = Vec::new();
         let mut corners = Vec::new();
+        let mut goals = HashMap::new();
         let mut spawn = |world: &mut World, name: &str, ship: ShipType, (x, y): (f64, f64), bounty: f64| {
             if let Some(id) = world.spawn_alien(name, kind, ship, x, y, bounty) {
                 ships.push(id);
@@ -658,6 +669,31 @@ impl Director {
                     name
                 )
             }
+            Faction::GalacticEmpire => {
+                let Some(k) = most_populous(world) else { return };
+                let (px, py, name) = (world.planets[k].x, world.planets[k].y, world.planets[k].name);
+                // Out of hyperspace, a long way out from its target.
+                let a = rng.gen_range(0.0..TAU);
+                let at = ((px + a.cos() * 25_000.0).clamp(5000.0, GWIDTH - 5000.0), (py + a.sin() * 25_000.0).clamp(5000.0, GWIDTH - 5000.0));
+                spawn(world, "Death Star", ShipType::DeathStar, at, 40.0);
+                for n in ["Devastator", "Avenger", "Tyrant"] {
+                    spawn(world, n, ShipType::StarDestroyer, near(at.0, at.1, 4000.0), 20.0);
+                }
+                spawn(world, "Vader", ShipType::TieAdvanced, near(at.0, at.1, 2500.0), 15.0);
+                for _ in 0..3 {
+                    // Each TIE fighter is worth less than a third of a kill.
+                    spawn(world, "TIE", ShipType::TieFighter, near(at.0, at.1, 3000.0), -7.0);
+                }
+                match ships.first() {
+                    Some(&ds) if world.players[ds as usize].ship == ShipType::DeathStar => goals.insert(ds, k),
+                    _ => return,
+                };
+                waypoint = (px, py);
+                format!(
+                    "A long time ago, in a galaxy far, far away... THE GALACTIC EMPIRE has arrived! That's no moon: the DEATH STAR is heading for {}, the most populous world in the galaxy, to destroy it with its superlaser. Three Star Destroyers fly with it, launching TIE fighters, and Darth Vader himself. The Death Star shrugs off almost any fire, but it has one weakness: a thermal exhaust port at its stern. A torpedo from a scout or destroyer, fired from the trench right behind it, will start a chain reaction.",
+                    name
+                )
+            }
         };
         if ships.is_empty() && !matches!(kind, Faction::Tribbles | Faction::Nanites) {
             return;
@@ -667,7 +703,7 @@ impl Director {
             kind,
             ships,
             started: world.tick,
-            goals: HashMap::new(),
+            goals,
             holds: HashMap::new(),
             waypoint,
             corners,
@@ -704,6 +740,9 @@ fn leading_empire(world: &World) -> Option<Team> {
 fn beaten(world: &World, e: &Event) -> bool {
     if e.kind == Faction::Tempest {
         return !e.ships.iter().any(|&s| world.players[s as usize].ship == ShipType::TempestCore);
+    }
+    if e.kind == Faction::GalacticEmpire {
+        return !e.ships.iter().any(|&s| world.players[s as usize].ship == ShipType::DeathStar);
     }
     if e.kind == Faction::Nanites {
         return !world.players.iter().any(|p| p.nanites);
@@ -749,6 +788,7 @@ fn defeat_text(kind: Faction) -> String {
         Faction::SphereBuilders => "The last Delphic sphere is destroyed, and the anomalies around it fade.".into(),
         Faction::Dyson => "The Dyson sphere's hatch emitter is destroyed! Its doors jam open and every ship inside flies free.".into(),
         Faction::Kzinti => "The Kzinti fleet is destroyed... for now.".into(),
+        Faction::GalacticEmpire => "Great shot, that was one in a million! The Death Star explodes in a chain reaction, and what's left of the Imperial fleet jumps to hyperspace.".into(),
     }
 }
 
@@ -786,6 +826,7 @@ fn withdraw_text(kind: Faction) -> String {
         Faction::SphereBuilders => "The Sphere Builders withdraw their spheres, and the anomalies fade.".into(),
         Faction::Dyson => "The Dyson sphere's automated systems go dormant. Its hatch swings open and the trapped ships fly free.".into(),
         Faction::Kzinti => "The Kzinti never withdraw.".into(),
+        Faction::GalacticEmpire => "The Death Star and its fleet jump to hyperspace. \"This will be a day long remembered.\"".into(),
     }
 }
 
@@ -935,6 +976,11 @@ fn run_event(world: &mut World, e: &mut Event) {
             Faction::SphereBuilders => sphere(world, i, n, tick),
             Faction::Dyson => dyson(world, e, i, tick),
             Faction::Kzinti => {}
+            Faction::GalacticEmpire => match world.players[i].ship {
+                ShipType::DeathStar => death_star(world, e, i, tick),
+                ShipType::StarDestroyer => star_destroyer(world, e, i, tick),
+                _ => tie_fighter(world, e, i, tick),
+            },
         }
     }
     match e.kind {
@@ -950,6 +996,9 @@ fn run_event(world: &mut World, e: &mut Event) {
     }
     if e.kind == Faction::Tempest {
         tempest(world, e, tick);
+    }
+    if e.kind == Faction::GalacticEmpire {
+        launch_ties(world, e, tick);
     }
     if e.kind == Faction::Tribbles {
         tribbles(world, e, tick);
@@ -3158,6 +3207,290 @@ fn dyson(world: &mut World, e: &mut Event, i: usize, tick: u32) {
 }
 
 // ----------------------------------------------------------------------
+// The Galactic Empire: a long time ago, in a galaxy far, far away.
+
+/// How far the Death Star's superlaser reaches.
+pub const SUPERLASER_RANGE: f64 = 9000.0;
+/// How long the superlaser takes to charge once the Death Star is in range.
+const SUPERLASER_CHARGE: i32 = 30 * UPS as i32;
+/// How long it needs after firing before it can charge again.
+const SUPERLASER_RECHARGE: u32 = 20 * UPS as u32;
+/// The trench: how far out from the Death Star's hull a ship can be and
+/// still put a torpedo down the exhaust port, and how wide it is (either
+/// side of dead astern).
+pub const TRENCH_DEPTH: f64 = 3000.0;
+const TRENCH_ARC: f64 = 32.0;
+/// TIE fighters out at once (not counting Vader), and how often the Star
+/// Destroyers launch another.
+const TIE_CAP: usize = 6;
+const TIE_LAUNCH: u32 = 15 * UPS as u32;
+
+/// The empires' world with the most armies.
+fn most_populous(world: &World) -> Option<usize> {
+    (0..world.planets.len())
+        .filter(|&k| Team::PLAYABLE.contains(&world.planets[k].owner))
+        .max_by_key(|&k| world.planets[k].armies)
+}
+
+/// Whether ship `q` is in the Death Star's trench: a scout or destroyer
+/// close in, right behind it, where a torpedo can reach the thermal exhaust
+/// port.
+pub fn in_trench(ds: &Player, q: &Player) -> bool {
+    matches!(q.ship, ShipType::Scout | ShipType::Destroyer)
+        && q.alive()
+        && q.faction.is_none()
+        && dist(ds.x, ds.y, q.x, q.y) < ds.ship.hit_radius() + TRENCH_DEPTH
+        && dir_diff(dir_to(ds.x, ds.y, q.x, q.y), ds.dir + 128.0).abs() < TRENCH_ARC
+}
+
+/// The ship that most threatens the Death Star: one in its trench, or else
+/// the closest within `range` of it.
+fn death_star_threat(world: &World, e: &Event, range: f64) -> Option<usize> {
+    let ds = e.ships.iter().map(|&s| &world.players[s as usize]).find(|p| p.alive() && p.ship == ShipType::DeathStar)?;
+    if let Some(q) = world.players.iter().find(|q| in_trench(ds, q)) {
+        return Some(q.id as usize);
+    }
+    world
+        .players
+        .iter()
+        .filter(|q| q.alive() && q.faction.is_none() && !q.cloaked)
+        .map(|q| (q.id as usize, dist(ds.x, ds.y, q.x, q.y)))
+        .filter(|&(_, d)| d < range)
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+        .map(|(j, _)| j)
+}
+
+/// The Death Star: fly to the most populous world, charge the superlaser
+/// and destroy it, then on to the next. Its turbolaser batteries fire at
+/// anything close, with stormtrooper accuracy.
+fn death_star(world: &mut World, e: &mut Event, i: usize, tick: u32) {
+    let mut rng = rand::thread_rng();
+    let id = i as u8;
+    let goal = match e.goals.get(&id) {
+        Some(&k) if k < world.planets.len() && world.planets[k].alien != Some(Faction::GalacticEmpire) => k,
+        _ => {
+            e.progress.remove(&id);
+            let Some(k) = most_populous(world) else { return };
+            e.goals.insert(id, k);
+            announce(world, format!("The Death Star has set course for {}, now the most populous world in the galaxy.", world.planets[k].name));
+            k
+        }
+    };
+    let (px, py, name) = (world.planets[goal].x, world.planets[goal].y, world.planets[goal].name);
+    let d = dist(world.players[i].x, world.players[i].y, px, py);
+    if tick % 4 == 0 {
+        // Close to a comfortable firing range, then stop and face it.
+        let max = world.players[i].stats().max_speed;
+        steer_to(world, i, px, py, if d < SUPERLASER_RANGE * 0.8 { 0 } else { max });
+    }
+    if d < SUPERLASER_RANGE && tick >= e.cooldown {
+        let charge = e.progress.entry(id).or_insert(0);
+        *charge += 1;
+        let c = *charge;
+        if c == 1 {
+            announce(
+                world,
+                format!(
+                    "The Death Star is in range of {}! Its superlaser is charging and fires in {} seconds. Get behind it!",
+                    name,
+                    SUPERLASER_CHARGE / UPS as i32
+                ),
+            );
+        } else if c == SUPERLASER_CHARGE - 10 * UPS as i32 {
+            announce(world, format!("\"Commence primary ignition.\" The Death Star fires on {} in 10 seconds!", name));
+        } else if c >= SUPERLASER_CHARGE {
+            superlaser(world, e, i, goal);
+        }
+    }
+    // Someone has made it into the trench.
+    let runner = (0..MAXPLAYER).find(|&j| in_trench(&world.players[i], &world.players[j]));
+    if let Some(j) = runner.filter(|&j| e.prey != Some(j as u8)) {
+        e.prey = Some(j as u8);
+        announce(world, format!("{} is in the Death Star's trench, lining up on the exhaust port! \"Stay on target...\"", world.players[j].label()));
+    }
+    // Turbolaser batteries: a shot every 0.7 seconds, and half of them miss.
+    if tick % 7 == 0 {
+        let (x, y) = (world.players[i].x, world.players[i].y);
+        let reach = world.players[i].ship.hit_radius() + 6000.0;
+        let targets: Vec<usize> = empire_ships_near(world, x, y, reach).into_iter().filter(|&j| !world.players[j].cloaked).collect();
+        if let Some(&t) = targets.choose(&mut rng) {
+            if rng.gen_bool(0.5) {
+                beam(world, i, t, 20.0, "was blasted by the Death Star's turbolasers");
+            } else {
+                let (tx, ty) = (world.players[t].x + rng.gen_range(-900.0..900.0), world.players[t].y + rng.gen_range(-900.0..900.0));
+                world.phasers.push(PhaserShot {
+                    info: PhaserInfo { owner: id, x1: x as i32, y1: y as i32, x2: tx as i32, y2: ty as i32, hit: false },
+                    ticks: 6,
+                });
+            }
+        }
+    }
+}
+
+/// Fire the superlaser: the planet is destroyed, and every ship orbiting it.
+fn superlaser(world: &mut World, e: &mut Event, i: usize, k: usize) {
+    let id = i as u8;
+    let (x, y) = (world.players[i].x, world.players[i].y);
+    let (px, py) = (world.planets[k].x, world.planets[k].y);
+    // Eight beams from the dish meet in front of it, and one lances out to the planet.
+    let (fx, fy) = dir_vec(dir_to(x, y, px, py));
+    let r = world.players[i].ship.hit_radius();
+    let (cx, cy) = (x + fx * r * 0.6, y + fy * r * 0.6);
+    let (gx, gy) = (x + fx * r * 1.5, y + fy * r * 1.5);
+    let mut shot = |x1: f64, y1: f64, x2: f64, y2: f64| {
+        world.phasers.push(PhaserShot {
+            info: PhaserInfo { owner: id, x1: x1 as i32, y1: y1 as i32, x2: x2 as i32, y2: y2 as i32, hit: true },
+            ticks: 20,
+        });
+    };
+    for n in 0..8 {
+        let a = n as f64 / 8.0 * TAU;
+        shot(cx + a.cos() * r * 0.3, cy + a.sin() * r * 0.3, gx, gy);
+    }
+    shot(gx, gy, px, py);
+    let name = world.planets[k].name;
+    let doomed: Vec<usize> = (0..MAXPLAYER)
+        .filter(|&j| world.players[j].alive() && world.players[j].faction.is_none())
+        .filter(|&j| world.players[j].orbiting == Some(k) || dist(world.players[j].x, world.players[j].y, px, py) < 2000.0)
+        .collect();
+    for j in doomed {
+        world.kill(j, Some(id), format!("was destroyed with {}", name));
+    }
+    let pl = &mut world.planets[k];
+    let old = pl.owner;
+    pl.armies = 0;
+    pl.owner = Team::Ind;
+    pl.flags = 0;
+    pl.outpost = None;
+    pl.tribbles = false;
+    pl.alien = Some(Faction::GalacticEmpire);
+    announce(
+        world,
+        format!(
+            "The Death Star's superlaser fires! {} is destroyed. \"I felt a great disturbance in the Force, as if millions of voices suddenly cried out in terror, and were suddenly silenced.\"",
+            name
+        ),
+    );
+    world.check_genocide(old, Team::Ind);
+    e.goals.remove(&id);
+    e.progress.remove(&id);
+    e.cooldown = world.tick + SUPERLASER_RECHARGE;
+}
+
+/// Star Destroyers: guard the Death Star, otherwise bomb colonies and land
+/// stormtroopers. They turn slowly, and their turbolasers only bear forward.
+fn star_destroyer(world: &mut World, e: &mut Event, i: usize, tick: u32) {
+    let id = i as u8;
+    if tick % 2 != 0 {
+        return;
+    }
+    let mut rng = rand::thread_rng();
+    let (x, y) = (world.players[i].x, world.players[i].y);
+    let target = death_star_threat(world, e, 12_000.0)
+        .filter(|&t| dist(x, y, world.players[t].x, world.players[t].y) < 25_000.0)
+        .or_else(|| nearest_enemy(world, i, 14_000.0, None).map(|(t, _)| t));
+    if let Some(t) = target {
+        let (p, q) = (&world.players[i], &world.players[t]);
+        let s = p.stats();
+        let d = dist(p.x, p.y, q.x, q.y);
+        let tv = q.speed as f64 * WARP1;
+        let (tvx, tvy) = dir_vec(q.dir);
+        let aim = lead(p.x, p.y, q.x, q.y, tvx * tv, tvy * tv, s.torp_speed * WARP1);
+        let off = dir_diff(p.dir, aim).abs();
+        let (qx, qy, straight) = (q.x, q.y, dir_to(p.x, p.y, q.x, q.y));
+        let reach = s.torp_speed * WARP1 * s.torp_fuse as f64 * 0.8;
+        let phrange = PHASEDIST * s.phaser_damage / 100.0 * 0.7;
+        steer_to(world, i, qx, qy, if d > 6000.0 { s.max_speed } else { 3 });
+        if off < 40.0 && d < reach && rng.gen_bool(0.3) {
+            cmd(world, i, ClientMsg::Torp((aim + rng.gen_range(-4.0..4.0)).rem_euclid(256.0) as u8));
+        }
+        if off < 48.0 && d < phrange && tick % 10 == 0 {
+            cmd(world, i, ClientMsg::Phaser(straight as u8));
+        }
+        return;
+    }
+    let goal = match e.goals.get(&id) {
+        Some(&k) if k < world.planets.len() && Team::PLAYABLE.contains(&world.planets[k].owner) => k,
+        _ => match nearest_planet(world, i, |pl| Team::PLAYABLE.contains(&pl.owner) && pl.flags & PL_HOME == 0) {
+            Some(k) => {
+                e.goals.insert(id, k);
+                k
+            }
+            None => return,
+        },
+    };
+    if go_orbit(world, i, goal) {
+        if world.planets[goal].armies > 4 {
+            if !world.players[i].bombing {
+                cmd(world, i, ClientMsg::Bomb);
+            }
+        } else {
+            let pl = &mut world.planets[goal];
+            let (name, old) = (pl.name, pl.owner);
+            pl.owner = Team::Ind;
+            pl.alien = Some(Faction::GalacticEmpire);
+            pl.armies = 10;
+            announce(world, format!("Imperial stormtroopers have landed on {} and occupied it for the Empire!", name));
+            world.check_genocide(old, Team::Ind);
+            e.goals.remove(&id);
+        }
+    }
+}
+
+/// TIE fighters screen the Death Star, swarming whoever comes near it.
+/// Vader goes for the trench runners too, and otherwise for the best pilot
+/// in reach.
+fn tie_fighter(world: &mut World, e: &mut Event, i: usize, tick: u32) {
+    if tick % 2 != 0 {
+        return;
+    }
+    let (x, y) = (world.players[i].x, world.players[i].y);
+    let mut target = death_star_threat(world, e, 15_000.0);
+    if target.is_none() && world.players[i].ship == ShipType::TieAdvanced {
+        target = (0..MAXPLAYER)
+            .filter(|&j| {
+                let q = &world.players[j];
+                q.alive() && q.faction.is_none() && !q.cloaked && dist(x, y, q.x, q.y) < 25_000.0
+            })
+            .max_by(|&a, &b| world.players[a].kills.total_cmp(&world.players[b].kills));
+    }
+    match target.or_else(|| nearest_enemy(world, i, 20_000.0, None).map(|(t, _)| t)) {
+        Some(t) => fight(world, i, t),
+        None => {
+            // Back to the Death Star.
+            let ds = e.ships.iter().map(|&s| &world.players[s as usize]).find(|p| p.alive() && p.ship == ShipType::DeathStar);
+            if let Some((dx, dy)) = ds.map(|p| (p.x, p.y)) {
+                if tick % 10 == 0 {
+                    steer_to(world, i, dx, dy, if dist(x, y, dx, dy) > 5000.0 { 8 } else { 2 });
+                }
+            }
+        }
+    }
+}
+
+/// The Star Destroyers launch TIE fighters to keep the screen up, leaving
+/// a couple of slots free for anyone joining.
+fn launch_ties(world: &mut World, e: &mut Event, tick: u32) {
+    if tick < e.next_at {
+        return;
+    }
+    e.next_at = tick + TIE_LAUNCH;
+    let flying = |s: ShipType| -> Vec<u8> {
+        e.ships.iter().copied().filter(|&id| world.players[id as usize].alive() && world.players[id as usize].ship == s).collect()
+    };
+    let free = world.players.iter().filter(|p| !p.in_use).count();
+    if flying(ShipType::TieFighter).len() >= TIE_CAP || free < 3 {
+        return;
+    }
+    let mut rng = rand::thread_rng();
+    let Some(&c) = flying(ShipType::StarDestroyer).choose(&mut rng) else { return };
+    let (x, y) = (world.players[c as usize].x, world.players[c as usize].y);
+    if let Some(nid) = world.spawn_alien("TIE", Faction::GalacticEmpire, ShipType::TieFighter, x, y, -7.0) {
+        e.ships.push(nid);
+    }
+}
+
+// ----------------------------------------------------------------------
 // The Kzinti and their Ringworld: they come once and stay for good.
 
 /// The three Kzinti ships (from "The Slaver Weapon"), and what they fly.
@@ -3537,7 +3870,7 @@ mod tests {
                     ["Khan", "Gorn", "Tholian", "Fesarius", "Balok", "Terran", "planet killer", "amoeba", "Borg", "V'Ger",
                         "Crystalline", "probe", "8472", "Jem'Hadar", "wormhole", "ribble", "Chang", "Hirogen", "Q", "Ferengi",
                         "warm", "TEMPEST", "Tempest", "NOMAD", "Nomad", "Armus", "anite", "hangeling", "Metron", "Pakled", "10-C",
-                        "Caretaker", "Horta", "Sphere", "DYSON", "Dyson", "Kzin"]
+                        "Caretaker", "Horta", "Sphere", "DYSON", "Dyson", "Kzin", "Death Star", "Imperial"]
                         .iter()
                         .any(|k| m.contains(k))
                 })
@@ -4337,6 +4670,131 @@ mod tests {
             w.tick();
         }
         assert!(before - toughness(&w.players[h]) >= 500.0, "{} -> {}", before, toughness(&w.players[h]));
+    }
+
+    /// The Death Star goes for the most populous world, charges its
+    /// superlaser and destroys it, along with any ship in orbit.
+    #[test]
+    fn death_star_destroys_the_most_populous_world() {
+        let (mut w, kirk) = with_cruiser(0.0, 0.0);
+        let kirk = kirk as usize;
+        let k = (0..w.planets.len()).find(|&k| w.planets[k].owner == Team::Rom && w.planets[k].flags & PL_HOME == 0).unwrap();
+        w.planets[k].armies = 99;
+        let mut d = Director::new(AlienConfig { kinds: vec![Faction::GalacticEmpire], interval: 9999 });
+        d.spawn_kind(&mut w, Faction::GalacticEmpire, None);
+        let fleet: Vec<ShipType> = d.events[0].ships.iter().map(|&s| w.players[s as usize].ship).collect();
+        let count = |t: ShipType| fleet.iter().filter(|&&s| s == t).count();
+        assert_eq!(
+            (count(ShipType::DeathStar), count(ShipType::StarDestroyer), count(ShipType::TieAdvanced), count(ShipType::TieFighter)),
+            (1, 3, 1, 3)
+        );
+        let ds = d.events[0].ships[0] as usize;
+        assert_eq!(d.events[0].goals.get(&(ds as u8)), Some(&k));
+        let name = w.planets[k].name;
+        assert!(alerts(&mut w).iter().any(|m| m.contains("DEATH STAR") && m.contains(name)));
+        // Just the Death Star, in range, with Kirk parked over the planet.
+        for &s in &d.events[0].ships[1..] {
+            w.remove_player(s);
+        }
+        d.events[0].ships.truncate(1);
+        let (px, py) = (w.planets[k].x, w.planets[k].y);
+        (w.players[ds].x, w.players[ds].y) = (px + 7000.0, py);
+        (w.players[kirk].x, w.players[kirk].y) = (px + 600.0, py);
+        let mut log = Vec::new();
+        for _ in 0..(40 * UPS) {
+            // Keep Kirk alive until the end (he's in the turbolasers' reach).
+            if w.planets[k].armies > 0 {
+                (w.players[kirk].damage, w.players[kirk].shield) = (0.0, 100.0);
+            }
+            d.tick(&mut w);
+            w.tick();
+            log.extend(alerts(&mut w));
+        }
+        let pl = &w.planets[k];
+        assert_eq!((pl.armies, pl.owner, pl.flags, pl.alien), (0, Team::Ind, 0, Some(Faction::GalacticEmpire)));
+        assert!(!w.players[kirk].alive(), "destroyed with the planet");
+        assert!(log.iter().any(|m| m.contains("in range of") && m.contains(name)));
+        assert!(log.iter().any(|m| m.contains("superlaser fires") && m.contains(name)));
+        // Then on to the next world.
+        assert!(log.iter().any(|m| m.contains("set course for")));
+        assert!(d.events[0].goals.get(&(ds as u8)).map_or(false, |&g| g != k));
+    }
+
+    /// Only a torpedo from a scout or destroyer in the trench behind it
+    /// hurts the Death Star; that one blows it up.
+    #[test]
+    fn death_star_only_dies_down_its_exhaust_port() {
+        let (mut w, kirk) = with_cruiser(50_000.0, 52_000.0);
+        let ds = w.spawn_alien("Death Star", Faction::GalacticEmpire, ShipType::DeathStar, 50_000.0, 50_000.0, 40.0).unwrap() as usize;
+        // Nose toward -y: the stern (and the trench) is toward +y.
+        (w.players[ds].dir, w.players[ds].desired_dir) = (0.0, 0.0);
+        let luke = w.add_player("Luke", false).unwrap();
+        w.join(luke, Team::Fed, ShipType::Scout).unwrap();
+        let l = luke as usize;
+        let hit = |w: &mut World, from: u8, kind: HitKind| {
+            w.hit_kind = kind;
+            w.inflict(ds, 40.0, Some(from), "test".into());
+        };
+        // A cruiser behind it barely scratches it...
+        hit(&mut w, kirk, HitKind::Photon);
+        assert!(w.players[ds].alive() && w.players[ds].damage < 1.0);
+        // ...and so does a scout's torpedo from in front, or its phasers from the trench.
+        (w.players[l].x, w.players[l].y) = (50_000.0, 46_000.0);
+        hit(&mut w, luke, HitKind::Photon);
+        (w.players[l].x, w.players[l].y) = (50_000.0, 53_500.0);
+        assert!(in_trench(&w.players[ds], &w.players[l]));
+        hit(&mut w, luke, HitKind::Phaser);
+        assert!(w.players[ds].alive());
+        // A torpedo from the trench: one in a million.
+        let before = w.players[l].kills;
+        hit(&mut w, luke, HitKind::Photon);
+        assert!(!w.players[ds].alive());
+        assert!(w.players[l].kills - before >= 5.0);
+        assert!(alerts(&mut w).iter().any(|m| m.contains("exhaust port")));
+    }
+
+    /// Star Destroyers take double damage from astern.
+    #[test]
+    fn star_destroyers_are_weak_astern() {
+        let (mut w, kirk) = with_cruiser(50_000.0, 46_000.0);
+        let sd = w.spawn_alien("Devastator", Faction::GalacticEmpire, ShipType::StarDestroyer, 50_000.0, 50_000.0, 20.0).unwrap() as usize;
+        w.players[sd].dir = 0.0;
+        let loss = |w: &mut World, y: f64| {
+            w.players[kirk as usize].y = y;
+            w.players[sd].shield = 250.0;
+            w.hit_kind = HitKind::Photon;
+            w.inflict(sd, 40.0, Some(kirk), "test".into());
+            250.0 - w.players[sd].shield
+        };
+        let (ahead, astern) = (loss(&mut w, 46_000.0), loss(&mut w, 54_000.0));
+        assert!((astern - ahead * 2.0).abs() < 0.01, "{} ahead, {} astern", ahead, astern);
+    }
+
+    /// A robot in a scout gets behind the Death Star and fires down the
+    /// exhaust port.
+    #[test]
+    fn robots_make_trench_runs() {
+        let mut w = World::new();
+        let ds = w.spawn_alien("Death Star", Faction::GalacticEmpire, ShipType::DeathStar, 50_000.0, 50_000.0, 40.0).unwrap();
+        let mut e = test_event(Faction::GalacticEmpire);
+        e.ships.push(ds);
+        let mut b = bot::spawn(&mut w, Team::Fed).unwrap();
+        w.join(b.id, Team::Fed, ShipType::Scout).unwrap();
+        let r = b.id as usize;
+        // Start in front of it, where the turbolasers are.
+        let (dx, dy) = dir_vec(w.players[ds as usize].dir);
+        (w.players[r].x, w.players[r].y) = (50_000.0 + dx * 8000.0, 50_000.0 + dy * 8000.0);
+        for _ in 0..(60 * UPS) {
+            // The pilot is patched up as they go: this is about the flying.
+            (w.players[r].damage, w.players[r].shield) = (0.0, 75.0);
+            run_event(&mut w, &mut e);
+            b.think(&mut w);
+            w.tick();
+            if !w.players[ds as usize].alive() {
+                break;
+            }
+        }
+        assert!(!w.players[ds as usize].alive(), "the trench run failed");
     }
 
     fn test_event(kind: Faction) -> Event {

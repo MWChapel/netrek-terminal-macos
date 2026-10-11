@@ -1076,6 +1076,8 @@ impl App {
                         match pl.alien {
                             Some(Faction::Doomsday) => "devoured by the planet killer",
                             Some(Faction::Species8472) => "destroyed by Species 8472",
+                            Some(Faction::GalacticEmpire) if pl.armies == 0 => "destroyed by the Death Star",
+                            Some(Faction::GalacticEmpire) => "occupied by the Galactic Empire",
                             Some(Faction::Khan) => "Khan's stronghold",
                             Some(Faction::Kzinti) if k == PLANETS.len() + f.ring.as_ref().map_or(0, |r| r.kzin as usize) => "Kzin, the Kzinti homeworld",
                             Some(fac) => fac.name(),

@@ -97,6 +97,7 @@ pub fn faction_rgb(f: Faction) -> Rgb {
         Faction::SphereBuilders => rgb(0x5ad8c0),
         Faction::Dyson => rgb(0xd0a860),
         Faction::Kzinti => rgb(0xff8c1a),
+        Faction::GalacticEmpire => rgb(0x8090c0),
     }
 }
 
@@ -115,10 +116,12 @@ pub fn player_rgb(p: &PlayerInfo) -> Rgb {
 /// The Tempest's neon-blue web.
 pub const TEMPEST_BLUE: Rgb = rgb(0x2060ff);
 
-/// A planet's colour; devoured planets are dead grey rock.
+/// A planet's colour; devoured planets are dead grey rock (as are worlds
+/// the Death Star has destroyed: the ones the Empire occupies have armies).
 pub fn planet_rgb(info: &PlanetInfo) -> Rgb {
     match info.alien {
         Some(Faction::Doomsday | Faction::Species8472) => rgb(0x55595f),
+        Some(Faction::GalacticEmpire) if info.armies == 0 => rgb(0x55595f),
         Some(f) => faction_rgb(f),
         None => team_rgb(info.owner),
     }

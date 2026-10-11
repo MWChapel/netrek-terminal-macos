@@ -17,10 +17,11 @@ that runs entirely inside a terminal window on macOS.
 - **Trek-style ships:** each empire has its own ship designs (Federation saucers and
   nacelles, Klingon D7s and Birds-of-Prey, Romulan warbirds, Orion raiders).
 - **Robots:** AI pilots fight, bomb, carry armies and capture planets, so you can play solo.
-- **Alien incursions** (optional): thirty-two threats, from Khan, the Borg and the
+- **Alien incursions** (optional): thirty-three threats, from Khan, the Borg and the
   planet killer to V'Ger, Species 8472, the Jem'Hadar, General Chang, Q, Nomad, the
   Metrons' arena, a Dyson sphere and a plague of tribbles, drop into the game, and the
-  Kzinti arrive with a Ringworld that stays until they lose it.
+  Kzinti arrive with a Ringworld that stays until they lose it. From a galaxy far, far
+  away, the Galactic Empire brings the Death Star.
 - **Extras** (optional, each its own server option): career ranks and service records,
   personal orders from command, treaties between empires, 21 kinds of space terrain (10
   in any one galaxy), supply convoys that buy upgrades for your empire, subsystem damage,
@@ -155,7 +156,7 @@ netrek <COMMAND>
 | `-b, --bind <ADDR>` | `0.0.0.0` | Address to bind; use `127.0.0.1` for local-only |
 | `--bots <N>` | `6` | Robot players kept in the game |
 | `-e, --empires <LIST>` | `fed,rom` | Empires the robots play for: `all`, or a comma list such as `fed,rom,kli` |
-| `--aliens [LIST]` | off | Alien incursions: bare `--aliens` for all thirty-two, or a list such as `khan,borg,vger`. See [Alien incursions](#alien-incursions) |
+| `--aliens [LIST]` | off | Alien incursions: bare `--aliens` for all thirty-three, or a list such as `khan,borg,vger`. See [Alien incursions](#alien-incursions) |
 | `--alien-interval <SECS>` | `150` | Average seconds between incursions |
 | `--ranks [FILE]` | off | Career ranks, service records and a leaderboard, saved to `FILE` (default `~/.netrek/service-records.tsv`). See [Extras](#extras) |
 | `--orders` | off | Personal orders from command, with rewards |
@@ -581,6 +582,9 @@ Robots keep the game lively when there aren't enough people. They:
   enemy planets
 - go into a **ring frenzy** when the Kzinti's Ringworld arrives: until it leaves they
   fight only for the ring (see [Alien incursions](#alien-incursions))
+- make **trench runs** on the Death Star when they're flying a scout or destroyer: they
+  swing round its flanks, get right behind it and fire down the exhaust port. In bigger
+  ships they leave it alone and fight its escorts
 
 By default robots play the classic two-empire **Federation vs Romulan** game. Use
 `--empires all` (or a list such as `fed,rom,kli`) to have them fly for more empires:
@@ -597,7 +601,8 @@ on two fronts. Robots are marked in the player list.
 
 ## Alien incursions
 
-Pass `--aliens` to `server` or `solo` and episodes from Star Trek drop into the galaxy.
+Pass `--aliens` to `server` or `solo` and episodes from Star Trek (and one visitor from a
+galaxy far, far away) drop into the galaxy.
 One arrives roughly every `--alien-interval` seconds (150 by default, with some random
 variation), and at most **two** are active at once. The galaxy has 32 player slots, so
 with aliens on the server keeps 8 of them free for incursions (11 with the Kzinti), running fewer robots than
@@ -605,7 +610,7 @@ with aliens on the server keeps 8 of them free for incursions (11 with the Kzint
 is announced to everyone as a magenta **ALERT** message with a klaxon.
 
 ```sh
-netrek server --empires all --bots 12 --aliens            # all thirty-two
+netrek server --empires all --bots 12 --aliens            # all thirty-three
 netrek solo --aliens khan,borg,doomsday --alien-interval 90
 ```
 
@@ -643,6 +648,7 @@ netrek solo --aliens khan,borg,doomsday --alien-interval 90
 | `spheres` | **The Sphere Builders** (Enterprise): four **Delphic Expanse spheres** appear in open space. Each one scorches ships within 3,500 units every 5 seconds and **warps the space around it into anomalies** (a spatial eddy, a chroniton field, a tetryon field or a spatial rift; see [Space terrain](#space-terrain)), up to three each, even when `--terrain` is off. The anomalies vanish when their sphere is destroyed. |
 | `kzinti` | **The Kzinti and their Ringworld** (the Kzinti are from *The Slaver Weapon*, the animated series; the Ringworld is from Larry Niven, who wrote it): a vast **Ringworld**, 14,000–18,000 across, appears around a random planet. It can't be destroyed and never withdraws on its own; even a galaxy reset keeps it (with its sections reset). But it only stays while the Kzinti hold it: **once they've lost their last section, the Ringworld is free and jumps out of the galaxy**, taking all ten sections with it, **including any an empire has claimed**. (An empire whose only planets were on the ring is wiped out with it.) Ships orbiting a section are left in open space, orders naming a section are cancelled, and it never comes back. It has **ten sections** that are planets in their own right: ships can orbit (dock at) them, bomb them, and land armies to **claim them for their empire**. Each has its own population (4 to 10 armies) and resources (repair, fuel and farming in different mixes). They're named after Niven's Ringworld: Fist-of-God, Great Ocean, Map of Earth, and so on. One section is **Kzin**, the Kzinti homeworld (12 armies, repair, fuel and farming). The **Kzinti** play like a small extra empire with **three warships, always**: the Chuft-Captain's **dreadnought**, the Telepath's **cruiser** and Flyer's **striker**. A lost ship relaunches from Kzin a minute later (or from any Kzinti world if Kzin has fallen). They carry warriors from home and work hard to **take the rest of the Ringworld**, going for the weakest sections first; once it's all theirs they patrol it. They defend Kzin fiercely, patch up at home when hurt, and "scream and leap" at any ship that comes near. Their worlds regrow slowly (an army every 45 seconds, up to 12), and they'll always try to take Kzin back. A determined push by the empires usually breaks them within a quarter of an hour. Kzinti ships are worth 2 kills. The Kzinti come only once and don't count toward the two incursions at a time; when the Ringworld jumps away, their fleet goes with it. **Robots go into a ring frenzy** while it's here: their goal is to conquer as much of the Ringworld as they can. They land armies on **unclaimed sections first**, then on any enemy section they can take; **bomb the Kzinti's sections first**, then the enemy's lightest, to soften them up; fetch armies from whichever of their worlds is the shortest trip to the ring; and only break off to fight ships that come close or are **raiding their own sections**. They ignore the rest of the galaxy until the ring leaves. |
 | `dyson` | **A Dyson sphere** (*Relics*, TNG): a shell 9,000 across materialises around an out-of-the-way colony (in the episode it encloses a star). Nothing gets through the shell, ships or torpedoes, except by its **hatch**. The planet keeps its owner, but only ships inside can reach it (and repair, refuel or fight over it there). An automated **tractor beam** at the hatch locks onto the nearest ship within 15,000 units every 10 seconds and drags it in, whatever its engines do; the hatch opens to take it and shuts behind it. Heavy fire on the **hatch emitter** (200 damage while it holds you) breaks the beam. The hatch only opens to take a ship, but **a ship in the doorway holds it open**, as the Jenolan did, letting everyone in or out. **Destroy the hatch emitter** (600 shields, 1,200 hull, fast repairs, 5 kills) to jam the doors open for good. It's very tough, so bring friends: **a ship blowing up in the doorway does 6× damage** (Scotty's gambit), about a third of its strength for a cruiser. The **wreck of the USS Jenolan** lies on the shell and can be salvaged. |
+| `empire` | **The Galactic Empire** (*Star Wars*, from a galaxy far, far away): **the Death Star** comes out of hyperspace 25,000 units from the **most populous world in the galaxy** (the empires' planet with the most armies, usually a home world) with **three Star Destroyers** (*Devastator*, *Avenger* and *Tyrant*), **Darth Vader** in his TIE Advanced, and three **TIE fighters**. The Death Star flies to within 9,000 units of its target, stops and **charges its superlaser for 30 seconds** (with alerts when it starts and at 10 seconds to go), then **destroys the planet** with a green beam: no armies, no owner, no repair, fuel or farming, and every ship orbiting it (or within 2,000 units) goes with it. After 20 seconds to recharge it sets course for the next most populous world. Its turbolasers fire at any ship within 6,000 units of its hull, but with stormtrooper accuracy: half of them miss. **It shrugs off almost everything (2% damage).** Its one weakness is a **thermal exhaust port at its stern**: a **torpedo from a scout or destroyer in the trench** (within 3,000 units of the hull and within 45° of dead astern) sets off a **chain reaction** and destroys it outright, for 5 kills. Phasers and bigger ships won't do. An alert goes out when a ship gets into the trench ("Stay on target..."). When the Death Star blows up, the rest of the fleet jumps to hyperspace and the incursion is over. The **Star Destroyers** guard it, going after anyone near it (the trench first), and otherwise bomb colonies and **occupy** them with stormtroopers. They turn slowly, **their turbolasers only bear forward**, and they take **double damage from astern**, where their great engines are. They **launch a TIE fighter** every 15 seconds (up to six). **TIE fighters** are fast and have no shields; they swarm whoever comes near the Death Star. **Vader** chases trench runners too, and otherwise the best pilot about; **the Force** makes a quarter of hits on him miss. |
 
 **How aliens behave:**
 
@@ -655,8 +661,9 @@ netrek solo --aliens khan,borg,doomsday --alien-interval 90
   they show as a two-letter tag (`KH`, `BG`, `VG`, `JH`, …) plus a slot.
 - **Rewards:** destroying an alien is worth more than a normal kill. Fleet ships give 1.5
   kills, Khan's ships 2, and the monsters 3 to 5.
-- **Planets:** planets taken by Khan or the Terran Empire are shown in the alien's colour.
-  Planets devoured by the planet killer or destroyed by Species 8472 turn grey.
+- **Planets:** planets taken by Khan, the Terran Empire or the Galactic Empire are shown in
+  the alien's colour. Planets devoured by the planet killer or destroyed by Species 8472 or
+  the Death Star turn grey.
   Planets infested with tribbles are marked `T` (and shown with a dashed ring in vector
   mode). All of
   them can be retaken with armies, and everything is
@@ -664,7 +671,7 @@ netrek solo --aliens khan,borg,doomsday --alien-interval 90
 - **Ending:** an incursion ends when all its ships are destroyed (or V'Ger is joined, the
   probe answered, Q's trial judged, Nomad talked into destroying itself, Armus starved,
   the Metrons' duel decided, first contact made with Species 10-C, peace made with the
-  Horta, the Dyson sphere's hatch destroyed, or the last tribble or nanite cleared), or it withdraws after 4–6 minutes. The Kzinti
+  Horta, the Dyson sphere's hatch destroyed, the Death Star blown up, or the last tribble or nanite cleared), or it withdraws after 4–6 minutes. The Kzinti
   are the exception: they stay until they've lost the whole Ringworld. If an empire loses its last planet to aliens, it
   has been wiped out by alien invaders.
 
@@ -703,6 +710,7 @@ netrek solo --aliens khan,borg,doomsday --alien-interval 90
 | Sphere Builders | teal | `SB` | A great banded sphere |
 | Kzinti | tiger orange | `KZ` | Clawed, tiger-striped warships; their worlds (Kzin and whatever they've conquered) show in orange. The Ringworld is a dark band lit blue on its inner face, with seams between the sections and shadow squares turning inside |
 | Dyson sphere | bronze | `DY` | A vast dark metal ring around a planet, with a hatch (two great doors under an emitter) that glows when open |
+| Galactic Empire | slate blue | `GE` | The Death Star: a vast grey sphere with its superlaser dish facing its target, the equatorial trench, and the exhaust port at its stern. Star Destroyers are long daggers with the bridge tower at the back; TIE fighters are a ball between two hexagonal wings, and Vader's TIE Advanced has bent wings (labelled `Imperial`) |
 
 The status line shows **HUNTED** (vector mode: **PREY**) when the Hirogen are after you,
 **TRIBBLES** (**TRIB**) when you're carrying them, and **NANITES** (**NANO**) when you're
@@ -746,6 +754,10 @@ infected.
 | Kzinti cruiser (Telepath) | 10 | 90 | 110 | torpedo 40, phaser 95, 4 warriors | 2 |
 | Kzinti striker (Flyer) | 12 | 60 | 75 | torpedo 30, phaser 75, 3 warriors | 2 |
 | Dyson sphere hatch | – | 600 | 1,200 | tractor beam 15,000 (no weapons); 6× damage from explosions in the doorway | 5 |
+| Death Star | 3 | – | 3,000 | superlaser (destroys a planet), turbolasers 20; 2% damage, except a torpedo down the exhaust port | 5 |
+| Star Destroyer | 6 | 250 | 350 | turbolaser 45 (forward only), phaser 110; 2× damage from astern | 3 |
+| TIE fighter | 12 | – | 40 | laser 15 | 0.3 |
+| TIE Advanced (Vader) | 12 | 80 | 110 | laser 25; a quarter of hits miss | 2.5 |
 
 The monsters regenerate quickly. The planet killer only takes 40% of normal weapon
 damage, and a Borg cube's resistance builds as it's hit.
@@ -859,6 +871,14 @@ damage, and a Borg cube's resistance builds as it's hit.
   coordinated attack: a ship that's going down anyway should make its last stand in the
   doorway, since its explosion there does 6× damage, and two or three of those will
   finish it.
+- **Galactic Empire:** don't bother shooting the Death Star from a cruiser or battleship:
+  it takes 2%. Fly a **scout or destroyer**, swing wide round its flanks (not across its
+  face, where the turbolasers and TIEs are) and get **right behind it**, then put a torpedo
+  into its stern from within about 3,000 units. Once it stops to charge it sits still and
+  faces its target, so the trench stays put: the 30-second countdown is your window. Use
+  bigger ships to keep the TIE fighters and Vader busy, and attack Star Destroyers **from
+  behind**: they can't fire back there, they turn slowly, and they take double damage.
+  Get every ship out of orbit of the target world before it fires.
 - **Borg:** a cube assimilates a ship it holds in its tractor beam within about 2,600
   units for four seconds. Its tractor is far stronger than any pressor, so don't try to
   push free. Instead stay out of range, and if you're caught, run at full speed: cubes
@@ -1348,7 +1368,7 @@ The tests include:
 
 - **`four_empire_game`:** 16 robots across all four empires. Checks every empire gets
   its share of ships and that the fighting spreads across the galaxy.
-- **`every_incursion_plays_out`:** runs each of the thirty-two alien incursions against a
+- **`every_incursion_plays_out`:** runs each of the thirty-three alien incursions against a
   four-empire robot war and checks it arrives, acts and ends cleanly.
 - **Alien mechanics:** `vger_merge_ends_the_threat`, `crystal_shatters_on_resonance`,
   `whale_probe_drains_and_is_answered`, `bioships_only_fear_plasma`,
@@ -1366,7 +1386,9 @@ The tests include:
   `spheres_plant_anomalies_that_vanish_with_them` and
   `dyson_sphere_swallows_ships_and_the_jenolan_gambit`,
   `kzinti_ringworld_arrives_and_stays`, `ring_sections_are_planets_anyone_can_claim` and
-  `ringworld_departs_when_the_kzinti_lose_it` and `robots_go_into_a_ring_frenzy`.
+  `ringworld_departs_when_the_kzinti_lose_it` and `robots_go_into_a_ring_frenzy`,
+  `death_star_destroys_the_most_populous_world`, `death_star_only_dies_down_its_exhaust_port`,
+  `star_destroyers_are_weak_astern` and `robots_make_trench_runs`.
 - **`retaking_alien_planets`:** liberated and resettled planets lose their alien mark.
 - **Extras:** `galaxy_has_ten_kinds_of_terrain_clear_of_planets` (ten of the 21 kinds in
   every galaxy, all of them turning up over many) and a test for each terrain effect; `treaties_between_players`, `one_ally_at_a_time_and_robots_decide`,

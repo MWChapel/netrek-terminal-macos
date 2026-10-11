@@ -119,6 +119,7 @@ impl Bot {
         let near_ring = |qx: f64, qy: f64| frenzy.map_or(true, |(rx, ry, rr)| dist(qx, qy, rx, ry) < rr + 8000.0);
         let ring_only = |k: usize| frenzy.is_none() || k >= PLANETS.len();
 
+        let small = matches!(p.ship, ShipType::Scout | ShipType::Destroyer);
         // Nearest visible enemy.
         let enemy = world
             .players
@@ -129,6 +130,8 @@ impl Bot {
             // Don't waste fire on Q (or anything else weapons can't hurt), or on a champion only another empire can hurt.
             // (They still close in on V'Ger and the whale probe, which is how those end.)
             .filter(|q| (!q.ship.pointless_target() || matches!(q.ship, ShipType::VgerCloud | ShipType::WhaleProbe)) && q.only_hurt_by.map_or(true, |t| t == team))
+            // Only scouts and destroyers can make a trench run on the Death Star.
+            .filter(|q| q.ship != ShipType::DeathStar || small)
             .filter(|q| near_ring(q.x, q.y) || dist(x, y, q.x, q.y) < 5000.0)
             .map(|q| (q, dist(x, y, q.x, q.y)))
             .min_by(|a, b| a.1.total_cmp(&b.1))
@@ -313,6 +316,31 @@ impl Bot {
         }
 
         match self.goal {
+            Goal::Fight if world.players[enemy.unwrap().0 as usize].ship == ShipType::DeathStar => {
+                // A trench run: get right behind it, then fire down the exhaust port.
+                let ds = &world.players[enemy.unwrap().0 as usize];
+                if super::aliens::in_trench(ds, p) {
+                    cmds.push(ClientMsg::Course(dir_to(x, y, ds.x, ds.y) as u8));
+                    cmds.push(ClientMsg::Speed((s.max_speed / 2) as u8));
+                    if p.wtemp / s.max_wtemp < 0.8 && p.fuel > s.torp_cost * 2.0 && rng.gen_bool(0.6) {
+                        cmds.push(ClientMsg::Torp(dir_to(x, y, ds.x, ds.y) as u8));
+                    }
+                } else {
+                    let (bx, by) = dir_vec(ds.dir + 128.0);
+                    let back = ds.ship.hit_radius() + super::aliens::TRENCH_DEPTH * 0.5;
+                    let (sx, sy) = (ds.x + bx * back, ds.y + by * back);
+                    // Swing wide round the hull rather than through its turbolasers.
+                    let (cx, cy) = (x - ds.x, y - ds.y);
+                    let wide = if dist(x, y, ds.x, ds.y) < back * 1.3 && dir_diff(dir_to(ds.x, ds.y, x, y), ds.dir + 128.0).abs() > 64.0 {
+                        let side = if cx * by - cy * bx > 0.0 { 32.0 } else { -32.0 };
+                        dir_to(ds.x, ds.y, x, y) + side
+                    } else {
+                        dir_to(x, y, sx, sy)
+                    };
+                    cmds.push(ClientMsg::Course(wide.rem_euclid(256.0) as u8));
+                    cmds.push(ClientMsg::Speed(s.max_speed as u8));
+                }
+            }
             Goal::Fight => {
                 let (tid, tx, ty, tdir, tspeed, d) = enemy.unwrap();
                 let (tvx, tvy) = dir_vec(tdir as f64);
