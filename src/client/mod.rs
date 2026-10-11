@@ -23,7 +23,7 @@ use crossterm::{cursor, execute, terminal};
 use std::collections::{HashMap, VecDeque};
 use std::io::{self, BufReader, BufWriter};
 use std::net::TcpStream;
-use std::sync::mpsc::{self, Receiver};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -132,6 +132,27 @@ pub fn sixel_check() -> SixelCheck {
 enum NetEvent {
     Msg(ServerMsg),
     Closed(String),
+}
+
+/// What the reader thread has for the main loop, oldest first. A frame is a
+/// whole snapshot, so only the newest is kept: if the main loop stalls (say
+/// the terminal stops taking output) frames don't pile up behind it.
+#[derive(Default)]
+struct Inbox(Mutex<VecDeque<NetEvent>>);
+
+impl Inbox {
+    fn push(&self, ev: NetEvent) {
+        let is_frame = |e: &NetEvent| matches!(e, NetEvent::Msg(ServerMsg::Frame(_)));
+        let mut q = self.0.lock().unwrap();
+        if is_frame(&ev) {
+            q.retain(|e| !is_frame(e));
+        }
+        q.push_back(ev);
+    }
+
+    fn take(&self) -> VecDeque<NetEvent> {
+        std::mem::take(&mut *self.0.lock().unwrap())
+    }
 }
 
 #[derive(Clone, PartialEq)]
@@ -398,16 +419,13 @@ pub fn run(cfg: ClientConfig) -> io::Result<()> {
         _ => return Err(io::Error::new(io::ErrorKind::Other, "unexpected reply from server")),
     };
 
-    let (tx, rx) = mpsc::channel();
+    let inbox = Arc::new(Inbox::default());
+    let tx = inbox.clone();
     thread::spawn(move || loop {
         match read_msg::<ServerMsg, _>(&mut reader) {
-            Ok(m) => {
-                if tx.send(NetEvent::Msg(m)).is_err() {
-                    break;
-                }
-            }
+            Ok(m) => tx.push(NetEvent::Msg(m)),
             Err(e) => {
-                let _ = tx.send(NetEvent::Closed(e.to_string()));
+                tx.push(NetEvent::Closed(e.to_string()));
                 break;
             }
         }
@@ -461,7 +479,7 @@ pub fn run(cfg: ClientConfig) -> io::Result<()> {
     }
 
     let _guard = TermGuard::enter()?;
-    let result = app.main_loop(rx);
+    let result = app.main_loop(&inbox);
     drop(_guard);
     if let Some(why) = &app.closed {
         eprintln!("Disconnected from server: {}", why);
@@ -498,7 +516,7 @@ impl Drop for TermGuard {
 }
 
 impl App {
-    fn main_loop(&mut self, rx: Receiver<NetEvent>) -> io::Result<()> {
+    fn main_loop(&mut self, inbox: &Inbox) -> io::Result<()> {
         let (w, h) = terminal::size()?;
         let mut screen = Screen::new(w, h);
         self.measure_cells();
@@ -507,18 +525,17 @@ impl App {
         let mut last_draw = Instant::now() - Duration::from_secs(1);
         let mut had_images = false;
         while !self.quit {
-            loop {
-                match rx.try_recv() {
-                    Ok(NetEvent::Msg(m)) => {
+            for ev in inbox.take() {
+                match ev {
+                    NetEvent::Msg(m) => {
                         self.on_server(m);
                         dirty = true;
                     }
-                    Ok(NetEvent::Closed(why)) => {
+                    NetEvent::Closed(why) => {
                         self.closed = Some(why);
                         self.quit = true;
                         break;
                     }
-                    Err(_) => break,
                 }
             }
             if event::poll(Duration::from_millis(10))? {

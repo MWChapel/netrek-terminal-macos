@@ -40,6 +40,10 @@ pub struct ServerConfig {
     pub quiet: bool,
 }
 
+/// A client that takes no data for this long is dropped, so one that stops
+/// reading (or vanishes without closing) doesn't hold its slot for good.
+const WRITE_TIMEOUT: Duration = Duration::from_secs(10);
+
 /// Most observers watching at once.
 pub const MAX_OBSERVERS: usize = 8;
 
@@ -132,6 +136,7 @@ fn serve(listener: TcpListener, cfg: ServerConfig) -> io::Result<()> {
 fn handle_conn(conn: u64, stream: TcpStream, tx: Sender<Event>) {
     let _ = stream.set_nodelay(true);
     let Ok(write_half) = stream.try_clone() else { return };
+    let _ = write_half.set_write_timeout(Some(WRITE_TIMEOUT));
     let mut reader = BufReader::new(stream);
     let _ = reader.get_ref().set_read_timeout(Some(Duration::from_secs(15)));
     let (name, observe) = match read_msg::<ClientMsg, _>(&mut reader) {
@@ -333,18 +338,33 @@ fn game_loop(rx: Receiver<Event>, cfg: ServerConfig) {
 
         // Send each client its view of the world (observers see all of it).
         let names: Vec<String> = watchers.values().map(|w| w.name.clone()).collect();
+        // A connection whose writer has gone is dropped here, slot and all:
+        // its Disconnect event will find nothing left to clean up.
+        let mut lost = Vec::new();
         conns.retain(|_, c| {
             let mut f = world.frame_for(c.slot);
             f.observers = names.clone();
-            send(c, &ServerMsg::Frame(Box::new(f)))
+            let ok = send(c, &ServerMsg::Frame(Box::new(f)));
+            if !ok {
+                lost.push(c.slot);
+            }
+            ok
         });
+        for slot in lost {
+            log(format!("slot {} lost its connection", slot_char(slot)));
+            world.remove_player(slot);
+        }
         watchers.retain(|_, w| {
             if w.follow.map_or(false, |f| !world.players[f as usize].in_use) {
                 w.follow = None;
             }
             let mut f = world.frame_for_observer(w.follow);
             f.observers = names.clone();
-            !matches!(w.out.try_send(Arc::new(encode(&ServerMsg::Frame(Box::new(f))))), Err(TrySendError::Disconnected(_)))
+            let ok = !matches!(w.out.try_send(Arc::new(encode(&ServerMsg::Frame(Box::new(f))))), Err(TrySendError::Disconnected(_)));
+            if !ok {
+                log(format!("{} stopped observing", w.name));
+            }
+            ok
         });
 
         next += tick_len;
