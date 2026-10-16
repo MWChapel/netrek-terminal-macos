@@ -7,6 +7,9 @@ mod palette;
 mod render;
 mod render_terrain;
 mod render_vec;
+mod render_models;
+mod render_view;
+mod render_view_terrain;
 mod shipart;
 mod sixel;
 mod sound;
@@ -52,10 +55,12 @@ pub enum Gfx {
     Braille,
 }
 
-/// Image slots: tactical, galactic, dashboard, comms, players, popup.
-const IMAGE_SLOTS: usize = 6;
+/// Image slots: tactical, galactic, dashboard, comms, players, popup, viewscreen.
+const IMAGE_SLOTS: usize = 7;
 /// The popup is drawn over the other images, so it's always painted last.
 const POPUP_SLOT: usize = 5;
+/// The forward viewscreen, under the player list.
+const VIEW_SLOT: usize = 6;
 
 /// An encoded image waiting to be sent after the text layer.
 struct Image {

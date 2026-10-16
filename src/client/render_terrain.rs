@@ -10,31 +10,31 @@ use crate::proto::{Frame, TerrainInfo, TerrainKind, ZoneInfo, ZoneKind};
 use crossterm::style::Color;
 use std::f32::consts::TAU;
 
-const WHITE: Rgb = [255.0, 255.0, 255.0];
-const NEBULA: Rgb = rgb(0x8a4fd0);
-const STORM: Rgb = rgb(0x4a8cff);
-const ROCK: Rgb = rgb(0x8a8070);
-const ACCRETION: Rgb = rgb(0xff9a40);
-const PULSAR: Rgb = rgb(0x9ae8ff);
-const WORMHOLE: Rgb = rgb(0xc070ff);
-const WRECK: Rgb = rgb(0x9aa0a8);
-const SLIPSTREAM: Rgb = rgb(0x40e0c0);
-const STAR: Rgb = rgb(0xffc040);
-const COMET: Rgb = rgb(0xc8e8ff);
-const TACHYON: Rgb = rgb(0x50d8e8);
-const MINES: Rgb = rgb(0xff4d4d);
-const CHRONITON: Rgb = rgb(0x40e0b0);
-const EDDY: Rgb = rgb(0x7fa8ff);
-const MAGNETAR: Rgb = rgb(0xff50e0);
-const METREON: Rgb = rgb(0xffa040);
-const TETRYON: Rgb = rgb(0xd8ff60);
-const PLANETOID: Rgb = rgb(0x9a9088);
-const BARRIER: Rgb = rgb(0xb070ff);
-const RIFT: Rgb = rgb(0xff90d0);
-const STATION: Rgb = rgb(0xc0c8d8);
+pub(super) const WHITE: Rgb = [255.0, 255.0, 255.0];
+pub(super) const NEBULA: Rgb = rgb(0x8a4fd0);
+pub(super) const STORM: Rgb = rgb(0x4a8cff);
+pub(super) const ROCK: Rgb = rgb(0x8a8070);
+pub(super) const ACCRETION: Rgb = rgb(0xff9a40);
+pub(super) const PULSAR: Rgb = rgb(0x9ae8ff);
+pub(super) const WORMHOLE: Rgb = rgb(0xc070ff);
+pub(super) const WRECK: Rgb = rgb(0x9aa0a8);
+pub(super) const SLIPSTREAM: Rgb = rgb(0x40e0c0);
+pub(super) const STAR: Rgb = rgb(0xffc040);
+pub(super) const COMET: Rgb = rgb(0xc8e8ff);
+pub(super) const TACHYON: Rgb = rgb(0x50d8e8);
+pub(super) const MINES: Rgb = rgb(0xff4d4d);
+pub(super) const CHRONITON: Rgb = rgb(0x40e0b0);
+pub(super) const EDDY: Rgb = rgb(0x7fa8ff);
+pub(super) const MAGNETAR: Rgb = rgb(0xff50e0);
+pub(super) const METREON: Rgb = rgb(0xffa040);
+pub(super) const TETRYON: Rgb = rgb(0xd8ff60);
+pub(super) const PLANETOID: Rgb = rgb(0x9a9088);
+pub(super) const BARRIER: Rgb = rgb(0xb070ff);
+pub(super) const RIFT: Rgb = rgb(0xff90d0);
+pub(super) const STATION: Rgb = rgb(0xc0c8d8);
 
 /// Pulsar cycle length in ticks (matches the server).
-const PULSAR_PERIOD: f32 = 100.0;
+pub(super) const PULSAR_PERIOD: f32 = 100.0;
 
 fn hash(a: i64, b: i64) -> u64 {
     let mut h = (a as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ (b as u64).wrapping_mul(0xC2B2_AE3D_27D4_EB4F);
@@ -44,11 +44,11 @@ fn hash(a: i64, b: i64) -> u64 {
 }
 
 /// A pseudo-random number in 0..1 from a seed and an index.
-fn rnd(seed: u64, k: u64) -> f32 {
+pub(super) fn rnd(seed: u64, k: u64) -> f32 {
     (hash(seed as i64, k as i64) % 10_000) as f32 / 10_000.0
 }
 
-fn seed(t: &TerrainInfo) -> u64 {
+pub(super) fn seed(t: &TerrainInfo) -> u64 {
     hash(t.x as i64 * 7 + t.kind as i64, t.y as i64)
 }
 
@@ -523,14 +523,14 @@ pub fn draw_tempest_braille(b: &mut Braille, f: &Frame, to_dot: &dyn Fn(f64, f64
     }
 }
 
-const SLICK: Rgb = rgb(0x9a80b8);
-const ARENA: Rgb = rgb(0xf4f0ff);
-const BEACON: Rgb = rgb(0x9060ff);
-const DISPLACE: Rgb = rgb(0x80e0ff);
-const DYSON: Rgb = rgb(0xd0a860);
+pub(super) const SLICK: Rgb = rgb(0x9a80b8);
+pub(super) const ARENA: Rgb = rgb(0xf4f0ff);
+pub(super) const BEACON: Rgb = rgb(0x9060ff);
+pub(super) const DISPLACE: Rgb = rgb(0x80e0ff);
+pub(super) const DYSON: Rgb = rgb(0xd0a860);
 
 /// The edge of Armus's slick: a wobbling blob, `n` points round.
-fn slick_edge(z: &ZoneInfo, tick: f32, n: usize) -> Vec<(f64, f64)> {
+pub(super) fn slick_edge(z: &ZoneInfo, tick: f32, n: usize) -> Vec<(f64, f64)> {
     (0..n)
         .map(|k| {
             let a = k as f32 / n as f32 * TAU;
@@ -604,8 +604,8 @@ pub fn draw_zones_vec(px: &mut Canvas, f: &Frame, to: &dyn Fn(f64, f64) -> (f32,
     }
 }
 
-const RING_LIT: Rgb = rgb(0x8fd0ff);
-const RING_DARK: Rgb = rgb(0x26405c);
+pub(super) const RING_LIT: Rgb = rgb(0x8fd0ff);
+pub(super) const RING_DARK: Rgb = rgb(0x26405c);
 
 /// The Ringworld: a band around its planet, lit blue on its inner face, with
 /// seams between its ten sections and the shadow squares circling inside.

@@ -1,7 +1,7 @@
 //! Everything that draws to the screen.
 
 use super::canvas::{Braille, Screen};
-use super::{App, Layout, Mode, Popup, Rect, IMAGE_SLOTS, POPUP_SLOT};
+use super::{App, Layout, Mode, Popup, Rect, IMAGE_SLOTS, POPUP_SLOT, VIEW_SLOT};
 use crate::consts::*;
 use crate::proto::*;
 use crossterm::style::Color;
@@ -447,15 +447,25 @@ impl App {
         }
 
         // Bottom right: warning line, talk line, message log. It runs the
-        // full width under the galaxy map and the player list.
-        let right_end = w;
-        scr.frame(gx, by, right_end - gx, bh, "", Color::White);
-        let rx = gx + 1;
-        let rw = right_end - gx - 2;
+        // full width under the galaxy map and the player list, except in
+        // vector mode, where the viewscreen sits under the galaxy map and
+        // the messages under the player list.
+        let viewscreen = vector && side_col;
+        let comms_x = if viewscreen { maps_right } else { gx };
+        scr.frame(comms_x, by, w - comms_x, bh, "", Color::White);
+        let rx = comms_x + 1;
+        let rw = w - comms_x - 2;
         if vector {
             let img = self.draw_comms_vec((rw as f64 * cw) as i32, ((bh - 2) as f64 * ch) as i32);
             self.images.push(super::Image { x: rx, y: by + 1, slot: 3, data: super::sixel::encode_canvas(&img) });
             scr.masks.push((rx, by + 1, rw, bh - 2));
+            if viewscreen {
+                scr.frame(gx, by, maps_right - gx, bh, "", Color::White);
+                let (vw, vh) = (maps_right - gx - 2, bh - 2);
+                let img = self.draw_viewscreen_vec((vw as f64 * cw) as i32, (vh as f64 * ch) as i32);
+                self.images.push(super::Image { x: gx + 1, y: by + 1, slot: VIEW_SLOT, data: super::sixel::encode_canvas(&img) });
+                scr.masks.push((gx + 1, by + 1, vw, vh));
+            }
             if side_col {
                 scr.frame(maps_right, 0, w - maps_right, sr + 2, "", Color::White);
                 let (lw, lh) = (w - maps_right - 2, sr);
