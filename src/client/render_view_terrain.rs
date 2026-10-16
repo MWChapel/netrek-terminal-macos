@@ -1062,6 +1062,109 @@ pub(super) fn draw_zone_piece(c: &mut Canvas, cam: &Cam, f: &Frame, piece: ZoneP
     }
 }
 
+/// How tall a Tholian web stands above and below the plane: as far as its
+/// strands reach.
+const WEB_HALF: f32 = 300.0;
+/// Webs are cut into stretches this long so they sort among everything else.
+const WEB_STEP: f32 = 1200.0;
+
+/// A stretch of a Tholian web strand, from `a` to `b` (galaxy coordinates).
+#[derive(Clone, Copy)]
+pub(super) struct WebPiece {
+    a: (f32, f32),
+    b: (f32, f32),
+    /// Distance along the strand where this stretch starts.
+    s0: f32,
+}
+
+/// The stretches of Tholian web in view, with their depths.
+pub(super) fn web_pieces(cam: &Cam, f: &Frame) -> Vec<(f32, WebPiece)> {
+    let tan = (cam.cx / cam.focal) * 1.3;
+    let mut out = Vec::new();
+    for w in &f.webs {
+        let (x1, y1, x2, y2) = (w.x1 as f32, w.y1 as f32, w.x2 as f32, w.y2 as f32);
+        let len = ((x2 - x1).powi(2) + (y2 - y1).powi(2)).sqrt();
+        let n = (len / WEB_STEP).ceil().max(1.0) as usize;
+        for k in 0..n {
+            let (t0, t1) = (k as f32 / n as f32, (k + 1) as f32 / n as f32);
+            let a = (x1 + (x2 - x1) * t0, y1 + (y2 - y1) * t0);
+            let b = (x1 + (x2 - x1) * t1, y1 + (y2 - y1) * t1);
+            let (la, za) = cam.local(a.0, a.1);
+            let (lb, zb) = cam.local(b.0, b.1);
+            if za.max(zb) < NEAR || za.min(zb) > RANGE {
+                continue;
+            }
+            if la.abs() > za.max(0.0) * tan + WEB_STEP && lb.abs() > zb.max(0.0) * tan + WEB_STEP && la.signum() == lb.signum() {
+                continue;
+            }
+            out.push((((za + zb) / 2.0).max(NEAR), WebPiece { a, b, s0: len * t0 }));
+        }
+    }
+    out
+}
+
+/// A stretch of Tholian web: a curtain of glowing amber strands strung
+/// across the plane, criss-crossed like a crystal lattice.
+pub(super) fn draw_web_piece(c: &mut Canvas, cam: &Cam, piece: WebPiece, tick: u32) {
+    let (a, b) = (piece.a, piece.b);
+    let z = (cam.local(a.0, a.1).1 + cam.local(b.0, b.1).1) / 2.0;
+    let fade = (1.0 - (z / RANGE - 0.6).max(0.0) / 0.4).clamp(0.0, 1.0);
+    if fade <= 0.0 {
+        return;
+    }
+    let width = |k: f32| (k / z.max(NEAR) * cam.focal).clamp(0.6, 6.0);
+    let (glow, core) = (rgb(0xffa040), rgb(0xffd090));
+    let t = tick as f32;
+    let lo = |p: (f32, f32)| cam.at(p.0, p.1, -WEB_HALF);
+    let hi = |p: (f32, f32)| cam.at(p.0, p.1, WEB_HALF);
+    let mid = |p: (f32, f32)| cam.at(p.0, p.1, 0.0);
+
+    // A faint amber sheet between the strands.
+    if let Some(q) = cam.clip_poly(&[lo(a), lo(b), hi(b), hi(a)]) {
+        c.fill_poly(&q, glow, 0.07 * fade);
+    }
+    let mut strand = |p: V3, q: V3, w: f32, bright: f32| {
+        if let Some((p, q)) = cam.segment3(p, q) {
+            c.line(p.0, p.1, q.0, q.1, width(w * 3.0), glow, 0.22 * bright * fade, 0.0);
+            c.line(p.0, p.1, q.0, q.1, width(w), core, 0.85 * bright * fade, 0.0);
+        }
+    };
+    // The main strand, with a shimmer running along it, and the rails.
+    let shimmer = 0.75 + 0.25 * ((piece.s0 / 900.0) - t * 0.25).sin();
+    strand(mid(a), mid(b), 14.0, shimmer);
+    strand(lo(a), lo(b), 8.0, 0.6);
+    strand(hi(a), hi(b), 8.0, 0.6);
+
+    // The lattice: diagonals zig-zagging between the rails.
+    let len = ((b.0 - a.0).powi(2) + (b.1 - a.1).powi(2)).sqrt();
+    let n = (len / (WEB_HALF * 2.0)).round().max(1.0) as usize;
+    let at = |k: usize| {
+        let s = k as f32 / n as f32;
+        (a.0 + (b.0 - a.0) * s, a.1 + (b.1 - a.1) * s)
+    };
+    for k in 0..n {
+        let (p, q) = (at(k), at(k + 1));
+        strand(lo(p), hi(q), 5.0, 0.45);
+        strand(hi(p), lo(q), 5.0, 0.45);
+        strand(lo(p), hi(p), 4.0, 0.3);
+    }
+    // Glints of light caught at the knots.
+    for k in 0..=n {
+        let s = piece.s0 + len * k as f32 / n as f32;
+        let tw = ((s * 0.013 + t * 0.4).sin() * 0.5 + 0.5).powi(4);
+        if tw < 0.3 {
+            continue;
+        }
+        let p = at(k);
+        let alt = if (s / (WEB_HALF * 2.0)).round() as i64 % 2 == 0 { WEB_HALF } else { -WEB_HALF };
+        let v = cam.at(p.0, p.1, alt);
+        if v[2] > NEAR {
+            let (sx, sy) = cam.screen3(v);
+            c.glow(sx, sy, width(60.0) * 2.0, core, 0.7 * tw * fade);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1168,6 +1271,41 @@ mod tests {
 
     /// Renders the Dyson sphere from outside and inside, and the other
     /// alien zones, into $TMPDIR/netrek-view-zones.ppm.
+    #[test]
+    fn view_web_gallery() {
+        use crate::proto::WebInfo;
+        let tr = TextRenderer::load();
+        let mut f = crate::server::world::World::new().frame_for(0);
+        f.tick = 120;
+        f.terrain.clear();
+        f.planets.clear();
+        let (cx, cy) = (50_000i32, 50_000i32);
+        f.webs = vec![
+            WebInfo { x1: cx - 12_000, y1: cy, x2: cx + 12_000, y2: cy },
+            WebInfo { x1: cx + 12_000, y1: cy, x2: cx, y2: cy - 15_000 },
+            WebInfo { x1: cx, y1: cy - 15_000, x2: cx - 12_000, y2: cy },
+        ];
+        let views: Vec<(i32, i32, u8)> = vec![(cx, cy + 9000, 0), (cx - 3000, cy + 2500, 20), (cx - 20_000, cy + 4000, 64), (cx, cy - 5000, 0)];
+        let (pw, ph) = (480, 220);
+        let mut c = Canvas::new(pw * 2 + 6, (ph + 6) * 2, [30.0, 30.0, 30.0]);
+        for (k, (x, y, dir)) in views.into_iter().enumerate() {
+            f.players = vec![PlayerInfo {
+                id: 0, name: "me".into(), team: Team::Fed, ship: ShipType::Cruiser, state: PState::Alive, x, y, dir, speed: 0,
+                flags: 0, kills: 0.0, armies: 0, tractor_target: None, fuzzy: false, explode_frame: 0, faction: None, rank: None,
+            }];
+            let img = super::super::render_view::viewscreen(&tr, Some(&f), 0, None, 12.0, pw, ph);
+            c.draw_canvas(&img, (k as i32 % 2) * (pw + 6), (k as i32 / 2) * (ph + 6));
+        }
+        let mut out = format!("P6 {} {} 255\n", c.w, c.h).into_bytes();
+        for y in 0..c.h {
+            for x in 0..c.w {
+                let p = c.get(x, y);
+                out.extend([p[0] as u8, p[1] as u8, p[2] as u8]);
+            }
+        }
+        std::fs::write(std::env::temp_dir().join("netrek-view-webs.ppm"), out).unwrap();
+    }
+
     #[test]
     fn view_zone_gallery() {
         use crate::proto::ZoneInfo;

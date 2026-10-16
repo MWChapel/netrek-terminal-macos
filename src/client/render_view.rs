@@ -129,6 +129,7 @@ enum Thing<'a> {
     Terrain(&'a TerrainInfo),
     Ring(super::render_view_terrain::RingPiece),
     Zone(super::render_view_terrain::ZonePiece),
+    Web(super::render_view_terrain::WebPiece),
 }
 
 impl App {
@@ -212,6 +213,7 @@ pub(super) fn viewscreen(tr: &TextRenderer, f: Option<&Frame>, slot: u8, watch: 
     }
     things.extend(super::render_view_terrain::zone_pieces(&cam, f).into_iter().map(|(z, p)| (z, Thing::Zone(p))));
     things.extend(super::render_view_terrain::ring_pieces(&cam, f).into_iter().map(|(z, p)| (z, Thing::Ring(p))));
+    things.extend(super::render_view_terrain::web_pieces(&cam, f).into_iter().map(|(z, p)| (z, Thing::Web(p))));
     things.sort_by(|a, b| b.0.total_cmp(&a.0));
 
     let defs = super::planet_defs(f);
@@ -260,6 +262,7 @@ pub(super) fn viewscreen(tr: &TextRenderer, f: Option<&Frame>, slot: u8, watch: 
             Thing::Zone(piece) => super::render_view_terrain::draw_zone_piece(&mut c, &cam, f, piece, tr, fs),
             Thing::Ring(piece) => super::render_view_terrain::draw_ring_piece(&mut c, &cam, f, piece, tr, fs),
             Thing::Terrain(t) => super::render_view_terrain::draw(&mut c, &cam, t, f.tick, tr, fs),
+            Thing::Web(piece) => super::render_view_terrain::draw_web_piece(&mut c, &cam, piece, f.tick),
             Thing::Torp(t) => {
                 let (sx, sy) = cam.project(cam.local(t.x as f32, t.y as f32));
                 if !on_screen(sx, sy, 20.0) {
