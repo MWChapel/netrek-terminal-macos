@@ -1,9 +1,10 @@
 //! Space terrain (the --terrain option): nebulae, ion storms, asteroid
 //! fields, a black hole, a pulsar, a wormhole, derelicts to salvage,
-//! subspace slipstreams, a star, a comet and a tachyon detection grid.
+//! subspace slipstreams, a star, a comet, a tachyon detection grid, the
+//! Briar Patch, the Badlands, the Nexus, the Guardian of Forever and more.
 //! Generated fresh with each galaxy, clear of the planets.
 
-use super::world::{GameEvent, World};
+use super::world::{Away, GameEvent, Past, Tear, World, TEAR_TTL};
 use crate::consts::*;
 use crate::proto::{TerrainInfo, TerrainKind};
 use rand::seq::SliceRandom;
@@ -29,6 +30,8 @@ pub struct Terrain {
     pub mines: Vec<(f64, f64)>,
     /// The Delphic sphere that made it (it goes when the sphere does).
     pub owner: Option<u8>,
+    /// Neutral Zone: the two empires it lies between.
+    pub sides: Option<(Team, Team)>,
 }
 
 pub const NEBULA_SPEED: i32 = 6;
@@ -55,15 +58,90 @@ pub const COMET_HEAD: f64 = 500.0;
 pub const COMET_TAIL: f64 = 9000.0;
 /// Close enough to see a ship hidden by a nebula or ion storm.
 pub const SENSOR_RANGE: f64 = 3000.0;
+/// The Briar Patch: top speed inside, and hull healed per tick.
+pub const BRIAR_SPEED: i32 = 4;
+pub const BRIAR_HEAL: f64 = 0.3;
+/// The Badlands: ticks between plasma eruptions, how many, their reach
+/// and how hard they hit.
+pub const BADLANDS_PERIOD: i32 = 15;
+pub const ERUPTIONS: usize = 4;
+pub const ERUPTION_REACH: f64 = 1200.0;
+pub const ERUPTION_DAMAGE: f64 = 20.0;
+/// The Nexus ribbon: its length, how close counts as touching, and how
+/// long a ship stays inside.
+pub const NEXUS_LEN: f64 = 16_000.0;
+pub const NEXUS_REACH: f64 = 600.0;
+pub const NEXUS_TICKS: u32 = 20 * UPS as u32;
+/// Tyken's Rift: size, fuel drained and pull per tick, and how close to
+/// the centre a torpedo must go off to collapse it.
+pub const TYKEN_R: f64 = 3500.0;
+pub const TYKEN_DRAIN: f64 = 60.0;
+pub const TYKEN_PULL: f64 = 45.0;
+pub const TYKEN_CORE: f64 = 800.0;
+/// The Genesis Planet: its solid surface, how close a ship must hold to
+/// take on colonists (one every GENESIS_GROW ticks), how long until it
+/// tears itself apart, and the blast.
+pub const GENESIS_R: f64 = 1500.0;
+pub const GENESIS_REACH: f64 = 3500.0;
+pub const GENESIS_GROW: u32 = 30;
+pub const GENESIS_LIFE: i32 = 120 * UPS as i32;
+pub const GENESIS_BLAST: f64 = 6000.0;
+pub const GENESIS_DAMAGE: f64 = 50.0;
+/// Quantum filaments: the field, how many strands, how long, and how close
+/// you can pass.
+pub const FILAMENT_R: f64 = 6000.0;
+pub const FILAMENTS: usize = 7;
+pub const FILAMENT_LEN: f64 = 2500.0;
+pub const FILAMENT_REACH: f64 = 200.0;
+/// The Hekaras Corridor: its width, and the warp above which ships tear
+/// subspace.
+pub const HEKARAS_WIDTH: f64 = 2600.0;
+pub const HEKARAS_SPEED: i32 = 5;
+/// An Omega particle zone: its size when it forms and at most, the core,
+/// and how long a ship must hold there to neutralise it.
+pub const OMEGA_R: f64 = 3000.0;
+pub const OMEGA_MAX: f64 = 9000.0;
+pub const OMEGA_CORE: f64 = 800.0;
+pub const OMEGA_TICKS: i32 = 10 * UPS as i32;
+pub const OMEGA_REWARD: f64 = 2.0;
+/// The Neutral Zone: its width, and what its border outposts do to a ship
+/// that fires inside it (at most every NEUTRAL_EVERY ticks).
+pub const NEUTRAL_WIDTH: f64 = 3000.0;
+pub const NEUTRAL_FIRE: f64 = 15.0;
+pub const NEUTRAL_EVERY: u32 = 3 * UPS as u32;
+/// The Guardian of Forever: its portal, and how far back it sends you
+/// (a snapshot every PAST_EVERY ticks, PAST_LEN of them).
+pub const GUARDIAN_R: f64 = 800.0;
+pub const PAST_EVERY: u32 = 5;
+pub const PAST_LEN: usize = 61;
+/// Theta radiation: how big a patch is, how long it lasts, and how often
+/// it kills an army aboard.
+pub const THETA_R: f64 = 2500.0;
+pub const THETA_TTL: i32 = 90 * UPS as i32;
+pub const THETA_SICKNESS: u32 = 20;
+/// How far a red matter singularity pulls.
+pub const RED_MATTER_R: f64 = 6000.0;
 
 impl Terrain {
     fn new(kind: TerrainKind, name: &str, (x, y): (f64, f64), r: f64) -> Terrain {
-        Terrain { kind, name: name.into(), x, y, r, x2: x, y2: y, vx: 0.0, vy: 0.0, timer: 0, respawn: 0, mines: Vec::new(), owner: None }
+        Terrain { kind, name: name.into(), x, y, r, x2: x, y2: y, vx: 0.0, vy: 0.0, timer: 0, respawn: 0, mines: Vec::new(), owner: None, sides: None }
     }
 
     /// An anomaly planted by a Delphic sphere (alien incursion).
     pub fn planted(kind: TerrainKind, name: &str, at: (f64, f64), r: f64, owner: u8) -> Terrain {
         Terrain { owner: Some(owner), ..Terrain::new(kind, name, at, r) }
+    }
+
+    /// The black hole a planet becomes when the Narada's red matter
+    /// reaches its core.
+    pub fn singularity(name: &str, at: (f64, f64)) -> Terrain {
+        Terrain::new(TerrainKind::BlackHole, name, at, RED_MATTER_R)
+    }
+
+    /// A patch of theta radiation dumped by a Malon freighter: it lingers
+    /// for a while after the freighter has gone.
+    pub fn theta(at: (f64, f64)) -> Terrain {
+        Terrain { timer: THETA_TTL, ..Terrain::new(TerrainKind::ThetaRadiation, "theta radiation", at, THETA_R) }
     }
 
     pub fn visible(&self) -> bool {
@@ -73,6 +151,8 @@ impl Terrain {
     pub fn info(&self) -> TerrainInfo {
         let phase = match self.kind {
             TerrainKind::Pulsar => (PULSAR_PERIOD - self.timer).clamp(0, 255) as u8,
+            TerrainKind::GenesisPlanet => (self.timer as f64 / GENESIS_LIFE as f64 * 255.0).clamp(0.0, 255.0) as u8,
+            TerrainKind::ThetaRadiation => (self.timer as f64 / THETA_TTL as f64 * 255.0).clamp(0.0, 255.0) as u8,
             _ => 0,
         };
         TerrainInfo {
@@ -109,7 +189,7 @@ fn place(world: &World, r: f64, clear: f64) -> Option<(f64, f64)> {
         let (x, y) = (rng.gen_range(margin..GWIDTH - margin), rng.gen_range(margin..GWIDTH - margin));
         let planets_ok = world.planets.iter().all(|pl| dist(x, y, pl.x, pl.y) > r + clear);
         let terrain_ok = world.terrain.iter().all(|t| match t.kind {
-            TerrainKind::Corridor | TerrainKind::Comet | TerrainKind::IonStorm => true,
+            TerrainKind::Corridor | TerrainKind::Comet | TerrainKind::IonStorm | TerrainKind::Nexus | TerrainKind::HekarasCorridor | TerrainKind::NeutralZone => true,
             TerrainKind::Wormhole => dist(x, y, t.x, t.y) > r + t.r + 2000.0 && dist(x, y, t.x2, t.y2) > r + t.r + 2000.0,
             _ => dist(x, y, t.x, t.y) > r + t.r + 1500.0,
         });
@@ -145,7 +225,7 @@ fn update_tail(t: &mut Terrain) {
 /// Kinds of terrain each galaxy gets, drawn at random from all of them.
 pub const ACTIVE_KINDS: usize = 10;
 
-pub const ALL_KINDS: [TerrainKind; 22] = [
+pub const ALL_KINDS: [TerrainKind; 32] = [
     TerrainKind::Nebula,
     TerrainKind::IonStorm,
     TerrainKind::Asteroids,
@@ -168,6 +248,16 @@ pub const ALL_KINDS: [TerrainKind; 22] = [
     TerrainKind::FluidicRift,
     TerrainKind::AbandonedStation,
     TerrainKind::GreatBlackHole,
+    TerrainKind::BriarPatch,
+    TerrainKind::Badlands,
+    TerrainKind::Nexus,
+    TerrainKind::TykensRift,
+    TerrainKind::GenesisPlanet,
+    TerrainKind::QuantumFilaments,
+    TerrainKind::HekarasCorridor,
+    TerrainKind::OmegaZone,
+    TerrainKind::NeutralZone,
+    TerrainKind::GuardianOfForever,
 ];
 
 /// A fresh set of terrain: ten kinds, picked at random, each placed clear
@@ -241,7 +331,7 @@ fn spawn_kind(world: &mut World, kind: TerrainKind) -> usize {
         }
     };
     match kind {
-        TerrainKind::Nebula => many(world, &["Mutara Nebula", "Briar Patch", "Paulson Nebula", "Mar Oscura"], 3, 5000.0..7000.0, 1500.0),
+        TerrainKind::Nebula => many(world, &["Mutara Nebula", "Hourglass Nebula", "Paulson Nebula", "Mar Oscura"], 3, 5000.0..7000.0, 1500.0),
         TerrainKind::Asteroids => many(world, &["Maluria asteroid belt", "Hanoran asteroid field"], 2, 4000.0..5000.0, 1500.0),
         TerrainKind::BlackHole => {
             let t = place(world, 7000.0, 3000.0).map(|p| Terrain::new(kind, "Tarsus singularity", p, 7000.0));
@@ -333,12 +423,70 @@ fn spawn_kind(world: &mut World, kind: TerrainKind) -> usize {
             let t = place(world, GREAT_HOLE_R, -1500.0).map(|p| Terrain::new(kind, "the Black Hole", p, GREAT_HOLE_R));
             add(world, t);
         }
+        TerrainKind::BriarPatch => many(world, &["the Briar Patch"], 1, 6000.0..7000.0, 1500.0),
+        TerrainKind::Badlands => many(world, &["the Badlands"], 1, 6500.0..7500.0, 1500.0),
+        TerrainKind::Nexus => {
+            let (cx, cy) = (rng.gen_range(25_000.0..75_000.0), rng.gen_range(25_000.0..75_000.0));
+            let a = rng.gen_range(0.0..std::f64::consts::TAU);
+            let (ux, uy) = (a.cos(), a.sin());
+            let mut t = Terrain::new(kind, "the Nexus", (cx - ux * NEXUS_LEN / 2.0, cy - uy * NEXUS_LEN / 2.0), NEXUS_REACH);
+            (t.x2, t.y2) = (cx + ux * NEXUS_LEN / 2.0, cy + uy * NEXUS_LEN / 2.0);
+            // It sweeps sideways across the galaxy.
+            (t.vx, t.vy) = (-uy * WARP1, ux * WARP1);
+            world.terrain.push(t);
+        }
+        TerrainKind::TykensRift => many(world, &["Tyken's Rift"], 1, TYKEN_R..TYKEN_R + 1.0, 2000.0),
+        TerrainKind::GenesisPlanet => many(world, &["the Genesis Planet"], 1, GENESIS_R..GENESIS_R + 1.0, GENESIS_REACH + 1000.0),
+        TerrainKind::QuantumFilaments => {
+            if let Some(p) = place(world, FILAMENT_R, 1500.0) {
+                let mut t = Terrain::new(kind, "quantum filaments", p, FILAMENT_R);
+                t.mines = (0..FILAMENTS).flat_map(|_| filament(p.0, p.1, FILAMENT_R)).collect();
+                world.terrain.push(t);
+            }
+        }
+        TerrainKind::HekarasCorridor => {
+            if let Some((a, b)) = segment(20_000.0..28_000.0) {
+                let mut t = Terrain::new(kind, "the Hekaras Corridor", a, HEKARAS_WIDTH / 2.0);
+                (t.x2, t.y2) = b;
+                world.terrain.push(t);
+            }
+        }
+        TerrainKind::OmegaZone => {
+            let t = place(world, OMEGA_MAX * 0.8, -2000.0).map(|p| Terrain::new(kind, "Omega particle zone", p, OMEGA_R));
+            add(world, t);
+        }
+        TerrainKind::NeutralZone => {
+            // Across the border between two neighbouring empires' home worlds.
+            let pairs = [(Team::Fed, Team::Rom), (Team::Rom, Team::Kli), (Team::Kli, Team::Ori), (Team::Ori, Team::Fed)];
+            let (a, b) = *pairs.choose(&mut rng).unwrap();
+            let (pa, pb) = (&world.planets[a.home_planet()], &world.planets[b.home_planet()]);
+            let (mx, my) = ((pa.x + pb.x) / 2.0, (pa.y + pb.y) / 2.0);
+            let d = dist(pa.x, pa.y, pb.x, pb.y).max(1.0);
+            let (ux, uy) = ((pb.y - pa.y) / d, -(pb.x - pa.x) / d);
+            let end = |s: f64| ((mx + ux * s).clamp(3000.0, GWIDTH - 3000.0), (my + uy * s).clamp(3000.0, GWIDTH - 3000.0));
+            let mut t = Terrain::new(kind, &format!("the {}-{} Neutral Zone", a.name(), b.name()), end(-15_000.0), NEUTRAL_WIDTH / 2.0);
+            (t.x2, t.y2) = end(15_000.0);
+            t.sides = Some((a, b));
+            world.terrain.push(t);
+        }
+        TerrainKind::GuardianOfForever => many(world, &["the Guardian of Forever"], 1, GUARDIAN_R..GUARDIAN_R + 1.0, 3000.0),
+        // Only ever dumped by a Malon freighter.
+        TerrainKind::ThetaRadiation => {}
     }
     world.terrain.len() - before
 }
 
+/// One quantum filament somewhere in a field: its two ends.
+fn filament(x: f64, y: f64, r: f64) -> [(f64, f64); 2] {
+    let mut rng = rand::thread_rng();
+    let (cx, cy) = scatter(x, y, r * 0.8, 1)[0];
+    let a = rng.gen_range(0.0..std::f64::consts::TAU);
+    let h = FILAMENT_LEN / 2.0;
+    [(cx - a.cos() * h, cy - a.sin() * h), (cx + a.cos() * h, cy + a.sin() * h)]
+}
+
 /// Somewhere random and open, clear of the planets (fluidic rift exits).
-fn random_open_spot(world: &World) -> (f64, f64) {
+pub fn random_open_spot(world: &World) -> (f64, f64) {
     let mut rng = rand::thread_rng();
     for _ in 0..200 {
         let (x, y) = (rng.gen_range(5000.0..95_000.0), rng.gen_range(5000.0..95_000.0));
@@ -389,6 +537,34 @@ pub fn metreon_ignite(world: &mut World, i: usize) {
     }
 }
 
+/// A shot fired inside the Neutral Zone: its border outposts open fire on
+/// the shooter, and (with --diplomacy) a captain who fires there breaks
+/// the treaty between the two empires it divides.
+pub fn neutral_zone_shot(world: &mut World, i: usize) {
+    let p = &world.players[i];
+    if p.faction.is_some() || p.away.is_some() {
+        return;
+    }
+    let (x, y, team, tick) = (p.x, p.y, p.team, world.tick);
+    let Some(t) = world.terrain.iter().find(|t| t.kind == TerrainKind::NeutralZone && t.visible() && seg_dist(x, y, t.x, t.y, t.x2, t.y2) < t.r) else {
+        return;
+    };
+    let (name, sides) = (t.name.clone(), t.sides);
+    if let Some((a, b)) = sides {
+        if world.features.diplomacy && !world.players[i].robot && (team == a || team == b) && world.allied(a, b) && !world.breaking.iter().any(|&(x, _, _)| x == team) {
+            let who = world.players[i].label();
+            world.god(format!("{} opens fire inside {}! The {} have violated their treaty.", who, name, team.plural()));
+            world.break_treaty(team, None);
+        }
+    }
+    if tick < world.players[i].violated_until {
+        return;
+    }
+    world.players[i].violated_until = tick + NEUTRAL_EVERY;
+    world.warn(i as u8, format!("Weapons fire inside {}! Its border outposts open fire on you", name));
+    world.inflict(i, NEUTRAL_FIRE, None, format!("was destroyed by the outposts of {}", name));
+}
+
 /// A terrain feature, for tests elsewhere.
 #[cfg(test)]
 pub fn tests_make(kind: TerrainKind, x: f64, y: f64, r: f64) -> Terrain {
@@ -406,6 +582,9 @@ pub fn escape(world: &World, x: f64, y: f64) -> Option<f64> {
             TerrainKind::GreatBlackHole => d < t.r * 0.35,
             TerrainKind::Star => d < STAR_CORE + 2500.0,
             TerrainKind::Comet => d < COMET_HEAD + 1500.0,
+            TerrainKind::TykensRift => d < t.r + 1000.0,
+            TerrainKind::GenesisPlanet => t.timer > GENESIS_LIFE - 20 * UPS as i32 && d < GENESIS_BLAST + 1000.0,
+            TerrainKind::OmegaZone | TerrainKind::ThetaRadiation => d < t.r + 500.0,
             _ => false,
         };
         if danger {
@@ -437,6 +616,18 @@ pub fn in_asteroids(world: &World, x: f64, y: f64) -> bool {
     world.terrain.iter().any(|t| t.kind == TerrainKind::Asteroids && dist(x, y, t.x, t.y) < t.r)
 }
 
+/// A Bajoran solar sail rides the tachyon eddies round stars, pulsars and
+/// comets: +5 warp, free.
+pub const SAIL_WARP: f64 = 5.0;
+
+fn sail(p: &mut super::world::Player) {
+    if p.ship == ShipType::SolarSail && p.speed > 0 && p.orbiting.is_none() {
+        let (hx, hy) = dir_vec(p.dir);
+        p.x = (p.x + hx * SAIL_WARP * WARP1).clamp(0.0, GWIDTH);
+        p.y = (p.y + hy * SAIL_WARP * WARP1).clamp(0.0, GWIDTH);
+    }
+}
+
 pub fn tick(world: &mut World) {
     let mut rng = rand::thread_rng();
     let tick = world.tick;
@@ -465,7 +656,33 @@ pub fn tick(world: &mut World) {
             }
             TerrainKind::Pulsar => t.timer = (t.timer + 1) % PULSAR_PERIOD,
             TerrainKind::MetreonCloud if t.timer > 0 => t.timer -= 1,
+            TerrainKind::Nexus => {
+                (t.x, t.y, t.x2, t.y2) = (t.x + t.vx, t.y + t.vy, t.x2 + t.vx, t.y2 + t.vy);
+                let out = |v: f64| !(2000.0..GWIDTH - 2000.0).contains(&v);
+                if out(t.x) || out(t.y) || out(t.x2) || out(t.y2) {
+                    (t.vx, t.vy) = (-t.vx, -t.vy);
+                }
+            }
+            TerrainKind::Badlands => {
+                t.timer = (t.timer + 1) % BADLANDS_PERIOD;
+                if t.timer == 0 {
+                    t.mines = scatter(t.x, t.y, t.r, ERUPTIONS);
+                }
+            }
+            TerrainKind::GenesisPlanet if t.visible() => t.timer += 1,
+            TerrainKind::OmegaZone if t.visible() => t.r = (t.r + 1.0).min(OMEGA_MAX),
+            TerrainKind::ThetaRadiation => t.timer -= 1,
             _ => {}
+        }
+    }
+    world.terrain.retain(|t| t.kind != TerrainKind::ThetaRadiation || t.timer > 0);
+    // The Guardian of Forever remembers where everyone has been.
+    if tick % PAST_EVERY == 0 && world.terrain.iter().any(|t| t.kind == TerrainKind::GuardianOfForever) {
+        for p in world.players.iter_mut().filter(|p| p.alive() && p.faction.is_none() && p.away.is_none()) {
+            p.past.push_back(Past { x: p.x, y: p.y, dir: p.dir, speed: p.speed, fuel: p.fuel, shield: p.shield, damage: p.damage, etemp: p.etemp, wtemp: p.wtemp });
+            while p.past.len() > PAST_LEN {
+                p.past.pop_front();
+            }
         }
     }
     // Salvaged derelicts: another wreck drifts in somewhere else.
@@ -488,6 +705,7 @@ pub fn tick(world: &mut World) {
         p.hidden = false;
         p.in_storm = false;
         p.detected = false;
+        p.no_transport = false;
     }
 
     let mut hurt: Vec<(usize, f64, String)> = Vec::new();
@@ -498,6 +716,11 @@ pub fn tick(world: &mut World) {
     let mut mine_hits: Vec<(usize, usize, usize)> = Vec::new();
     let mut barrier_hits: Vec<usize> = Vec::new();
     let mut rifts: Vec<usize> = Vec::new();
+    let mut nexus: Vec<usize> = Vec::new();
+    let mut filament_hits: Vec<(usize, usize, usize)> = Vec::new();
+    let mut new_tears: Vec<Tear> = Vec::new();
+    let mut omega_holders: Vec<(usize, usize)> = Vec::new();
+    let mut guardian: Vec<usize> = Vec::new();
     let terrain = &world.terrain;
     let players = &mut world.players;
     for (ti, t) in terrain.iter().enumerate() {
@@ -506,7 +729,7 @@ pub fn tick(world: &mut World) {
         }
         for j in 0..MAXPLAYER {
             let p = &mut players[j];
-            if !p.alive() {
+            if !p.alive() || p.away.is_some() {
                 continue;
             }
             let d = dist(p.x, p.y, t.x, t.y);
@@ -578,6 +801,9 @@ pub fn tick(world: &mut World) {
                     }
                 }
                 TerrainKind::Pulsar => {
+                    if d < t.r {
+                        sail(p);
+                    }
                     if t.timer == 0 && d < t.r {
                         hurt.push((j, 10.0 + 45.0 * (1.0 - d / t.r), format!("was irradiated by the {}", t.name)));
                     } else if t.timer == PULSAR_PERIOD - 20 && d < t.r + 2000.0 {
@@ -609,8 +835,10 @@ pub fn tick(world: &mut World) {
                 TerrainKind::Derelict if d < SALVAGE_REACH => {
                     near_wreck[j] = true;
                     if p.speed <= 2 {
-                        p.salvage += 1;
-                        if p.salvage == 1 {
+                        // The Baxial's crew are born scroungers.
+                        let first = p.salvage == 0;
+                        p.salvage += if p.ship == ShipType::Baxial { 3 } else { 1 };
+                        if first {
                             warns.push((id, format!("Salvaging the {}: hold position for 5 seconds", t.name)));
                         }
                         if p.salvage >= SALVAGE_TICKS {
@@ -632,6 +860,7 @@ pub fn tick(world: &mut World) {
                     }
                 }
                 TerrainKind::Star if d < t.r => {
+                    sail(p);
                     if d < STAR_CORE {
                         hurt.push((j, 6.0, format!("burned up in {}", t.name)));
                     }
@@ -646,6 +875,7 @@ pub fn tick(world: &mut World) {
                         hurt.push((j, 4.0, "was struck by a comet".into()));
                     } else if seg_dist(p.x, p.y, t.x, t.y, t.x2, t.y2) < 1200.0 {
                         p.fuel = (p.fuel + 8.0 * s.recharge).min(s.max_fuel);
+                        sail(p);
                     }
                 }
                 TerrainKind::Minefield if d < t.r + MINE_REACH => {
@@ -701,6 +931,84 @@ pub fn tick(world: &mut World) {
                     p.shield = (p.shield + s.repair * 2.0 / 1000.0).min(s.max_shield);
                     p.fuel = (p.fuel + 6.0 * s.recharge).min(s.max_fuel);
                 }
+                TerrainKind::BriarPatch if d < t.r => {
+                    p.hidden = true;
+                    p.no_transport = true;
+                    p.desired_speed = p.desired_speed.min(BRIAR_SPEED);
+                    // Metaphasic radiation: the hull knits itself back together.
+                    p.damage = (p.damage - BRIAR_HEAL).max(0.0);
+                }
+                TerrainKind::Badlands if d < t.r => {
+                    p.hidden = true;
+                    if t.timer == 0 && t.mines.iter().any(|&(ex, ey)| dist(p.x, p.y, ex, ey) < ERUPTION_REACH) {
+                        hurt.push((j, ERUPTION_DAMAGE, format!("was caught in a plasma storm in {}", t.name)));
+                    }
+                }
+                TerrainKind::Nexus if tick >= p.wormhole_until && seg_dist(p.x, p.y, t.x, t.y, t.x2, t.y2) < NEXUS_REACH => nexus.push(j),
+                TerrainKind::TykensRift if d < t.r => {
+                    p.fuel = (p.fuel - TYKEN_DRAIN).max(0.0);
+                    if p.orbiting.is_none() && d > 1.0 {
+                        p.x += (t.x - p.x) / d * TYKEN_PULL.min(d);
+                        p.y += (t.y - p.y) / d * TYKEN_PULL.min(d);
+                    }
+                    if (tick + j as u32) % 30 == 0 {
+                        warns.push((id, format!("{} is draining your power! Detonate a torpedo at its centre to collapse it", t.name)));
+                    }
+                }
+                TerrainKind::GenesisPlanet if d < GENESIS_REACH => {
+                    if d < t.r && d > 1.0 {
+                        // Protomatter rock: solid.
+                        p.x = t.x + (p.x - t.x) / d * t.r;
+                        p.y = t.y + (p.y - t.y) / d * t.r;
+                        p.leave_orbit_pub();
+                    }
+                    if p.speed <= 2 && (tick + j as u32) % GENESIS_GROW == 0 && p.armies < s.max_armies {
+                        p.armies += 1;
+                        warns.push((id, format!("Colonists from {} beam aboard (+1 army)", t.name)));
+                    }
+                    let left = GENESIS_LIFE - t.timer;
+                    if left == 15 * UPS as i32 || left == 5 * UPS as i32 {
+                        warns.push((id, format!("{} is breaking up! It blows in {} seconds", t.name, left / UPS as i32)));
+                    }
+                }
+                TerrainKind::QuantumFilaments if d < t.r + FILAMENT_LEN => {
+                    if let Some(k) = (0..t.mines.len() / 2).find(|&k| {
+                        let (a, b) = (t.mines[2 * k], t.mines[2 * k + 1]);
+                        seg_dist(p.x, p.y, a.0, a.1, b.0, b.1) < FILAMENT_REACH
+                    }) {
+                        if !filament_hits.iter().any(|h| h.0 == ti && h.1 == k) {
+                            filament_hits.push((ti, k, j));
+                        }
+                    }
+                }
+                TerrainKind::HekarasCorridor if p.speed > HEKARAS_SPEED && p.orbiting.is_none() => {
+                    if seg_dist(p.x, p.y, t.x, t.y, t.x2, t.y2) < t.r {
+                        if (tick + j as u32) % 8 == 0 {
+                            let (hx, hy) = dir_vec(p.dir);
+                            new_tears.push(Tear { x: p.x - hx * 900.0, y: p.y - hy * 900.0, ttl: TEAR_TTL, owner: None, team: Team::Ind });
+                        }
+                        if (tick + j as u32) % 40 == 0 {
+                            warns.push((id, format!("Above warp {} in {} your warp field is tearing subspace!", HEKARAS_SPEED, t.name)));
+                        }
+                    }
+                }
+                TerrainKind::OmegaZone if d < t.r => {
+                    // Subspace itself is gone: no warp, no transwarp.
+                    p.desired_speed = p.desired_speed.min(2);
+                    p.jump_at = None;
+                    if d < OMEGA_CORE && p.speed <= 2 {
+                        omega_holders.push((ti, j));
+                    }
+                }
+                TerrainKind::NeutralZone if p.cloaked && seg_dist(p.x, p.y, t.x, t.y, t.x2, t.y2) < t.r => p.detected = true,
+                TerrainKind::GuardianOfForever if d < t.r && tick >= p.wormhole_until => guardian.push(j),
+                TerrainKind::ThetaRadiation if d < t.r => {
+                    if (tick + j as u32) % THETA_SICKNESS == 0 && p.armies > 0 {
+                        p.armies -= 1;
+                        warns.push((id, "Theta radiation sickness: one of the armies aboard has died".into()));
+                    }
+                    hurt.push((j, 0.3, "was poisoned by theta radiation".into()));
+                }
                 _ => {}
             }
         }
@@ -730,6 +1038,7 @@ pub fn tick(world: &mut World) {
                 }
                 TerrainKind::Magnetar if d < f.r => t.dir = (t.dir + 1.5).rem_euclid(256.0),
                 TerrainKind::Planetoid if d < f.r => t.fuse = 0,
+                TerrainKind::GenesisPlanet if d < f.r => t.fuse = 0,
                 TerrainKind::GalacticBarrier if seg_dist(t.x, t.y, f.x, f.y, f.x2, f.y2) < BARRIER_REACH => t.fuse = 0,
                 TerrainKind::GreatBlackHole if d < f.r => {
                     if d < GREAT_HORIZON {
@@ -750,6 +1059,16 @@ pub fn tick(world: &mut World) {
                     }
                 }
                 _ => {}
+            }
+        }
+    }
+
+    // A torpedo going off at the heart of Tyken's Rift collapses it.
+    let mut collapsed: Vec<(usize, u8)> = Vec::new();
+    for t in world.torps.iter().filter(|t| t.explode == 1 && t.damage > 0.0) {
+        for (k, f) in world.terrain.iter().enumerate() {
+            if f.kind == TerrainKind::TykensRift && f.visible() && dist(t.x, t.y, f.x, f.y) < TYKEN_CORE && !collapsed.iter().any(|c| c.0 == k) {
+                collapsed.push((k, t.owner));
             }
         }
     }
@@ -784,6 +1103,107 @@ pub fn tick(world: &mut World) {
         world.warn(j as u8, "Crossing the galactic barrier: power drained, hull damaged");
         world.hit_kind = super::world::HitKind::Polaron;
         world.inflict(j, 25.0, None, "was torn apart crossing the galactic barrier".into());
+    }
+    for (k, owner) in collapsed {
+        world.terrain[k].respawn = 90 * UPS as i32;
+        let who = world.players.get(owner as usize).filter(|p| p.in_use).map_or("A torpedo".to_string(), |p| p.label());
+        let name = world.terrain[k].name.clone();
+        world.god(format!("{} detonates a torpedo at the heart of {} and it collapses!", who, name));
+    }
+    for j in nexus {
+        world.send_away(j, Away::Nexus, NEXUS_TICKS);
+        let who = world.players[j].label();
+        world.warn(j as u8, "You are swept into the Nexus... time has no meaning here. (20 s)");
+        world.god(format!("{} is swept into the Nexus", who));
+    }
+    for (ti, k, j) in filament_hits {
+        let (tx, ty, r) = (world.terrain[ti].x, world.terrain[ti].y, world.terrain[ti].r);
+        let [a, b] = filament(tx, ty, r);
+        (world.terrain[ti].mines[2 * k], world.terrain[ti].mines[2 * k + 1]) = (a, b);
+        let (px, py) = (world.players[j].x, world.players[j].y);
+        flash(world, px, py, j as u8);
+        if world.features.subsystems {
+            let sy = System::ALL[rng.gen_range(0..System::ALL.len())];
+            world.warn(j as u8, format!("A quantum filament slices through the hull: {} knocked out!", sy.name().to_lowercase()));
+            world.damage_system(j, sy, 100.0);
+        } else {
+            world.players[j].shields_up = false;
+            world.warn(j as u8, "A quantum filament slices through the hull! Shields down");
+            world.inflict(j, 20.0, None, "was cut apart by a quantum filament".into());
+        }
+    }
+    world.tears.extend(new_tears);
+    // The Badlands' plasma eruptions (to look at; the damage is done above).
+    let eruptions: Vec<(f64, f64)> = world
+        .terrain
+        .iter()
+        .filter(|t| t.kind == TerrainKind::Badlands && t.visible() && t.timer == 0)
+        .filter(|t| world.players.iter().any(|p| p.alive() && p.faction.is_none() && dist(p.x, p.y, t.x, t.y) < t.r + 15_000.0))
+        .flat_map(|t| t.mines.clone())
+        .collect();
+    for (x, y) in eruptions {
+        flash(world, x, y, 0);
+    }
+    // The Genesis Planet tears itself apart.
+    for k in 0..world.terrain.len() {
+        let t = &world.terrain[k];
+        if t.kind != TerrainKind::GenesisPlanet || !t.visible() || t.timer < GENESIS_LIFE {
+            continue;
+        }
+        let (x, y, name) = (t.x, t.y, t.name.clone());
+        world.terrain[k].timer = 0;
+        world.terrain[k].respawn = 60 * UPS as i32;
+        for (fx, fy) in scatter(x, y, GENESIS_R * 2.0, 6) {
+            flash(world, fx, fy, 0);
+        }
+        world.god(format!("The protomatter at its heart gives way, and {} tears itself apart!", name));
+        let caught: Vec<(usize, f64)> = (0..MAXPLAYER)
+            .filter(|&j| world.players[j].alive() && world.players[j].faction.is_none() && world.players[j].away.is_none())
+            .map(|j| (j, dist(world.players[j].x, world.players[j].y, x, y)))
+            .filter(|&(_, d)| d < GENESIS_BLAST)
+            .collect();
+        for (j, d) in caught {
+            if !world.players[j].techs.contains(&Tech::MetaphasicShields) {
+                world.inflict(j, GENESIS_DAMAGE * (1.0 - 0.6 * d / GENESIS_BLAST), None, format!("was caught in the death of {}", name));
+            }
+        }
+    }
+    // Omega: neutralised by a ship holding at its core, or it grows.
+    for k in 0..world.terrain.len() {
+        if world.terrain[k].kind != TerrainKind::OmegaZone || !world.terrain[k].visible() {
+            continue;
+        }
+        let Some(&(_, j)) = omega_holders.iter().find(|h| h.0 == k) else {
+            world.terrain[k].timer = 0;
+            continue;
+        };
+        world.terrain[k].timer += 1;
+        if world.terrain[k].timer == 1 {
+            world.warn(j as u8, "Holding at the Omega molecule: keep still for 10 seconds to break it down");
+        }
+        if world.terrain[k].timer >= OMEGA_TICKS {
+            let t = &mut world.terrain[k];
+            (t.timer, t.respawn, t.r) = (0, 120 * UPS as i32, OMEGA_R);
+            let p = &mut world.players[j];
+            p.kills += OMEGA_REWARD;
+            p.total_kills += OMEGA_REWARD;
+            let who = p.label();
+            world.events.push(GameEvent::Honour { player: j as u8, text: "Neutralised an Omega molecule".into() });
+            world.god(format!("{} neutralises the Omega molecule! Subspace begins to heal (+{} kills)", who, OMEGA_REWARD));
+        }
+    }
+    // The Guardian of Forever: back to where you were.
+    for j in guardian {
+        let Some(&then) = world.players[j].past.front() else { continue };
+        let secs = world.players[j].past.len() as u32 * PAST_EVERY / UPS as u32;
+        world.players[j].leave_orbit_pub();
+        let p = &mut world.players[j];
+        (p.x, p.y, p.dir, p.desired_dir, p.speed, p.desired_speed) = (then.x, then.y, then.dir, then.dir, then.speed, then.speed);
+        (p.fuel, p.shield, p.damage, p.etemp, p.wtemp) = (then.fuel, then.shield, then.damage, then.etemp, then.wtemp);
+        (p.lock, p.tractor) = (super::world::Lock::None, None);
+        p.past.clear();
+        p.wormhole_until = tick + 10 * UPS as u32;
+        world.warn(j as u8, format!("\"A question. Since before your sun burned hot in space...\" The Guardian of Forever sends you back {} seconds", secs));
     }
     for j in rifts {
         let (x, y) = random_open_spot(world);
@@ -1115,6 +1535,208 @@ mod tests {
         put(&mut w, TerrainKind::FluidicRift, 50_000.0, 50_000.0, 700.0);
         tick(&mut w);
         assert!(dist(w.players[k].x, w.players[k].y, 50_000.0, 50_000.0) > 1000.0);
+    }
+
+    #[test]
+    fn briar_patch_hides_slows_heals_and_jams_transporters() {
+        let mut w = World::with_features(Features { terrain: true, boarding: true, ..Features::default() });
+        let id = w.add_player("Kirk", false).unwrap();
+        w.join(id, Team::Fed, ShipType::Cruiser).unwrap();
+        let k = id as usize;
+        (w.players[k].x, w.players[k].y) = (50_000.0, 50_000.0);
+        w.terrain.clear();
+        put(&mut w, TerrainKind::BriarPatch, 50_000.0, 50_000.0, 6500.0);
+        (w.players[k].desired_speed, w.players[k].damage, w.players[k].armies) = (9, 40.0, 4);
+        tick(&mut w);
+        let p = &w.players[k];
+        assert!(p.hidden && p.no_transport && p.desired_speed == BRIAR_SPEED && p.damage < 40.0);
+        let r = w.add_player("Tal", false).unwrap();
+        w.join(r, Team::Rom, ShipType::Cruiser).unwrap();
+        (w.players[r as usize].x, w.players[r as usize].y, w.players[r as usize].shields_up) = (50_500.0, 50_000.0, false);
+        w.handle(id, ClientMsg::Board(r));
+        assert!(w.boardings.is_empty(), "transporters jammed");
+    }
+
+    #[test]
+    fn badlands_erupt() {
+        let (mut w, k) = setup(50_000.0, 50_000.0);
+        let t = put(&mut w, TerrainKind::Badlands, 50_000.0, 50_000.0, 7000.0);
+        w.players[k].shields_up = false;
+        w.terrain[t].timer = BADLANDS_PERIOD - 1;
+        // Make sure an eruption lands on us.
+        let mut hurt = false;
+        for _ in 0..40 {
+            w.terrain[t].timer = BADLANDS_PERIOD - 1;
+            tick(&mut w);
+            assert!(w.players[k].hidden);
+            if w.terrain[t].mines.iter().any(|&(ex, ey)| dist(ex, ey, 50_000.0, 50_000.0) < ERUPTION_REACH) {
+                hurt = true;
+                break;
+            }
+        }
+        if hurt {
+            assert!(w.players[k].damage >= ERUPTION_DAMAGE);
+        }
+        assert!(w.torps.iter().any(|t| t.explode > 0), "eruptions flash");
+    }
+
+    #[test]
+    fn nexus_takes_ships_away_and_sends_them_back_whole() {
+        let (mut w, k) = setup(50_000.0, 50_000.0);
+        let t = put(&mut w, TerrainKind::Nexus, 40_000.0, 50_000.0, NEXUS_REACH);
+        (w.terrain[t].x2, w.terrain[t].y2) = (60_000.0, 50_000.0);
+        w.players[k].damage = 60.0;
+        tick(&mut w);
+        assert!(w.players[k].away.is_some() && !w.players[k].alive(), "swept in");
+        let r = w.add_player("Tal", false).unwrap();
+        w.join(r, Team::Rom, ShipType::Cruiser).unwrap();
+        assert!(!w.frame_for(r).players.iter().any(|p| p.id == k as u8), "gone from sight");
+        assert!(w.frame_for(k as u8).players.iter().any(|p| p.id == k as u8), "but it can see itself");
+        w.inflict(k, 500.0, None, "test".into());
+        assert_eq!(w.players[k].state, PState::Alive, "untouchable in there");
+        w.terrain.clear();
+        for _ in 0..NEXUS_TICKS + 2 {
+            w.tick();
+        }
+        assert!(w.players[k].alive());
+        assert_eq!(w.players[k].damage, 0.0, "made whole");
+    }
+
+    #[test]
+    fn tykens_rift_drains_and_collapses() {
+        let (mut w, k) = setup(51_000.0, 50_000.0);
+        let t = put(&mut w, TerrainKind::TykensRift, 50_000.0, 50_000.0, TYKEN_R);
+        let fuel = w.players[k].fuel;
+        tick(&mut w);
+        assert!(w.players[k].fuel <= fuel - TYKEN_DRAIN && w.players[k].x < 51_000.0);
+        // A torpedo detonated at the centre collapses it.
+        w.players[k].x = 50_000.0 + TYKEN_CORE * 0.5;
+        w.handle(k as u8, ClientMsg::Torp(0));
+        w.handle(k as u8, ClientMsg::DetOwn);
+        for _ in 0..3 {
+            w.tick();
+        }
+        assert!(!w.terrain[t].visible(), "collapsed");
+    }
+
+    #[test]
+    fn genesis_planet_gives_armies_then_blows() {
+        let (mut w, k) = setup(52_500.0, 50_000.0);
+        let t = put(&mut w, TerrainKind::GenesisPlanet, 50_000.0, 50_000.0, GENESIS_R);
+        (w.players[k].speed, w.players[k].armies, w.players[k].shields_up) = (0, 0, false);
+        for _ in 0..GENESIS_GROW * 3 {
+            tick(&mut w);
+        }
+        assert!(w.players[k].armies >= 2, "colonists aboard: {}", w.players[k].armies);
+        assert!(w.terrain[t].info().phase > 0);
+        w.terrain[t].timer = GENESIS_LIFE - 1;
+        tick(&mut w);
+        assert!(w.players[k].damage > 20.0, "caught in the blast");
+        assert!(!w.terrain[t].visible());
+    }
+
+    #[test]
+    fn quantum_filaments_knock_out_systems() {
+        let mut w = World::with_features(Features { terrain: true, subsystems: true, ..Features::default() });
+        let id = w.add_player("Kirk", false).unwrap();
+        w.join(id, Team::Fed, ShipType::Cruiser).unwrap();
+        let k = id as usize;
+        w.terrain.clear();
+        (w.players[k].x, w.players[k].y) = (50_000.0, 50_000.0);
+        let t = put(&mut w, TerrainKind::QuantumFilaments, 50_000.0, 50_000.0, FILAMENT_R);
+        w.terrain[t].mines = vec![(49_000.0, 50_000.0), (51_000.0, 50_000.0)];
+        tick(&mut w);
+        assert!(w.players[k].systems.iter().any(|&h| h == 0.0), "a system is out");
+        assert_ne!(w.terrain[t].mines[0], (49_000.0, 50_000.0), "the strand moves on");
+    }
+
+    #[test]
+    fn hekaras_corridor_tears_subspace_above_warp_five() {
+        let (mut w, k) = setup(50_000.0, 50_000.0);
+        let t = put(&mut w, TerrainKind::HekarasCorridor, 30_000.0, 50_000.0, HEKARAS_WIDTH / 2.0);
+        (w.terrain[t].x2, w.terrain[t].y2) = (70_000.0, 50_000.0);
+        w.players[k].speed = 5;
+        for _ in 0..16 {
+            tick(&mut w);
+        }
+        assert!(w.tears.is_empty(), "warp 5 is safe");
+        w.players[k].speed = 8;
+        for _ in 0..16 {
+            tick(&mut w);
+        }
+        assert!(!w.tears.is_empty());
+        assert!(w.tears.iter().all(|t| t.owner.is_none()));
+    }
+
+    #[test]
+    fn omega_zone_kills_warp_and_can_be_neutralised() {
+        let (mut w, k) = setup(50_000.0, 50_000.0);
+        let t = put(&mut w, TerrainKind::OmegaZone, 50_000.0, 50_000.0, OMEGA_R);
+        w.players[k].desired_speed = 9;
+        w.players[k].jump_at = Some(999);
+        tick(&mut w);
+        assert!(w.players[k].desired_speed <= 2 && w.players[k].jump_at.is_none());
+        assert!(w.terrain[t].r > OMEGA_R, "it grows");
+        let kills = w.players[k].kills;
+        w.players[k].speed = 0;
+        for _ in 0..OMEGA_TICKS {
+            tick(&mut w);
+        }
+        assert!(!w.terrain[t].visible(), "neutralised");
+        assert_eq!(w.players[k].kills, kills + OMEGA_REWARD);
+    }
+
+    #[test]
+    fn neutral_zone_shows_cloaks_and_punishes_fire() {
+        let mut w = World::with_features(Features { terrain: true, diplomacy: true, ..Features::default() });
+        w.terrain.clear();
+        let id = w.add_player("Kirk", false).unwrap();
+        w.join(id, Team::Fed, ShipType::Cruiser).unwrap();
+        let k = id as usize;
+        (w.players[k].x, w.players[k].y) = (50_000.0, 50_000.0);
+        let t = put(&mut w, TerrainKind::NeutralZone, 50_000.0, 30_000.0, NEUTRAL_WIDTH / 2.0);
+        (w.terrain[t].x2, w.terrain[t].y2, w.terrain[t].sides) = (50_000.0, 70_000.0, Some((Team::Fed, Team::Rom)));
+        w.players[k].cloaked = true;
+        tick(&mut w);
+        assert!(w.players[k].detected, "cloaks show in the zone");
+        w.players[k].cloaked = false;
+        w.treaties.push((Team::Fed, Team::Rom));
+        w.players[k].shields_up = false;
+        w.handle(id, ClientMsg::Phaser(0));
+        assert!(w.players[k].damage >= NEUTRAL_FIRE, "the outposts open fire");
+        assert!(w.breaking.iter().any(|&(a, b, _)| a == Team::Fed && b == Team::Rom), "the treaty is broken");
+    }
+
+    #[test]
+    fn guardian_of_forever_sends_you_back() {
+        let (mut w, k) = setup(20_000.0, 20_000.0);
+        put(&mut w, TerrainKind::GuardianOfForever, 50_000.0, 50_000.0, GUARDIAN_R);
+        w.players[k].fuel = 3000.0;
+        for _ in 0..PAST_EVERY * 4 {
+            w.tick += 1;
+            tick(&mut w);
+        }
+        assert!(w.players[k].past.len() >= 4);
+        (w.players[k].x, w.players[k].y, w.players[k].fuel, w.players[k].damage) = (50_000.0, 50_000.0, 100.0, 70.0);
+        tick(&mut w);
+        let p = &w.players[k];
+        assert!(dist(p.x, p.y, 20_000.0, 20_000.0) < 100.0, "back where it was");
+        assert!(p.fuel > 2000.0 && p.damage == 0.0, "and how it was");
+    }
+
+    #[test]
+    fn theta_radiation_sickens_armies_and_fades() {
+        let (mut w, k) = setup(50_000.0, 50_000.0);
+        w.terrain.push(Terrain::theta((50_000.0, 50_000.0)));
+        w.players[k].armies = 3;
+        for _ in 0..THETA_SICKNESS * 2 {
+            w.tick += 1;
+            tick(&mut w);
+        }
+        assert!(w.players[k].armies < 3);
+        w.terrain[0].timer = 1;
+        tick(&mut w);
+        assert!(w.terrain.is_empty(), "it fades away");
     }
 
     #[test]

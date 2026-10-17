@@ -61,6 +61,11 @@ fn line(a: (f32, f32), b: (f32, f32)) -> Part {
     Line { a, b }
 }
 
+/// A rod from `a` to `b` (a tendril).
+fn sym_line(a: (f32, f32), b: (f32, f32)) -> Part {
+    capsule(a, b, 0.08)
+}
+
 pub fn ship_parts(team: Team, ship: ShipType, faction: Option<Faction>) -> Vec<Part> {
     if let Some(f) = faction {
         return alien(f, ship);
@@ -387,6 +392,97 @@ fn special_or_relic(ship: ShipType) -> Option<Vec<Part>> {
         ShipType::CygnusRelic => return Some(cygnus()),
         ShipType::Eagle => return Some(eagle()),
         ShipType::WarRocketAjax => return Some(ming_rocket(true)),
+        ShipType::PromellianCruiser => {
+            // Promellian: a long, tapering hull flaring at the stern, the
+            // bridge dome well forward, ribbed along its length.
+            v.push(sym(&[(0.0, -1.0), (0.18, -0.85), (0.24, -0.3), (0.42, 0.5), (0.58, 0.95), (0.2, 0.82), (0.0, 0.9)]));
+            v.push(Circle { c: (0.0, -0.62), r: 0.12, fill: false });
+            for k in 0..4 {
+                let y = -0.25 + k as f32 * 0.28;
+                let w = 0.2 + k as f32 * 0.07;
+                v.push(line((-w, y), (w, y)));
+            }
+        }
+        ShipType::Gomtuu => {
+            // Gomtuu: a lumpy, living pod trailing tendrils.
+            v.push(Poly {
+                pts: (0..18)
+                    .map(|k| {
+                        let a = k as f32 / 18.0 * TAU;
+                        let r = 0.62 + 0.12 * (a * 3.0).sin() + 0.06 * (a * 7.0).cos();
+                        (a.cos() * r * 0.85, -0.15 + a.sin() * r)
+                    })
+                    .collect(),
+                fill: true,
+            });
+            for k in 0..3 {
+                let x = (k as f32 - 1.0) * 0.3;
+                v.push(line((x, 0.45), (x * 1.6, 0.75)));
+                v.push(line((x * 1.6, 0.75), (x * 1.2, 1.0)));
+            }
+            v.push(Circle { c: (0.0, -0.2), r: 0.22, fill: false });
+        }
+        ShipType::SolarSail => {
+            // A Bajoran lightship: a slim hull under a fan of three sails.
+            v.push(capsule((0.0, -0.15), (0.0, 0.92), 0.2));
+            v.push(Poly { pts: vec![(-0.28, -1.0), (0.28, -1.0), (0.16, -0.3), (-0.16, -0.3)], fill: false });
+            v.extend(pair(|s| Poly { pts: vec![(s * 0.34, -0.92), (s * 0.95, -0.55), (s * 0.6, 0.0), (s * 0.2, -0.28)], fill: false }));
+            v.extend(pair(|s| line((s * 0.08, 0.0), (s * 0.6, 0.0))));
+            v.extend(pair(|s| line((s * 0.08, 0.0), (s * 0.16, -0.3))));
+        }
+        ShipType::SikarianShip => {
+            // Sikarian: a swept blade, the trajector's emitter amidships.
+            v.push(sym(&[(0.0, -1.0), (0.2, -0.4), (0.75, 0.3), (0.62, 0.55), (0.2, 0.42), (0.15, 0.95), (0.0, 0.85)]));
+            v.push(Circle { c: (0.0, 0.05), r: 0.14, fill: false });
+            v.push(Circle { c: (0.0, 0.05), r: 0.06, fill: true });
+        }
+        ShipType::Dauntless => {
+            // The Dauntless: a sleek arrowhead with a long spine, built for the slipstream.
+            v.push(sym(&[(0.0, -1.0), (0.12, -0.6), (0.55, 0.55), (0.5, 0.9), (0.2, 0.7), (0.0, 0.9)]));
+            v.push(line((0.0, -0.85), (0.0, 0.8)));
+            v.extend(pair(|s| capsule((s * 0.3, 0.2), (s * 0.4, 0.8), 0.1)));
+        }
+        ShipType::SonaBattleship => {
+            // Son'a: an angular, segmented hull with a pair of forward prongs.
+            v.push(sym(&[(0.0, -0.55), (0.22, -1.0), (0.38, -0.95), (0.34, -0.3), (0.72, 0.4), (0.56, 0.95), (0.16, 0.7), (0.0, 0.85)]));
+            v.push(line((-0.3, 0.0), (0.3, 0.0)));
+            v.push(line((-0.45, 0.4), (0.45, 0.4)));
+            v.push(Hole { pts: vec![(-0.1, -0.35), (0.1, -0.35), (0.06, -0.1), (-0.06, -0.1)] });
+        }
+        ShipType::HierarchyShip => {
+            // Hierarchy: a round hull under a great sensor dish.
+            v.push(circle((0.0, 0.15), 0.58));
+            v.push(Circle { c: (0.0, -0.58), r: 0.36, fill: false });
+            v.push(Circle { c: (0.0, -0.58), r: 0.12, fill: false });
+            v.extend(pair(|s| line((s * 0.2, -0.32), (s * 0.4, 0.0))));
+            v.extend(pair(|s| line((s * 0.58, 0.15), (s * 0.9, 0.35))));
+        }
+        ShipType::PralorUnit => {
+            // Pralor: a robot's blocky hull, gridded, with its sensor head.
+            v.push(Poly { pts: vec![(-0.5, -0.8), (0.5, -0.8), (0.65, 0.9), (-0.65, 0.9)], fill: true });
+            v.push(Poly { pts: vec![(-0.2, -1.0), (0.2, -1.0), (0.2, -0.8), (-0.2, -0.8)], fill: true });
+            for k in 0..3 {
+                let y = -0.4 + k as f32 * 0.4;
+                v.push(line((-0.52, y), (0.52, y)));
+            }
+            v.push(line((0.0, -0.8), (0.0, 0.9)));
+        }
+        ShipType::TamarianCruiser => {
+            // Tamarian: a big, blocky cruiser with a forked bow.
+            v.push(sym(&[(0.0, -0.65), (0.22, -1.0), (0.52, -0.9), (0.6, 0.2), (0.82, 0.9), (0.3, 0.95), (0.0, 0.8)]));
+            v.push(line((-0.45, -0.2), (0.45, -0.2)));
+            v.push(line((-0.55, 0.4), (0.55, 0.4)));
+            v.push(Circle { c: (0.0, 0.1), r: 0.16, fill: false });
+        }
+        ShipType::Baxial => {
+            // The Baxial: a patched-up Talaxian freighter with pods bolted on.
+            v.push(Poly { pts: vec![(-0.2, -0.95), (0.25, -0.85), (0.35, 0.2), (0.2, 0.95), (-0.3, 0.9), (-0.35, 0.0)], fill: true });
+            v.push(circle((0.5, 0.3), 0.2));
+            v.push(capsule((-0.55, -0.3), (-0.55, 0.5), 0.2));
+            v.push(line((0.32, 0.3), (0.5, 0.3)));
+            v.push(line((-0.33, 0.1), (-0.55, 0.1)));
+            v.push(line((-0.1, -0.5), (0.2, -0.3)));
+        }
         ShipType::TalosianShip => {
             // Talosian: a bulbous dome ringed by smaller cells.
             v.push(circle((0.0, -0.2), 0.55));
@@ -778,6 +874,115 @@ fn alien(f: Faction, ship: ShipType) -> Vec<Part> {
                 v.push(Circle { c: (x, y), r, fill: false });
             }
         }
+        Faction::Narada => match ship {
+            ShipType::NaradaDrill => {
+                // The drill platform, hanging on its chain.
+                v.push(Poly { pts: vec![(0.0, -0.75), (0.5, 0.0), (0.0, 0.75), (-0.5, 0.0)], fill: true });
+                v.push(Circle { c: (0.0, 0.0), r: 0.22, fill: false });
+                v.push(line((0.0, -0.75), (0.0, -1.0)));
+                v.extend(pair(|s| line((s * 0.5, 0.0), (s * 0.85, 0.0))));
+            }
+            _ => {
+                // The Narada: a black, squid-like mining ship, all spines
+                // and tendrils, its arms curling forward.
+                v.push(capsule((0.0, -0.85), (0.0, 0.75), 0.26));
+                v.push(circle((0.0, 0.0), 0.32));
+                for k in 0..3 {
+                    let y = -0.3 + k as f32 * 0.35;
+                    v.extend(pair(|s| line((s * 0.2, y), (s * (0.7 + 0.1 * k as f32), y - 0.35))));
+                    v.extend(pair(|s| line((s * (0.7 + 0.1 * k as f32), y - 0.35), (s * (0.85 + 0.05 * k as f32), y - 0.7))));
+                }
+                v.extend(pair(|s| sym_line((s * 0.2, 0.55), (s * 0.4, 0.98))));
+                v.push(Circle { c: (0.0, 0.0), r: 0.14, fill: false });
+            }
+        },
+        Faction::Krenim => {
+            // Annorax's timeship: a long, segmented hull round a temporal core.
+            v.push(sym(&[(0.0, -1.0), (0.22, -0.85), (0.38, -0.5), (0.45, 0.5), (0.3, 0.85), (0.15, 1.0), (0.0, 0.9)]));
+            for k in 0..6 {
+                let y = -0.6 + k as f32 * 0.25;
+                v.push(line((-0.36, y), (0.36, y)));
+            }
+            v.push(Circle { c: (0.0, 0.05), r: 0.22, fill: false });
+            v.push(Circle { c: (0.0, 0.05), r: 0.1, fill: true });
+        }
+        Faction::Malon => {
+            // A Malon export vessel: a slab of a hull carrying great tanks.
+            v.push(Poly { pts: vec![(-0.3, -1.0), (0.3, -1.0), (0.35, 0.95), (-0.35, 0.95)], fill: true });
+            for &y in &[-0.55f32, -0.1, 0.35, 0.75] {
+                v.extend(pair(|s| Circle { c: (s * 0.55, y), r: 0.2, fill: false }));
+            }
+            v.push(line((0.0, -0.95), (0.0, 0.9)));
+        }
+        Faction::Vaal => {
+            // Vaal: a serpent's head carved in red stone, its mouth open.
+            v.push(sym(&[(0.0, -0.95), (0.45, -0.8), (0.8, -0.3), (0.8, 0.3), (0.55, 0.8), (0.25, 0.95), (0.0, 0.7)]));
+            v.extend(pair(|s| Hole { pts: (0..8).map(|k| { let a = k as f32 / 8.0 * TAU; (s * 0.35 + a.cos() * 0.12, -0.35 + a.sin() * 0.09) }).collect() }));
+            v.push(Hole { pts: vec![(-0.25, 0.3), (0.25, 0.3), (0.12, 0.65), (-0.12, 0.65)] });
+            v.extend(pair(|s| line((s * 0.15, 0.3), (s * 0.1, 0.5))));
+        }
+        Faction::Landru => {
+            // Landru: the computer's lens, ringed and staring.
+            v.push(circle((0.0, 0.0), 0.6));
+            v.push(Circle { c: (0.0, 0.0), r: 0.82, fill: false });
+            v.push(Circle { c: (0.0, 0.0), r: 0.3, fill: false });
+            v.push(Circle { c: (0.0, 0.0), r: 0.12, fill: true });
+            for k in 0..8 {
+                let a = k as f32 / 8.0 * TAU;
+                v.push(line((a.cos() * 0.85, a.sin() * 0.85), (a.cos() * 1.0, a.sin() * 1.0)));
+            }
+        }
+        Faction::Bluegill => match ship {
+            ShipType::BluegillMother => {
+                // The mother creature: a swollen body, gills down both sides.
+                v.push(Poly {
+                    pts: (0..20)
+                        .map(|k| {
+                            let a = k as f32 / 20.0 * TAU;
+                            let r = 0.7 + 0.08 * (4.0 * a).sin();
+                            (a.cos() * r * 0.75, a.sin() * r)
+                        })
+                        .collect(),
+                    fill: true,
+                });
+                for k in 0..4 {
+                    let y = -0.35 + k as f32 * 0.22;
+                    v.extend(pair(|s| line((s * 0.25, y), (s * 0.5, y + 0.08))));
+                }
+                v.push(capsule((0.0, -0.7), (0.0, -1.0), 0.12));
+            }
+            // Infected ships still look like what they were.
+            s => return federation(s),
+        },
+        Faction::Dreadnought => {
+            // The Dreadnought: a huge arrowhead of a missile, with fins.
+            v.push(sym(&[(0.0, -1.0), (0.18, -0.6), (0.35, -0.2), (0.7, 0.65), (0.45, 0.7), (0.25, 0.55), (0.12, 0.95), (0.0, 0.85)]));
+            v.push(line((0.0, -0.8), (0.0, 0.7)));
+            v.extend(pair(|s| line((s * 0.2, 0.0), (s * 0.45, 0.4))));
+        }
+        Faction::Scimitar => {
+            // The Scimitar: a vast Reman warbird, its wings swept and folded.
+            v.push(sym(&[(0.0, -1.0), (0.12, -0.7), (0.25, -0.4), (0.7, 0.0), (1.0, 0.35), (0.85, 0.75), (0.45, 0.5), (0.2, 0.55), (0.12, 0.9), (0.0, 0.8)]));
+            v.extend(pair(|s| line((s * 0.25, -0.35), (s * 0.85, 0.6))));
+            v.extend(pair(|s| line((s * 0.5, 0.1), (s * 0.6, 0.5))));
+            v.push(Circle { c: (0.0, -0.25), r: 0.1, fill: false });
+        }
+        Faction::Calamarain => {
+            // The Calamarain: a crackling knot of ionized gas.
+            for &(x, y, r) in &[(0.0, 0.0, 0.55), (-0.4, -0.3, 0.38), (0.42, -0.25, 0.35), (0.3, 0.42, 0.38), (-0.35, 0.4, 0.33)] {
+                v.push(Circle { c: (x, y), r, fill: false });
+            }
+            for &((ax, ay), (bx, by)) in &[((-0.6, -0.1), (-0.2, 0.05)), ((0.1, -0.5), (0.25, -0.1)), ((0.2, 0.2), (0.55, 0.3))] {
+                v.push(line((ax, ay), (bx, by)));
+            }
+        }
+        Faction::Nagilum => {
+            // Nagilum: a hole in space, rimmed with faint light.
+            v.push(Hole { pts: (0..24).map(|k| { let a = k as f32 / 24.0 * TAU; (a.cos() * 0.9, a.sin() * 0.9) }).collect() });
+            v.push(Circle { c: (0.0, 0.0), r: 1.0, fill: false });
+            v.push(Circle { c: (-0.2, -0.15), r: 0.08, fill: false });
+            v.push(Circle { c: (0.2, -0.15), r: 0.08, fill: false });
+        }
         Faction::SphereBuilders => {
             // A Delphic Expanse sphere, banded with latitude lines.
             v.push(circle((0.0, 0.0), 1.0));
@@ -909,6 +1114,13 @@ pub fn engine_points(team: Team, ship: ShipType, faction: Option<Faction>) -> Ve
         ShipType::CygnusRelic => return vec![(0.15, 0.98), (-0.15, 0.98)],
         ShipType::Eagle => return vec![(0.08, 0.98), (-0.08, 0.98)],
         ShipType::WarRocketAjax => return vec![(0.0, 0.98)],
+        ShipType::PromellianCruiser => return vec![(0.4, 0.92), (-0.4, 0.92)],
+        ShipType::Gomtuu | ShipType::HierarchyShip => return vec![],
+        ShipType::SolarSail => return vec![(0.0, 0.95)],
+        ShipType::SikarianShip | ShipType::Dauntless => return vec![(0.38, 0.85), (-0.38, 0.85)],
+        ShipType::SonaBattleship | ShipType::TamarianCruiser => return vec![(0.45, 0.92), (-0.45, 0.92)],
+        ShipType::PralorUnit => return vec![(0.4, 0.92), (-0.4, 0.92)],
+        ShipType::Baxial => return vec![(0.0, 0.95), (-0.55, 0.55)],
         ShipType::PreserverObelisk | ShipType::TalosianShip | ShipType::Freighter | ShipType::VothCityShip | ShipType::SheliakShip | ShipType::ExcalbianShip => {
             return vec![]
         }
@@ -939,7 +1151,6 @@ mod tests {
     #[test]
     fn gallery() {
         let (cell, r) = (120.0f32, 44.0f32);
-        let mut c = Canvas::new(8 * cell as i32, 14 * cell as i32, [0.0, 0.0, 0.0]);
         let mut rows: Vec<Vec<(Team, ShipType, Option<Faction>)>> = Team::PLAYABLE
             .iter()
             .map(|&t| ShipType::ALL.iter().map(|&s| (t, s, None)).collect())
@@ -990,6 +1201,18 @@ mod tests {
             (Team::Ori, ShipType::Eagle, None),
         ]);
         rows.push(vec![
+            (Team::Fed, ShipType::PromellianCruiser, None),
+            (Team::Rom, ShipType::Gomtuu, None),
+            (Team::Kli, ShipType::SolarSail, None),
+            (Team::Ori, ShipType::SikarianShip, None),
+            (Team::Fed, ShipType::Dauntless, None),
+            (Team::Rom, ShipType::SonaBattleship, None),
+            (Team::Kli, ShipType::HierarchyShip, None),
+            (Team::Ori, ShipType::PralorUnit, None),
+            (Team::Fed, ShipType::TamarianCruiser, None),
+            (Team::Rom, ShipType::Baxial, None),
+        ]);
+        rows.push(vec![
             (Team::Fed, ShipType::WarRocketAjax, None),
             (Team::Ind, ShipType::Mongo, Some(Faction::Ming)),
             (Team::Ind, ShipType::WarRocketAjax, Some(Faction::Ming)),
@@ -1031,6 +1254,21 @@ mod tests {
             (Team::Ind, ShipType::RogueMoon, Some(Faction::Moonbase)),
             (Team::Ind, ShipType::Eagle, Some(Faction::Moonbase)),
         ]);
+        rows.push(vec![
+            (Team::Ind, ShipType::Narada, Some(Faction::Narada)),
+            (Team::Ind, ShipType::NaradaDrill, Some(Faction::Narada)),
+            (Team::Ind, ShipType::KrenimTimeship, Some(Faction::Krenim)),
+            (Team::Ind, ShipType::MalonFreighter, Some(Faction::Malon)),
+            (Team::Ind, ShipType::Vaal, Some(Faction::Vaal)),
+            (Team::Ind, ShipType::Landru, Some(Faction::Landru)),
+            (Team::Ind, ShipType::BluegillMother, Some(Faction::Bluegill)),
+            (Team::Ind, ShipType::DreadnoughtMissile, Some(Faction::Dreadnought)),
+            (Team::Ind, ShipType::Scimitar, Some(Faction::Scimitar)),
+            (Team::Ind, ShipType::Calamarain, Some(Faction::Calamarain)),
+            (Team::Ind, ShipType::Nagilum, Some(Faction::Nagilum)),
+        ]);
+        let cols = rows.iter().map(|r| r.len()).max().unwrap_or(1);
+        let mut c = Canvas::new(cols as i32 * cell as i32, rows.len() as i32 * cell as i32, [0.0, 0.0, 0.0]);
         for (row, ships) in rows.iter().enumerate() {
             for (col, &(team, ship, faction)) in ships.iter().enumerate() {
                 let (x, y) = (col as f32 * cell + cell / 2.0, row as f32 * cell + cell / 2.0);

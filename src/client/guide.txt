@@ -91,6 +91,7 @@ Points: kill credit, +0.5 per planet taken, +1 per order, +2 per honour.
 From Captain up you're worth +0.5 kill per rank to whoever gets you. /tech lists your tech.
 - Special ships (e): Defiant, D'deridex, Negh'Var, Corsair.
 - Best relics (u): Voth city ship (4 armies/kill), Husnock (bombs to 1), Iconian (gateway jumps), Sheliak (unbombable planet).
+- Relics with a lock (l): Iconian (a world), Sikarian (fold to a ship), Tamarian (tether an enemy).
 
 # 10 The extras
 ## Terrain
@@ -100,6 +101,10 @@ From Captain up you're worth +0.5 kill per rank to whoever gets you. /tech lists
 - Stars, comet tails and derelicts refuel and repair.
 - Avoid the black holes, pulsar, minefields, Metreon gas and the galactic barrier.
 - The Black Hole's warning gives the warp you need to break free.
+- The Nexus repairs you (after 20 s away); the Guardian sends you back 30 s.
+- Tyken's Rift: fire a torpedo in, D at the centre. Omega: hold at the core.
+- Genesis Planet: hold beside it for armies; leave when it warns.
+- Don't fire in the Neutral Zone; don't speed in the Hekaras Corridor.
 ## Supplies
 Escort your freighter, raid theirs. /upgrade shields|repair|torps|phasers|engines (10, 20, 30 supplies).
 ## Orders
@@ -128,6 +133,9 @@ In orbit, w fires at anything hostile in range, special weapons first. Off when 
 @ Caretaker | Wait out waves, then kill
 @ Horta | Orbit 10 s without firing: peace
 @ Spheres | Kill spheres one at a time
+@ Bluegills | Kill the mother at their home
+@ Calamarain | Phasers, not torps
+@ Malon | Kill early; avoid green haze
 ## Fight them the right way
 @ Species 8472 | Plasma only, from 6,600
 @ Crystalline | 3 ships' phasers within 2.5 s
@@ -141,6 +149,10 @@ In orbit, w fires at anything hostile in range, special weapons first. Off when 
 @ Star Destroyers | Attack from behind: 2x
 @ Cygnus | Only hurt from inside the well
 @ Ming | Disable Ajax, pressor it into Mongo
+@ Narada | Kill the drill, not the ship
+@ Krenim | Hit it in the 15 s after it fires
+@ Dreadnought | Phasers; torps get shot down
+@ Scimitar | 80 damage while it charges
 ## Don't shoot
 @ V'Ger | Park at the core 10 s
 @ Whale probe | Bring it 2 armies
@@ -151,6 +163,9 @@ In orbit, w fires at anything hostile in range, special weapons first. Off when 
 @ Species 10-C | Hold all 3 beacons at once
 @ Dyson sphere | Stay 15,000 from the hatch
 @ The Moon | Stay within 4,000 for 10 s
+@ Vaal | Sit in its field until it fails
+@ Landru | Bomb and take its planet
+@ Nagilum | Stay 7,000 away
 ## Outbreaks
 @ Tribbles | Avoid T planets; Klingons cure
 @ Nanites | d, or a friendly repair world

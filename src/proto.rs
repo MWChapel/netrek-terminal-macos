@@ -236,6 +236,35 @@ pub enum TerrainKind {
     /// The Black Hole (the Disney film): a vast whirlpool whose gravity
     /// drags in anything that strays near; the USS Cygnus hangs inside it.
     GreatBlackHole,
+    /// Metaphasic radiation: impulse only, no transporters, hidden from
+    /// sensors, but the hull slowly heals (Insurrection).
+    BriarPatch,
+    /// Plasma storms: hidden from sensors, with eruptions of plasma fire.
+    Badlands,
+    /// An energy ribbon, (x, y) to (x2, y2), drifting across the galaxy: a
+    /// ship it touches vanishes into the Nexus for a while and comes back
+    /// elsewhere, made whole (Generations).
+    Nexus,
+    /// Drains power; detonate a torpedo at its centre to collapse it.
+    TykensRift,
+    /// A protomatter world: armies for anyone holding beside it, until it
+    /// tears itself apart (`phase`: how close it is to that, 0-255).
+    GenesisPlanet,
+    /// Invisible strands that knock out a ship's systems.
+    QuantumFilaments,
+    /// A lane, (x, y) to (x2, y2): above warp 5 a ship tears subspace.
+    HekarasCorridor,
+    /// No warp at all; it grows until someone neutralises it at the centre.
+    OmegaZone,
+    /// A strip between two empires, (x, y) to (x2, y2): cloaks show, and
+    /// firing inside it is a violation.
+    NeutralZone,
+    /// A portal: fly through and your ship goes back to where (and how) it
+    /// was 30 seconds ago.
+    GuardianOfForever,
+    /// Theta radiation dumped by a Malon freighter (`phase`: how much is
+    /// left, 0-255): it sickens the armies a ship carries.
+    ThetaRadiation,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -396,6 +425,14 @@ pub enum ZoneKind {
     DysonHatchOpen,
     /// The lightning field round Mingo City, on the planet Mongo.
     LightningField,
+    /// A tear in subspace (Son'a torpedoes, the Hekaras Corridor).
+    SubspaceTear,
+    /// The ring a Tamarian cruiser has bound itself and an enemy to.
+    Tanagra,
+    /// The Scimitar's thalaron weapon, charging: everything inside will be hit.
+    Thalaron,
+    /// Vaal's field, draining the power of ships inside it.
+    EnergyDrain,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

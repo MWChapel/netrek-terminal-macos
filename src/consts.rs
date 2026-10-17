@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 pub const DEFAULT_PORT: u16 = 2592; // the traditional Netrek port
-pub const PROTOCOL_VERSION: u32 = 25;
+pub const PROTOCOL_VERSION: u32 = 26;
 
 pub const UPS: u64 = 10; // server updates per second, like the original
 pub const GWIDTH: f64 = 100_000.0;
@@ -155,10 +155,30 @@ pub enum Faction {
     Moonbase,
     /// Ming the Merciless and the planet Mongo (Flash Gordon).
     Ming,
+    /// Nero's mining ship, with red matter (Star Trek, 2009).
+    Narada,
+    /// Annorax's Krenim timeship ("Year of Hell").
+    Krenim,
+    /// A Malon export vessel dumping theta radiation ("Night").
+    Malon,
+    /// Vaal, the guardian of Gamma Trianguli VI ("The Apple").
+    Vaal,
+    /// Landru and the Body ("The Return of the Archons").
+    Landru,
+    /// The bluegill parasites ("Conspiracy").
+    Bluegill,
+    /// The Cardassian Dreadnought, a rogue missile ("Dreadnought").
+    Dreadnought,
+    /// Shinzon's Scimitar (Nemesis).
+    Scimitar,
+    /// The Calamarain ("Déjà Q").
+    Calamarain,
+    /// Nagilum ("Where Silence Has Lease").
+    Nagilum,
 }
 
 impl Faction {
-    pub const ALL: [Faction; 36] = [
+    pub const ALL: [Faction; 46] = [
         Faction::Khan,
         Faction::Gorn,
         Faction::Tholian,
@@ -195,6 +215,16 @@ impl Faction {
         Faction::Cygnus,
         Faction::Moonbase,
         Faction::Ming,
+        Faction::Narada,
+        Faction::Krenim,
+        Faction::Malon,
+        Faction::Vaal,
+        Faction::Landru,
+        Faction::Bluegill,
+        Faction::Dreadnought,
+        Faction::Scimitar,
+        Faction::Calamarain,
+        Faction::Nagilum,
     ];
 
     /// Name used on the command line.
@@ -236,6 +266,16 @@ impl Faction {
             Faction::Cygnus => "cygnus",
             Faction::Moonbase => "moon",
             Faction::Ming => "mongo",
+            Faction::Narada => "narada",
+            Faction::Krenim => "krenim",
+            Faction::Malon => "malon",
+            Faction::Vaal => "vaal",
+            Faction::Landru => "landru",
+            Faction::Bluegill => "bluegill",
+            Faction::Dreadnought => "dreadnought",
+            Faction::Scimitar => "scimitar",
+            Faction::Calamarain => "calamarain",
+            Faction::Nagilum => "nagilum",
         }
     }
 
@@ -277,6 +317,16 @@ impl Faction {
             Faction::Cygnus => "the USS Cygnus",
             Faction::Moonbase => "Moonbase Alpha",
             Faction::Ming => "Ming the Merciless",
+            Faction::Narada => "the Narada",
+            Faction::Krenim => "the Krenim timeship",
+            Faction::Malon => "the Malon",
+            Faction::Vaal => "Vaal",
+            Faction::Landru => "Landru",
+            Faction::Bluegill => "the bluegill parasites",
+            Faction::Dreadnought => "the Dreadnought",
+            Faction::Scimitar => "the Scimitar",
+            Faction::Calamarain => "the Calamarain",
+            Faction::Nagilum => "Nagilum",
         }
     }
 
@@ -319,6 +369,16 @@ impl Faction {
             Faction::Cygnus => "Cygnus",
             Faction::Moonbase => "Alpha",
             Faction::Ming => "Ming",
+            Faction::Narada => "Narada",
+            Faction::Krenim => "Krenim",
+            Faction::Malon => "Malon",
+            Faction::Vaal => "Vaal",
+            Faction::Landru => "Landru",
+            Faction::Bluegill => "Bluegill",
+            Faction::Dreadnought => "Dreadnought",
+            Faction::Scimitar => "Reman",
+            Faction::Calamarain => "Calamarain",
+            Faction::Nagilum => "Nagilum",
         }
     }
 
@@ -361,6 +421,16 @@ impl Faction {
             Faction::Cygnus => "CY",
             Faction::Moonbase => "MA",
             Faction::Ming => "MG",
+            Faction::Narada => "NR",
+            Faction::Krenim => "KR",
+            Faction::Malon => "ML",
+            Faction::Vaal => "VA",
+            Faction::Landru => "LD",
+            Faction::Bluegill => "BL",
+            Faction::Dreadnought => "DR",
+            Faction::Scimitar => "RE",
+            Faction::Calamarain => "CM",
+            Faction::Nagilum => "NG",
         }
     }
 
@@ -466,6 +536,50 @@ pub enum ShipType {
     WarRocketAjax,
     /// Ming's imperial rocket fighters.
     MingRocket,
+    // The second set of relic ships.
+    /// A Promellian battlecruiser, adrift a thousand years ("Booby Trap").
+    PromellianCruiser,
+    /// Gomtuu, the living ship ("Tin Man").
+    Gomtuu,
+    /// A Bajoran solar sail ship ("Explorers").
+    SolarSail,
+    /// A Sikarian ship with a spatial trajector ("Prime Factors").
+    SikarianShip,
+    /// Arturis's Dauntless, with its quantum slipstream drive ("Hope and Fear").
+    Dauntless,
+    /// A Son'a battleship (Insurrection).
+    SonaBattleship,
+    /// A Hierarchy surveillance ship ("Tinker Tenor Doctor Spy").
+    HierarchyShip,
+    /// A Pralor automated personnel unit ("Prototype").
+    PralorUnit,
+    /// A Tamarian deep-space cruiser ("Darmok").
+    TamarianCruiser,
+    /// Neelix's Talaxian freighter, the Baxial.
+    Baxial,
+    // The third wave of incursions.
+    /// Nero's Narada.
+    Narada,
+    /// The Narada's drill platform, lowered over a planet.
+    NaradaDrill,
+    /// Annorax's timeship.
+    KrenimTimeship,
+    /// A Malon export vessel, heavy with theta radiation.
+    MalonFreighter,
+    /// Vaal: the serpent's head on Gamma Trianguli VI.
+    Vaal,
+    /// Landru: the computer behind the Body.
+    Landru,
+    /// The bluegill mother creature.
+    BluegillMother,
+    /// The Cardassian Dreadnought missile.
+    DreadnoughtMissile,
+    /// Shinzon's Reman warbird.
+    Scimitar,
+    /// The Calamarain: a cloud of ionized gas that thinks.
+    Calamarain,
+    /// Nagilum: a hole in space with a mind behind it.
+    Nagilum,
 }
 
 impl ShipType {
@@ -497,7 +611,7 @@ impl ShipType {
     pub const SPECIALS: [ShipType; 4] = [ShipType::Defiant, ShipType::Warbird, ShipType::NeghVar, ShipType::Corsair];
 
     /// Relic ships of alien make, for Commodores and up (one drawn at random).
-    pub const RELICS: [ShipType; 16] = [
+    pub const RELICS: [ShipType; 26] = [
         ShipType::IconianShip,
         ShipType::BreenWarship,
         ShipType::VidiianHarvester,
@@ -514,6 +628,16 @@ impl ShipType {
         ShipType::CygnusRelic,
         ShipType::Eagle,
         ShipType::WarRocketAjax,
+        ShipType::PromellianCruiser,
+        ShipType::Gomtuu,
+        ShipType::SolarSail,
+        ShipType::SikarianShip,
+        ShipType::Dauntless,
+        ShipType::SonaBattleship,
+        ShipType::HierarchyShip,
+        ShipType::PralorUnit,
+        ShipType::TamarianCruiser,
+        ShipType::Baxial,
     ];
 
     pub fn special_for(team: Team) -> Option<ShipType> {
@@ -581,6 +705,16 @@ impl ShipType {
             ShipType::CygnusRelic => "anti-gravity field: black holes, eddies and enemy tractor or pressor beams can't move it",
             ShipType::Eagle => "VTOL transporter: drops straight into orbit at any speed",
             ShipType::WarRocketAjax => "Ming's ray cannons: its phasers go straight through shields",
+            ShipType::PromellianCruiser => "aceton assimilators: drains fuel from enemy ships within 3,000 into its own tanks",
+            ShipType::Gomtuu => "living ship: heals fast, and once per life folds space to escape a killing blow",
+            ShipType::SolarSail => "solar sail: free warp, and +5 warp in the tachyon eddies of stars, pulsars and comets",
+            ShipType::SikarianShip => "spatial trajector: lock onto a ship within 20,000 to fold space to it (every 20 s)",
+            ShipType::Dauntless => "quantum slipstream: hold top speed and it surges at +10 warp for 5 s (every 30 s)",
+            ShipType::SonaBattleship => "isolytic torpedoes: each hit tears subspace, hurting anyone who flies through for 8 s",
+            ShipType::HierarchyShip => "eavesdropping: your team sees every enemy within 15,000, cloaked or not, and its armies",
+            ShipType::PralorUnit => "no crew: immune to subsystem damage, boarding parties and Kelvan neural fields",
+            ShipType::TamarianCruiser => "Darmok at Tanagra: lock onto an enemy within 6,000 and neither of you can leave the ring",
+            ShipType::Baxial => "scrounger: salvages derelicts three times as fast, and picks over wrecks within 5,000",
             _ => "",
         }
     }
@@ -616,6 +750,14 @@ impl ShipType {
             ShipType::CygnusShip => 1100.0,
             ShipType::RogueMoon => 2400.0,
             ShipType::Mongo => 2200.0,
+            ShipType::Narada => 1100.0,
+            ShipType::NaradaDrill => 600.0,
+            ShipType::KrenimTimeship => 1300.0,
+            ShipType::MalonFreighter => 1000.0,
+            ShipType::Vaal | ShipType::Landru => 600.0,
+            ShipType::DreadnoughtMissile => 800.0,
+            ShipType::Scimitar => 900.0,
+            ShipType::Calamarain | ShipType::Nagilum => 1500.0,
             _ => EXPDIST,
         }
     }
@@ -634,6 +776,9 @@ impl ShipType {
                 | ShipType::DarkMatterAnomaly
                 | ShipType::RogueMoon
                 | ShipType::Mongo
+                | ShipType::Vaal
+                | ShipType::Landru
+                | ShipType::Nagilum
         )
     }
 
@@ -674,9 +819,16 @@ impl ShipType {
             | ShipType::KzintiCruiser
             | ShipType::KzintiStriker
             | ShipType::StarDestroyer => true,
+            // The Pralor unit has no crew to overpower.
+            ShipType::PralorUnit => false,
             // Special and relic ships are flown by players.
             s => s.is_special() || s.is_relic(),
         }
+    }
+
+    /// Ships that can fire while cloaked: Chang's Bird-of-Prey and the Scimitar.
+    pub fn fires_cloaked(self) -> bool {
+        matches!(self, ShipType::BirdOfPrey | ShipType::Scimitar)
     }
 
     pub fn is_alien(self) -> bool {
@@ -829,7 +981,7 @@ pub struct ShipStats {
     pub tract_str: f64,
 }
 
-pub static SHIPS: [ShipStats; 71] = [
+pub static SHIPS: [ShipStats; 92] = [
     ShipStats {
         name: "Scout", abbr: "SC", max_speed: 12, max_shield: 75.0, max_damage: 75.0,
         max_fuel: 5000.0, max_armies: 2, torp_damage: 25.0, torp_speed: 16.0, torp_fuse: 16,
@@ -1468,6 +1620,195 @@ pub static SHIPS: [ShipStats; 71] = [
         recharge: 500.0, repair: 0.0, warp_cost: 0.0, cloak_cost: 0.0, shield_cost: 0.0,
         turns: 450_000.0, acc: 300, dec: 300, wpn_cool: 50.0, egn_cool: 50.0,
         max_etemp: 100_000.0, max_wtemp: 100_000.0, mass: 700.0, tract_range: 1.0, tract_str: 1.0,
+    },
+    ShipStats {
+        name: "Promellian battlecruiser", abbr: "PB", max_speed: 8, max_shield: 150.0, max_damage: 170.0,
+        max_fuel: 14000.0, max_armies: 6, torp_damage: 40.0, torp_speed: 12.0, torp_fuse: 40,
+        torp_cost: 7.0 * 40.0, phaser_damage: 90.0, phaser_cost: 7.0 * 90.0,
+        plasma_damage: 0.0, plasma_speed: 0.0, plasma_fuse: 0, plasma_cost: 0.0,
+        recharge: 12.0, repair: 110.0, warp_cost: 4.0, cloak_cost: 26.0, shield_cost: 3.0,
+        turns: 120_000.0, acc: 120, dec: 260, wpn_cool: 2.5, egn_cool: 7.0,
+        max_etemp: 1200.0, max_wtemp: 1100.0, mass: 2800.0, tract_range: 1.0, tract_str: 3000.0,
+    },
+    ShipStats {
+        name: "Gomtuu", abbr: "GT", max_speed: 10, max_shield: 110.0, max_damage: 130.0,
+        max_fuel: 13000.0, max_armies: 4, torp_damage: 30.0, torp_speed: 14.0, torp_fuse: 35,
+        torp_cost: 7.0 * 30.0, phaser_damage: 85.0, phaser_cost: 7.0 * 85.0,
+        plasma_damage: 0.0, plasma_speed: 0.0, plasma_fuse: 0, plasma_cost: 0.0,
+        recharge: 16.0, repair: 260.0, warp_cost: 3.0, cloak_cost: 24.0, shield_cost: 3.0,
+        turns: 240_000.0, acc: 200, dec: 300, wpn_cool: 3.0, egn_cool: 8.0,
+        max_etemp: 1300.0, max_wtemp: 1100.0, mass: 1600.0, tract_range: 1.0, tract_str: 2600.0,
+    },
+    ShipStats {
+        name: "Bajoran solar sail", abbr: "SL", max_speed: 8, max_shield: 60.0, max_damage: 80.0,
+        max_fuel: 8000.0, max_armies: 2, torp_damage: 25.0, torp_speed: 13.0, torp_fuse: 35,
+        torp_cost: 7.0 * 25.0, phaser_damage: 70.0, phaser_cost: 7.0 * 70.0,
+        plasma_damage: 0.0, plasma_speed: 0.0, plasma_fuse: 0, plasma_cost: 0.0,
+        recharge: 10.0, repair: 100.0, warp_cost: 0.0, cloak_cost: 20.0, shield_cost: 2.0,
+        turns: 320_000.0, acc: 250, dec: 300, wpn_cool: 2.5, egn_cool: 9.0,
+        max_etemp: 1200.0, max_wtemp: 1000.0, mass: 600.0, tract_range: 1.0, tract_str: 1500.0,
+    },
+    ShipStats {
+        name: "Sikarian trajector ship", abbr: "SK", max_speed: 9, max_shield: 110.0, max_damage: 110.0,
+        max_fuel: 12000.0, max_armies: 4, torp_damage: 35.0, torp_speed: 13.0, torp_fuse: 35,
+        torp_cost: 7.0 * 35.0, phaser_damage: 85.0, phaser_cost: 7.0 * 85.0,
+        plasma_damage: 0.0, plasma_speed: 0.0, plasma_fuse: 0, plasma_cost: 0.0,
+        recharge: 14.0, repair: 110.0, warp_cost: 3.0, cloak_cost: 24.0, shield_cost: 3.0,
+        turns: 180_000.0, acc: 160, dec: 280, wpn_cool: 2.5, egn_cool: 7.0,
+        max_etemp: 1200.0, max_wtemp: 1100.0, mass: 1700.0, tract_range: 1.0, tract_str: 2600.0,
+    },
+    ShipStats {
+        name: "Dauntless", abbr: "DN", max_speed: 10, max_shield: 100.0, max_damage: 110.0,
+        max_fuel: 13000.0, max_armies: 4, torp_damage: 35.0, torp_speed: 14.0, torp_fuse: 35,
+        torp_cost: 7.0 * 35.0, phaser_damage: 85.0, phaser_cost: 7.0 * 85.0,
+        plasma_damage: 0.0, plasma_speed: 0.0, plasma_fuse: 0, plasma_cost: 0.0,
+        recharge: 14.0, repair: 110.0, warp_cost: 3.0, cloak_cost: 24.0, shield_cost: 3.0,
+        turns: 200_000.0, acc: 220, dec: 300, wpn_cool: 2.5, egn_cool: 7.0,
+        max_etemp: 1300.0, max_wtemp: 1100.0, mass: 1500.0, tract_range: 1.0, tract_str: 2600.0,
+    },
+    ShipStats {
+        name: "Son'a battleship", abbr: "SO", max_speed: 8, max_shield: 150.0, max_damage: 150.0,
+        max_fuel: 14000.0, max_armies: 4, torp_damage: 45.0, torp_speed: 12.0, torp_fuse: 40,
+        torp_cost: 7.0 * 45.0, phaser_damage: 90.0, phaser_cost: 7.0 * 90.0,
+        plasma_damage: 0.0, plasma_speed: 0.0, plasma_fuse: 0, plasma_cost: 0.0,
+        recharge: 14.0, repair: 110.0, warp_cost: 4.0, cloak_cost: 26.0, shield_cost: 3.0,
+        turns: 130_000.0, acc: 130, dec: 260, wpn_cool: 2.5, egn_cool: 7.0,
+        max_etemp: 1200.0, max_wtemp: 1100.0, mass: 2600.0, tract_range: 1.0, tract_str: 3000.0,
+    },
+    ShipStats {
+        name: "Hierarchy surveillance ship", abbr: "HY", max_speed: 9, max_shield: 90.0, max_damage: 100.0,
+        max_fuel: 13000.0, max_armies: 4, torp_damage: 25.0, torp_speed: 13.0, torp_fuse: 35,
+        torp_cost: 7.0 * 25.0, phaser_damage: 75.0, phaser_cost: 7.0 * 75.0,
+        plasma_damage: 0.0, plasma_speed: 0.0, plasma_fuse: 0, plasma_cost: 0.0,
+        recharge: 14.0, repair: 110.0, warp_cost: 3.0, cloak_cost: 22.0, shield_cost: 2.0,
+        turns: 200_000.0, acc: 180, dec: 280, wpn_cool: 2.5, egn_cool: 7.0,
+        max_etemp: 1200.0, max_wtemp: 1000.0, mass: 1400.0, tract_range: 1.0, tract_str: 2400.0,
+    },
+    ShipStats {
+        name: "Pralor automated unit", abbr: "PR", max_speed: 9, max_shield: 120.0, max_damage: 140.0,
+        max_fuel: 13000.0, max_armies: 4, torp_damage: 35.0, torp_speed: 13.0, torp_fuse: 35,
+        torp_cost: 7.0 * 35.0, phaser_damage: 90.0, phaser_cost: 7.0 * 90.0,
+        plasma_damage: 0.0, plasma_speed: 0.0, plasma_fuse: 0, plasma_cost: 0.0,
+        recharge: 14.0, repair: 110.0, warp_cost: 3.0, cloak_cost: 24.0, shield_cost: 3.0,
+        turns: 170_000.0, acc: 160, dec: 280, wpn_cool: 2.5, egn_cool: 7.0,
+        max_etemp: 1200.0, max_wtemp: 1100.0, mass: 1800.0, tract_range: 1.0, tract_str: 2800.0,
+    },
+    ShipStats {
+        name: "Tamarian cruiser", abbr: "TM", max_speed: 8, max_shield: 140.0, max_damage: 150.0,
+        max_fuel: 14000.0, max_armies: 6, torp_damage: 40.0, torp_speed: 12.0, torp_fuse: 40,
+        torp_cost: 7.0 * 40.0, phaser_damage: 90.0, phaser_cost: 7.0 * 90.0,
+        plasma_damage: 0.0, plasma_speed: 0.0, plasma_fuse: 0, plasma_cost: 0.0,
+        recharge: 14.0, repair: 110.0, warp_cost: 4.0, cloak_cost: 26.0, shield_cost: 3.0,
+        turns: 130_000.0, acc: 130, dec: 260, wpn_cool: 2.5, egn_cool: 7.0,
+        max_etemp: 1200.0, max_wtemp: 1100.0, mass: 2600.0, tract_range: 1.0, tract_str: 3000.0,
+    },
+    ShipStats {
+        name: "Baxial", abbr: "BX", max_speed: 8, max_shield: 90.0, max_damage: 110.0,
+        max_fuel: 12000.0, max_armies: 8, torp_damage: 30.0, torp_speed: 12.0, torp_fuse: 35,
+        torp_cost: 7.0 * 30.0, phaser_damage: 75.0, phaser_cost: 7.0 * 75.0,
+        plasma_damage: 0.0, plasma_speed: 0.0, plasma_fuse: 0, plasma_cost: 0.0,
+        recharge: 14.0, repair: 130.0, warp_cost: 3.0, cloak_cost: 24.0, shield_cost: 3.0,
+        turns: 150_000.0, acc: 140, dec: 260, wpn_cool: 2.5, egn_cool: 7.0,
+        max_etemp: 1200.0, max_wtemp: 1100.0, mass: 2200.0, tract_range: 1.0, tract_str: 2800.0,
+    },
+    ShipStats {
+        name: "Narada", abbr: "NR", max_speed: 6, max_shield: 300.0, max_damage: 700.0,
+        max_fuel: 1_000_000.0, max_armies: 0, torp_damage: 60.0, torp_speed: 12.0, torp_fuse: 40,
+        torp_cost: 0.0, phaser_damage: 0.0, phaser_cost: 0.0,
+        plasma_damage: 0.0, plasma_speed: 0.0, plasma_fuse: 0, plasma_cost: 0.0,
+        recharge: 500.0, repair: 80.0, warp_cost: 0.0, cloak_cost: 0.0, shield_cost: 0.0,
+        turns: 60000.0, acc: 80, dec: 150, wpn_cool: 50.0, egn_cool: 50.0,
+        max_etemp: 100_000.0, max_wtemp: 100_000.0, mass: 20_000.0, tract_range: 1.0, tract_str: 1.0,
+    },
+    ShipStats {
+        name: "Narada drill", abbr: "ND", max_speed: 0, max_shield: 0.0, max_damage: 180.0,
+        max_fuel: 1_000_000.0, max_armies: 0, torp_damage: 0.0, torp_speed: 10.0, torp_fuse: 30,
+        torp_cost: 0.0, phaser_damage: 0.0, phaser_cost: 0.0,
+        plasma_damage: 0.0, plasma_speed: 0.0, plasma_fuse: 0, plasma_cost: 0.0,
+        recharge: 500.0, repair: 0.0, warp_cost: 0.0, cloak_cost: 0.0, shield_cost: 0.0,
+        turns: 0.0, acc: 0, dec: 1000, wpn_cool: 50.0, egn_cool: 50.0,
+        max_etemp: 100_000.0, max_wtemp: 100_000.0, mass: 1_000_000.0, tract_range: 1.0, tract_str: 1.0,
+    },
+    ShipStats {
+        name: "Krenim timeship", abbr: "KT", max_speed: 3, max_shield: 400.0, max_damage: 700.0,
+        max_fuel: 1_000_000.0, max_armies: 0, torp_damage: 0.0, torp_speed: 10.0, torp_fuse: 30,
+        torp_cost: 0.0, phaser_damage: 0.0, phaser_cost: 0.0,
+        plasma_damage: 0.0, plasma_speed: 0.0, plasma_fuse: 0, plasma_cost: 0.0,
+        recharge: 500.0, repair: 80.0, warp_cost: 0.0, cloak_cost: 0.0, shield_cost: 0.0,
+        turns: 30000.0, acc: 60, dec: 150, wpn_cool: 50.0, egn_cool: 50.0,
+        max_etemp: 100_000.0, max_wtemp: 100_000.0, mass: 1_000_000.0, tract_range: 1.0, tract_str: 1.0,
+    },
+    ShipStats {
+        name: "Malon export vessel", abbr: "MX", max_speed: 3, max_shield: 120.0, max_damage: 600.0,
+        max_fuel: 1_000_000.0, max_armies: 0, torp_damage: 0.0, torp_speed: 10.0, torp_fuse: 30,
+        torp_cost: 0.0, phaser_damage: 0.0, phaser_cost: 0.0,
+        plasma_damage: 0.0, plasma_speed: 0.0, plasma_fuse: 0, plasma_cost: 0.0,
+        recharge: 500.0, repair: 80.0, warp_cost: 0.0, cloak_cost: 0.0, shield_cost: 0.0,
+        turns: 30000.0, acc: 60, dec: 150, wpn_cool: 50.0, egn_cool: 50.0,
+        max_etemp: 100_000.0, max_wtemp: 100_000.0, mass: 50_000.0, tract_range: 1.0, tract_str: 1.0,
+    },
+    ShipStats {
+        name: "Vaal", abbr: "VA", max_speed: 0, max_shield: 0.0, max_damage: 1_000_000.0,
+        max_fuel: 60_000.0, max_armies: 0, torp_damage: 0.0, torp_speed: 10.0, torp_fuse: 30,
+        torp_cost: 0.0, phaser_damage: 0.0, phaser_cost: 0.0,
+        plasma_damage: 0.0, plasma_speed: 0.0, plasma_fuse: 0, plasma_cost: 0.0,
+        recharge: 0.0, repair: 0.0, warp_cost: 0.0, cloak_cost: 0.0, shield_cost: 0.0,
+        turns: 0.0, acc: 0, dec: 1000, wpn_cool: 50.0, egn_cool: 50.0,
+        max_etemp: 100_000.0, max_wtemp: 100_000.0, mass: 10_000_000.0, tract_range: 1.0, tract_str: 1.0,
+    },
+    ShipStats {
+        name: "Landru", abbr: "LA", max_speed: 0, max_shield: 0.0, max_damage: 1_000_000.0,
+        max_fuel: 1_000_000.0, max_armies: 0, torp_damage: 0.0, torp_speed: 10.0, torp_fuse: 30,
+        torp_cost: 0.0, phaser_damage: 0.0, phaser_cost: 0.0,
+        plasma_damage: 0.0, plasma_speed: 0.0, plasma_fuse: 0, plasma_cost: 0.0,
+        recharge: 500.0, repair: 0.0, warp_cost: 0.0, cloak_cost: 0.0, shield_cost: 0.0,
+        turns: 0.0, acc: 0, dec: 1000, wpn_cool: 50.0, egn_cool: 50.0,
+        max_etemp: 100_000.0, max_wtemp: 100_000.0, mass: 10_000_000.0, tract_range: 1.0, tract_str: 1.0,
+    },
+    ShipStats {
+        name: "Bluegill mother creature", abbr: "BM", max_speed: 2, max_shield: 0.0, max_damage: 160.0,
+        max_fuel: 1_000_000.0, max_armies: 0, torp_damage: 0.0, torp_speed: 10.0, torp_fuse: 30,
+        torp_cost: 0.0, phaser_damage: 0.0, phaser_cost: 0.0,
+        plasma_damage: 0.0, plasma_speed: 0.0, plasma_fuse: 0, plasma_cost: 0.0,
+        recharge: 500.0, repair: 80.0, warp_cost: 0.0, cloak_cost: 0.0, shield_cost: 0.0,
+        turns: 100000.0, acc: 100, dec: 300, wpn_cool: 50.0, egn_cool: 50.0,
+        max_etemp: 100_000.0, max_wtemp: 100_000.0, mass: 1500.0, tract_range: 1.0, tract_str: 1.0,
+    },
+    ShipStats {
+        name: "Cardassian Dreadnought", abbr: "DR", max_speed: 3, max_shield: 400.0, max_damage: 400.0,
+        max_fuel: 1_000_000.0, max_armies: 0, torp_damage: 30.0, torp_speed: 14.0, torp_fuse: 30,
+        torp_cost: 0.0, phaser_damage: 0.0, phaser_cost: 0.0,
+        plasma_damage: 0.0, plasma_speed: 0.0, plasma_fuse: 0, plasma_cost: 0.0,
+        recharge: 500.0, repair: 80.0, warp_cost: 0.0, cloak_cost: 0.0, shield_cost: 0.0,
+        turns: 40000.0, acc: 80, dec: 200, wpn_cool: 50.0, egn_cool: 50.0,
+        max_etemp: 100_000.0, max_wtemp: 100_000.0, mass: 30_000.0, tract_range: 1.0, tract_str: 1.0,
+    },
+    ShipStats {
+        name: "Scimitar", abbr: "SM", max_speed: 9, max_shield: 300.0, max_damage: 450.0,
+        max_fuel: 1_000_000.0, max_armies: 0, torp_damage: 50.0, torp_speed: 13.0, torp_fuse: 40,
+        torp_cost: 0.0, phaser_damage: 120.0, phaser_cost: 0.0,
+        plasma_damage: 0.0, plasma_speed: 0.0, plasma_fuse: 0, plasma_cost: 0.0,
+        recharge: 500.0, repair: 80.0, warp_cost: 0.0, cloak_cost: 0.0, shield_cost: 0.0,
+        turns: 120000.0, acc: 150, dec: 250, wpn_cool: 50.0, egn_cool: 50.0,
+        max_etemp: 100_000.0, max_wtemp: 100_000.0, mass: 15_000.0, tract_range: 1.0, tract_str: 1.0,
+    },
+    ShipStats {
+        name: "Calamarain", abbr: "CN", max_speed: 6, max_shield: 0.0, max_damage: 450.0,
+        max_fuel: 1_000_000.0, max_armies: 0, torp_damage: 0.0, torp_speed: 10.0, torp_fuse: 30,
+        torp_cost: 0.0, phaser_damage: 0.0, phaser_cost: 0.0,
+        plasma_damage: 0.0, plasma_speed: 0.0, plasma_fuse: 0, plasma_cost: 0.0,
+        recharge: 500.0, repair: 40.0, warp_cost: 0.0, cloak_cost: 0.0, shield_cost: 0.0,
+        turns: 150000.0, acc: 150, dec: 250, wpn_cool: 50.0, egn_cool: 50.0,
+        max_etemp: 100_000.0, max_wtemp: 100_000.0, mass: 500_000.0, tract_range: 1.0, tract_str: 1.0,
+    },
+    ShipStats {
+        name: "Nagilum", abbr: "NG", max_speed: 1, max_shield: 0.0, max_damage: 1_000_000.0,
+        max_fuel: 1_000_000.0, max_armies: 0, torp_damage: 0.0, torp_speed: 10.0, torp_fuse: 30,
+        torp_cost: 0.0, phaser_damage: 0.0, phaser_cost: 0.0,
+        plasma_damage: 0.0, plasma_speed: 0.0, plasma_fuse: 0, plasma_cost: 0.0,
+        recharge: 500.0, repair: 0.0, warp_cost: 0.0, cloak_cost: 0.0, shield_cost: 0.0,
+        turns: 20000.0, acc: 50, dec: 150, wpn_cool: 50.0, egn_cool: 50.0,
+        max_etemp: 100_000.0, max_wtemp: 100_000.0, mass: 10_000_000.0, tract_range: 1.0, tract_str: 1.0,
     },
 ];
 

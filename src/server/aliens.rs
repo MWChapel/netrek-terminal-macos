@@ -66,6 +66,9 @@ struct Event {
     inside: Vec<u8>,
     /// Dyson sphere: when the tractor beam can grab another ship.
     cooldown: u32,
+    /// Krenim: the planets erased from history, as they were: (planet,
+    /// owner, armies, flags).
+    erased: Vec<(usize, Team, i32, u8)>,
 }
 
 /// Something climbing the Tempest's web.
@@ -111,7 +114,25 @@ pub struct Director {
     kzinti: Option<Kzinti>,
     /// The Ringworld has broken free and jumped away: it never comes back.
     ring_gone: bool,
+    /// Incursions that ended recently, and when: they don't come straight back.
+    ended: Vec<(Faction, u32)>,
+    /// How the last few incursions ended.
+    pub log: Vec<(Faction, Ending)>,
 }
+
+/// How an incursion ended.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum Ending {
+    /// Defeated (or answered, joined, talked down...).
+    Beaten,
+    /// Gone of its own accord, its work done.
+    Departed,
+    /// Ran out of time and withdrew.
+    Withdrew,
+}
+
+/// How long an incursion that has ended stays away.
+const COMEBACK: u32 = 60 * UPS as u32;
 
 fn dist(ax: f64, ay: f64, bx: f64, by: f64) -> f64 {
     ((ax - bx).powi(2) + (ay - by).powi(2)).sqrt()
@@ -131,6 +152,8 @@ fn duration(kind: Faction) -> u32 {
         Faction::TenC | Faction::SphereBuilders | Faction::Dyson | Faction::Cygnus => 5,
         // The Moon takes its time crossing (and leaves when it's across).
         Faction::Moonbase => 10,
+        Faction::Narada | Faction::Malon => 6,
+        Faction::Krenim | Faction::Vaal | Faction::Landru | Faction::Bluegill | Faction::Scimitar => 5,
         _ => 4,
     };
     mins * 60 * UPS as u32
@@ -139,7 +162,7 @@ fn duration(kind: Faction) -> u32 {
 impl Director {
     pub fn new(cfg: AlienConfig) -> Director {
         let first = cfg.interval.clamp(1, 120) / 2;
-        Director { cfg, events: Vec::new(), next_spawn: first as u32 * UPS as u32, wormhole: None, kzinti: None, ring_gone: false }
+        Director { cfg, events: Vec::new(), next_spawn: first as u32 * UPS as u32, wormhole: None, kzinti: None, ring_gone: false, ended: Vec::new(), log: Vec::new() }
     }
 
     pub fn tick(&mut self, world: &mut World) {
@@ -147,6 +170,7 @@ impl Director {
             return;
         }
         world.zones.clear();
+        world.duties.clear();
         world.moon_crisis = None;
         world.ajax_adrift = None;
         // A galaxy reset sends everyone home, aliens included.
@@ -178,6 +202,11 @@ impl Director {
             run_event(world, e);
         }
         self.events = events;
+        // Jobs for the robots: what it takes to deal with each incursion.
+        for e in &self.events {
+            post_duties(world, e);
+        }
+        world.assign_duties();
         self.run_kzinti(world);
     }
 
@@ -195,14 +224,28 @@ impl Director {
                 !gone
             });
             let timed_out = world.tick.saturating_sub(e.started) > duration(e.kind);
-            if beaten(world, e) || timed_out {
+            if beaten(world, e) || timed_out || departed(e) {
                 ended.push(k);
             }
         }
         for k in ended.into_iter().rev() {
             let mut e = self.events.remove(k);
-            if beaten(world, &e) {
+            self.ended.push((e.kind, world.tick));
+            let won = beaten(world, &e);
+            let ending = if won {
+                Ending::Beaten
+            } else if departed(&e) {
+                Ending::Departed
+            } else {
+                Ending::Withdrew
+            };
+            self.log.push((e.kind, ending));
+            let excess = self.log.len().saturating_sub(50);
+            self.log.drain(..excess);
+            if won {
                 announce(world, defeat_text(e.kind));
+            } else if departed(&e) {
+                announce(world, departure_text(e.kind));
             } else {
                 for &id in &e.ships {
                     world.remove_player(id);
@@ -210,6 +253,20 @@ impl Director {
                 announce(world, withdraw_text(e.kind));
             }
             match e.kind {
+                Faction::Narada | Faction::Bluegill => {
+                    for &id in &e.ships {
+                        world.remove_player(id);
+                    }
+                }
+                Faction::Krenim if won => restore_history(world, &e),
+                Faction::Malon if won => theta_burst(world, &e),
+                // Left alone, their worlds go back to the natives.
+                Faction::Vaal | Faction::Landru => {
+                    let f = e.kind;
+                    for pl in world.planets.iter_mut().filter(|pl| pl.alien == Some(f)) {
+                        pl.alien = None;
+                    }
+                }
                 Faction::Tribbles => {
                     for pl in world.planets.iter_mut() {
                         pl.tribbles = false;
@@ -277,6 +334,9 @@ impl Director {
     fn spawn(&mut self, world: &mut World) {
         let mut rng = rand::thread_rng();
         let mut active: Vec<Faction> = self.events.iter().map(|e| e.kind).collect();
+        let now = world.tick;
+        self.ended.retain(|&(_, at)| now < at + COMEBACK);
+        active.extend(self.ended.iter().map(|&(f, _)| f));
         if self.wormhole.is_some() {
             active.push(Faction::JemHadar);
         }
@@ -325,6 +385,10 @@ impl Director {
             // The core and a first climber; the rest climb out as slots free up.
             Faction::Tempest => 2,
             Faction::Tribbles => 0,
+            // The Narada, and later its drill.
+            Faction::Narada => 2,
+            // The mother creature and three infected ships.
+            Faction::Bluegill => 4,
             _ => 1,
         };
         if free < need {
@@ -356,6 +420,7 @@ impl Director {
         let mut inside = Vec::new();
         let mut corners = Vec::new();
         let mut goals = HashMap::new();
+        let mut next_at = world.tick + 3 * UPS as u32;
         let mut spawn = |world: &mut World, name: &str, ship: ShipType, (x, y): (f64, f64), bounty: f64| {
             if let Some(id) = world.spawn_alien(name, kind, ship, x, y, bounty) {
                 ships.push(id);
@@ -481,7 +546,13 @@ impl Director {
                 "Hirogen hunters have entered the sector, looking for worthy prey.".to_string()
             }
             Faction::Q => {
-                let Some(team) = leading_empire(world) else { return };
+                // The leading empire with ships to answer for it.
+                let flying = |t: Team| world.players.iter().any(|p| p.alive() && p.team == t && p.faction.is_none());
+                let accused = Team::PLAYABLE
+                    .into_iter()
+                    .filter(|&t| world.team_planet_count(t) > 0 && flying(t))
+                    .max_by_key(|&t| world.team_planet_count(t));
+                let Some(team) = accused.or_else(|| leading_empire(world)) else { return };
                 let (hx, hy) = (world.planets[team.home_planet()].x, world.planets[team.home_planet()].y);
                 let (qx, qy) = ((hx * 0.7 + 50_000.0 * 0.3), (hy * 0.7 + 50_000.0 * 0.3));
                 spawn(world, "Q", ShipType::QEntity, (qx, qy), 0.0);
@@ -765,6 +836,140 @@ impl Director {
                     nearest_planet_name(world, hx, hy)
                 )
             }
+            Faction::Narada => {
+                let (x, y) = edge();
+                spawn(world, "Nero", ShipType::Narada, (x, y), 30.0);
+                next_at = world.tick + 10 * UPS as u32;
+                "A vast black mining ship has come out of a lightning storm in space: the NARADA. Nero has come back through time for revenge on every world in the galaxy. It will lower a drill over a populous planet and fire red matter into its core, collapsing it into a black hole. Destroy the drill before it finishes!".to_string()
+            }
+            Faction::Krenim => {
+                let Some(at) = open_spot(world, 4000.0) else { return };
+                spawn(world, "Annorax", ShipType::KrenimTimeship, at, 30.0);
+                next_at = world.tick + 20 * UPS as u32;
+                format!(
+                    "A Krenim TIMESHIP has appeared near {}. Annorax is rewriting history: every 45 seconds he will erase a planet from time itself. Its temporal shields make it untouchable, except for 15 seconds after each incursion. Destroy it and history is restored.",
+                    nearest_planet_name(world, at.0, at.1)
+                )
+            }
+            Faction::Malon => {
+                let (a, b) = (rng.gen_range(15_000.0..85_000.0), rng.gen_range(15_000.0..85_000.0));
+                let (from, to) = match rng.gen_range(0..4) {
+                    0 => ((1500.0, a), (GWIDTH, b)),
+                    1 => ((GWIDTH - 1500.0, a), (0.0, b)),
+                    2 => ((a, 1500.0), (b, GWIDTH)),
+                    _ => ((a, GWIDTH - 1500.0), (b, 0.0)),
+                };
+                spawn(world, "Emck", ShipType::MalonFreighter, from, 20.0);
+                waypoint = to;
+                format!(
+                    "A Malon export vessel is crossing the galaxy near {}, dumping THETA RADIATION as it goes. The radiation sickens the armies a ship carries. Stop it, but beware: its theta tanks will rupture when it's destroyed.",
+                    nearest_planet_name(world, from.0, from.1)
+                )
+            }
+            Faction::Vaal => {
+                let worlds: Vec<usize> = (0..world.planets.len())
+                    .filter(|&k| world.planets[k].flags & PL_HOME == 0 && world.planets[k].alien.is_none() && k < PLANETS.len())
+                    .collect();
+                let Some(&k) = worlds.choose(&mut rng) else { return };
+                let pl = &mut world.planets[k];
+                let (px, py, name, old) = (pl.x, pl.y, pl.name, pl.owner);
+                (pl.owner, pl.alien, pl.armies) = (Team::Ind, Some(Faction::Vaal), VAAL_NATIVES);
+                for t in Team::PLAYABLE {
+                    pl.known[t.idx()] = true;
+                }
+                world.check_genocide(old, Team::Ind);
+                spawn(world, "Vaal", ShipType::Vaal, (px, py), 0.0);
+                let Some(&v) = ships.first() else { return };
+                goals.insert(v, k);
+                format!(
+                    "VAAL has awakened on {}! The serpent-headed guardian has taken the planet, and its field drains the fuel and shields of every ship within 6,000. Weapons can't touch it, but every ship it drains wears down its own power. Keep it busy until it falls silent and the planet is free.",
+                    name
+                )
+            }
+            Faction::Landru => {
+                let worlds: Vec<usize> = (0..world.planets.len())
+                    .filter(|&k| {
+                        let pl = &world.planets[k];
+                        Team::PLAYABLE.contains(&pl.owner) && pl.flags & PL_HOME == 0 && k < PLANETS.len()
+                    })
+                    .collect();
+                let Some(&k) = worlds.choose(&mut rng) else { return };
+                let pl = &mut world.planets[k];
+                let (px, py, name, old) = (pl.x, pl.y, pl.name, pl.owner);
+                (pl.owner, pl.alien, pl.armies) = (Team::Ind, Some(Faction::Landru), LANDRU_ARMIES);
+                for t in Team::PLAYABLE {
+                    pl.known[t.idx()] = true;
+                }
+                world.check_genocide(old, Team::Ind);
+                spawn(world, "Landru", ShipType::Landru, (px, py), 0.0);
+                let Some(&l) = ships.first() else { return };
+                goals.insert(l, k);
+                format!(
+                    "\"You will be absorbed.\" LANDRU has taken {}, and the Body is spreading: every 6 seconds it absorbs an army from each colony within 15,000, and a colony that loses its last becomes part of the Body. Landru can't be shot from space. Take {} back and the computer dies.",
+                    name, name
+                )
+            }
+            Faction::Bluegill => {
+                let hosts: Vec<Team> = Team::PLAYABLE.into_iter().filter(|t| world.planets[t.home_planet()].owner == *t).collect();
+                let Some(&team) = hosts.choose(&mut rng) else { return };
+                let k = team.home_planet();
+                let (px, py, name) = (world.planets[k].x, world.planets[k].y, world.planets[k].name);
+                spawn(world, "Mother", ShipType::BluegillMother, (px, py + ORBDIST), 25.0);
+                for (n, ship) in [("Quinn", ShipType::Cruiser), ("Savar", ShipType::Destroyer), ("Remmick", ShipType::Battleship)] {
+                    spawn(world, n, ship, near(px, py, 6000.0), 8.0);
+                }
+                let Some(&m) = ships.first() else { return };
+                world.players[m as usize].orbiting = Some(k);
+                world.players[m as usize].guise = Some((team, ShipType::BluegillMother));
+                for &id in ships.iter().skip(1) {
+                    let q = &mut world.players[id as usize];
+                    q.guise = Some((team, q.ship));
+                }
+                goals.insert(m, k);
+                format!(
+                    "CONSPIRACY! Bluegill parasites have taken over the {} high command. Three of its ships (Quinn, Savar and Remmick) still fly its colours, but they have turned on their own empire, and its planets won't fire on them. The mother creature is in orbit around {}: destroy it and the parasites die.",
+                    team.name(),
+                    name
+                )
+            }
+            Faction::Dreadnought => {
+                let Some(k) = most_populous(world) else { return };
+                let (px, py, name) = (world.planets[k].x, world.planets[k].y, world.planets[k].name);
+                // In from whichever edge is farthest from its target.
+                let at = [(2000.0, py), (GWIDTH - 2000.0, py), (px, 2000.0), (px, GWIDTH - 2000.0)]
+                    .into_iter()
+                    .max_by(|a, b| dist(a.0, a.1, px, py).total_cmp(&dist(b.0, b.1, px, py)))
+                    .unwrap();
+                spawn(world, "Dreadnought", ShipType::DreadnoughtMissile, at, 30.0);
+                let Some(&d) = ships.first() else { return };
+                goals.insert(d, k);
+                waypoint = (px, py);
+                format!(
+                    "A Cardassian DREADNOUGHT, a rogue missile with an artificial mind, is on course for {}! Its warhead will wipe the planet out. It's heavily shielded, it jinks, and its point defences shoot down torpedoes. Intercept it!",
+                    name
+                )
+            }
+            Faction::Scimitar => {
+                let (x, y) = edge();
+                spawn(world, "Shinzon", ShipType::Scimitar, (x, y), 35.0);
+                let Some(&sc) = ships.first() else { return };
+                world.players[sc as usize].cloaked = true;
+                next_at = world.tick + 40 * UPS as u32;
+                "Shinzon's SCIMITAR is loose in the sector! The Reman warbird fires while cloaked, and every minute it decloaks to charge its THALARON weapon, which kills the crews (armies) of every ship within 10,000. Hit it hard while it charges (80 damage) to disrupt it.".to_string()
+            }
+            Faction::Calamarain => {
+                let (x, y) = edge();
+                spawn(world, "Calamarain", ShipType::Calamarain, (x, y), 25.0);
+                "The CALAMARAIN have entered the galaxy: a living cloud of ionized gas. They are hunting the most decorated captain in the sector, and they strip the shields and then the hull of any ship they envelop. Torpedoes pass straight through them; phasers burn.".to_string()
+            }
+            Faction::Nagilum => {
+                let Some(at) = open_spot(world, 6000.0) else { return };
+                spawn(world, "Nagilum", ShipType::Nagilum, at, 0.0);
+                format!(
+                    "A hole in space has opened near {}. Something looks out of it: NAGILUM. It pulls in any ship that strays close, and wants to study how we die. Ships it takes come back changed. It can't be harmed: keep your distance, and it will tire of us.",
+                    nearest_planet_name(world, at.0, at.1)
+                )
+            }
             Faction::GalacticEmpire => {
                 let Some(k) = most_populous(world) else { return };
                 let (px, py, name) = (world.planets[k].x, world.planets[k].y, world.planets[k].name);
@@ -814,11 +1019,12 @@ impl Director {
             grabs: HashMap::new(),
             level: 0,
             queue: Vec::new(),
-            next_at: world.tick + 3 * UPS as u32,
+            next_at,
             duel,
             stolen: HashMap::new(),
             inside,
             cooldown: world.tick + 3 * UPS as u32,
+            erased: Vec::new(),
         });
     }
 }
@@ -849,10 +1055,41 @@ fn beaten(world: &World, e: &Event) -> bool {
     if e.kind == Faction::Nanites {
         return !world.players.iter().any(|p| p.nanites);
     }
+    if departed(e) {
+        return false;
+    }
+    if e.kind == Faction::Narada {
+        return !e.ships.iter().any(|&s| world.players[s as usize].ship == ShipType::Narada);
+    }
+    if e.kind == Faction::Bluegill {
+        return !e.ships.iter().any(|&s| world.players[s as usize].ship == ShipType::BluegillMother);
+    }
     if e.kind == Faction::Tribbles {
         !world.planets.iter().any(|pl| pl.tribbles) && !world.players.iter().any(|p| p.tribbles)
     } else {
         e.ships.is_empty()
+    }
+}
+
+/// Whether an incursion has gone of its own accord, its work done (or
+/// undone): the Narada after two worlds, the Malon freighter across the
+/// galaxy, the Dreadnought detonated, Nagilum satisfied.
+fn departed(e: &Event) -> bool {
+    match e.kind {
+        Faction::Narada => e.level >= NARADA_WORLDS,
+        Faction::Malon | Faction::Dreadnought => e.level == 1,
+        Faction::Nagilum => e.dwell == 1,
+        _ => false,
+    }
+}
+
+fn departure_text(kind: Faction) -> String {
+    match kind {
+        Faction::Narada => "Two worlds are gone. Nero has had his revenge, for now, and the Narada vanishes into a storm in space.".into(),
+        Faction::Malon => "The Malon freighter crosses out of the galaxy, leaving its poison behind.".into(),
+        Faction::Dreadnought => "The Dreadnought's mission is complete.".into(),
+        Faction::Nagilum => "Nagilum has learned what it wanted to know about death. The hole in space closes.".into(),
+        k => withdraw_text(k),
     }
 }
 
@@ -894,6 +1131,16 @@ fn defeat_text(kind: Faction) -> String {
         Faction::Cygnus => "The USS Cygnus breaks up and tumbles over the event horizon. Reinhardt has gone where no one can follow.".into(),
         Faction::Kzinti => "The Kzinti fleet is destroyed... for now.".into(),
         Faction::GalacticEmpire => "Great shot, that was one in a million! The Death Star explodes in a chain reaction, and what's left of the Imperial fleet jumps to hyperspace.".into(),
+        Faction::Narada => "The Narada is destroyed, and Nero with it. \"I would rather suffer the end of Romulus a thousand times...\"".into(),
+        Faction::Krenim => "The Krenim timeship is destroyed! The timeline snaps back: every world Annorax erased is restored.".into(),
+        Faction::Malon => "The Malon freighter is destroyed, and its theta tanks rupture in a burst of radiation!".into(),
+        Faction::Vaal => "Vaal falls silent. Its people are free to live their own lives.".into(),
+        Faction::Landru => "Landru is destroyed. The Body is free.".into(),
+        Faction::Bluegill => "The bluegill mother creature is dead! The parasites shrivel, and the infected ships fall silent.".into(),
+        Faction::Dreadnought => "The Dreadnought is destroyed before it reaches its target!".into(),
+        Faction::Scimitar => "The Scimitar is destroyed. Shinzon's thalaron weapon will never fire again.".into(),
+        Faction::Calamarain => "The Calamarain disperse, their cloud burned away.".into(),
+        Faction::Nagilum => "Nagilum withdraws.".into(),
     }
 }
 
@@ -935,11 +1182,270 @@ fn withdraw_text(kind: Faction) -> String {
         Faction::Cygnus => "The USS Cygnus drifts over the event horizon and vanishes into the Black Hole. Reinhardt has gone to see what lies beyond.".into(),
         Faction::Kzinti => "The Kzinti never withdraw.".into(),
         Faction::GalacticEmpire => "The Death Star and its fleet jump to hyperspace. \"This will be a day long remembered.\"".into(),
+        Faction::Narada => "The Narada withdraws into a storm in space, its revenge unfinished.".into(),
+        Faction::Krenim => "Annorax's timeship slips out of time. The worlds it erased stay erased.".into(),
+        Faction::Malon => "The Malon freighter jumps away, leaving its poison behind.".into(),
+        Faction::Vaal => "Vaal sleeps again. Its planet is left to its people.".into(),
+        Faction::Landru => "Landru's computer goes dormant, and the Body falls apart.".into(),
+        Faction::Bluegill => "The bluegills go to ground. Their host ships slip away, still infected.".into(),
+        Faction::Dreadnought => "The Dreadnought runs out of fuel and drifts off course.".into(),
+        Faction::Scimitar => "The Scimitar cloaks and is gone.".into(),
+        Faction::Calamarain => "The Calamarain lose interest and drift away.".into(),
+        Faction::Nagilum => "The hole in space closes. Nagilum is gone.".into(),
     }
 }
 
 // ----------------------------------------------------------------------
 // behaviour
+
+/// Post the jobs robots should take on to deal with incursion `e` (shared
+/// out by `World::assign_duties`, carried out in bot.rs).
+fn post_duties(world: &mut World, e: &Event) {
+    use super::world::{Duty, Task, Weapon};
+    let ships: Vec<u8> = e.ships.iter().copied().filter(|&s| world.players[s as usize].alive()).collect();
+    let of = |t: ShipType| -> Vec<u8> { ships.iter().copied().filter(|&s| world.players[s as usize].ship == t).collect() };
+    let pos = |s: u8| (world.players[s as usize].x, world.players[s as usize].y);
+    let attack = |target: u8, weapon: Weapon, standoff: f64| Task::Attack { target, weapon, standoff, station: None };
+    let avoid = |s: u8, r: f64| {
+        let (x, y) = pos(s);
+        Task::Avoid { x, y, r }
+    };
+    let mut d: Vec<Duty> = Vec::new();
+    match e.kind {
+        // Big, slow and dangerous up close: everyone, from out of reach of
+        // their beams and tractors.
+        Faction::Fesarius => d.extend(ships.iter().map(|&s| Duty::each(attack(s, Weapon::Any, 8500.0), 0))),
+        // The Borg pick off ships one at a time: gather out of reach, then
+        // all go in together.
+        Faction::Borg => {
+            for &s in &ships {
+                let (x, y) = pos(s);
+                let pilots = (0..MAXPLAYER).filter(|&j| world.duty_pilot(j)).count();
+                let near = (0..MAXPLAYER).filter(|&j| world.duty_pilot(j) && dist(world.players[j].x, world.players[j].y, x, y) < 14_000.0).count();
+                if world.players[s as usize].tractor.is_some() {
+                    // Its tractor is busy holding someone: in close, phasers and all.
+                    d.push(Duty::each(attack(s, Weapon::Any, 4500.0), 0));
+                } else if near * 2 >= pilots || world.players[s as usize].shield < 1000.0 {
+                    d.push(Duty::each(attack(s, Weapon::Any, 8000.0), 0));
+                } else {
+                    d.push(Duty::each(Task::Hold { x: 0.0, y: 0.0, r: 13_000.0, min: 10_000.0, follow: Some(s), quiet: true }, 0));
+                }
+            }
+        }
+        Faction::Doomsday => {
+            for &s in &ships {
+                // Commodore Decker's gambit, for a ship that's done for anyway.
+                d.push(Duty::each(Task::Gambit { target: s }, 1));
+                d.push(Duty::each(attack(s, Weapon::Any, 7500.0), 0));
+            }
+        }
+        // Join with it: one ship at its core; everyone else out of the cloud.
+        Faction::Vger => {
+            for &s in &ships {
+                d.push(Duty::any(Task::Hold { x: 0.0, y: 0.0, r: VGER_CORE * 0.6, min: 0.0, follow: Some(s), quiet: true }, 1));
+                d.push(Duty::each(avoid(s, VGER_CLOUD + 3500.0), 0));
+            }
+        }
+        // Resonance: phasers from many ships at once.
+        Faction::Crystal => d.extend(ships.iter().map(|&s| Duty::each(attack(s, Weapon::Phasers, 0.0), 0))),
+        // Bring it two armies (wait for it where it's going); keep clear otherwise.
+        Faction::Probe => {
+            for &s in &ships {
+                let (x, y) = e.goals.get(&s).map_or(pos(s), |&k| (world.planets[k].x, world.planets[k].y));
+                d.push(Duty::each(Task::Deliver { x, y, r: 2500.0, armies: 2 }, 1));
+                d.push(Duty::each(avoid(s, PROBE_DRAIN + 1000.0), 0));
+            }
+        }
+        // Plasma only, from outside their beams; ships without it keep away.
+        // Plasma first, from outside their beams; the rest chip away with
+        // torpedoes (a tenth of the damage) from the same range.
+        Faction::Species8472 => {
+            for &s in &ships {
+                d.push(Duty::each(attack(s, Weapon::Plasma, 7500.0), 0));
+            }
+            for &s in &ships {
+                d.push(Duty::each(attack(s, Weapon::Torps, 7000.0), 0));
+            }
+        }
+        // Klingons clear infested planets and the ships carrying them;
+        // everyone else keeps out of orbit there.
+        Faction::Tribbles => {
+            for k in (0..world.planets.len()).filter(|&k| world.planets[k].tribbles) {
+                d.push(Duty::of(Team::Kli, Task::Orbit { planet: k, quiet: false }, 1));
+                for t in [Team::Fed, Team::Rom, Team::Ori] {
+                    d.push(Duty::of(t, Task::Shun { planet: k }, 0));
+                }
+            }
+            // Bombing an infested world clears it too: its enemies (other
+            // than the Klingons, who have better things to do) bomb it while
+            // it still has armies to bomb.
+            for k in (0..world.planets.len()).filter(|&k| world.planets[k].tribbles && world.planets[k].armies > 4) {
+                for t in [Team::Fed, Team::Rom, Team::Ori] {
+                    if world.hostile(t, world.planets[k].owner) {
+                        d.push(Duty::of(t, Task::Bomb { planet: k }, 1));
+                    }
+                }
+            }
+            // Ships carrying tribbles: a Klingon goes to meet them, and they
+            // make for the nearest Klingon ship.
+            let klingons: Vec<usize> = (0..MAXPLAYER).filter(|&j| world.players[j].alive() && world.players[j].team == Team::Kli && world.players[j].faction.is_none()).collect();
+            for j in (0..MAXPLAYER).filter(|&j| world.players[j].alive() && world.players[j].tribbles) {
+                let (x, y) = pos(j as u8);
+                if let Some(&k) = klingons.iter().min_by(|&&a, &&b| dist(x, y, world.players[a].x, world.players[a].y).total_cmp(&dist(x, y, world.players[b].x, world.players[b].y))) {
+                    d.push(Duty::just(j as u8, Task::Meet { target: k as u8, r: 1500.0 }));
+                }
+                d.push(Duty::of(Team::Kli, Task::Meet { target: j as u8, r: 1500.0 }, 1));
+            }
+        }
+        // Q's trial: the accused bring tribute, or kill the champion.
+        Faction::Q => {
+            if let (Some(trial), Some(q)) = (e.trial.as_ref(), of(ShipType::QEntity).first().copied()) {
+                let (x, y) = pos(q);
+                match trial.kind {
+                    TrialKind::Tribute => d.push(Duty::of(trial.team, Task::Deliver { x, y, r: 2500.0, armies: 2 }, 3)),
+                    TrialKind::Champion => d.extend(of(ShipType::QChampion).into_iter().map(|c| Duty::of(trial.team, attack(c, Weapon::Any, 0.0), 0))),
+                    TrialKind::Hold => {}
+                }
+            }
+        }
+        // Hunt the marauders down (one robot from each empire on each, the
+        // rest on the most heavily laden); once one is loaded, cut it off at
+        // the edge it's running for.
+        Faction::Ferengi => {
+            let mut loaded = ships.clone();
+            loaded.sort_by_key(|&s| std::cmp::Reverse(world.players[s as usize].armies));
+            for &s in &loaded {
+                let p = &world.players[s as usize];
+                if p.armies >= p.stats().max_armies {
+                    let (x, y) = (p.x, p.y);
+                    let exit = if x.min(GWIDTH - x) < y.min(GWIDTH - y) {
+                        (if x < GWIDTH / 2.0 { 4000.0 } else { GWIDTH - 4000.0 }, y)
+                    } else {
+                        (x, if y < GWIDTH / 2.0 { 4000.0 } else { GWIDTH - 4000.0 })
+                    };
+                    d.push(Duty::each(Task::Attack { target: s, weapon: Weapon::Any, standoff: 0.0, station: Some(exit) }, 1));
+                }
+            }
+            // They surrender to any battleship that gets close.
+            for &s in &loaded {
+                d.push(Duty::each(Task::Meet { target: s, r: 1500.0 }, 1));
+            }
+            for &s in &loaded {
+                d.push(Duty::each(attack(s, Weapon::Any, 0.0), 1));
+            }
+            if let Some(&s) = loaded.first() {
+                d.push(Duty::each(attack(s, Weapon::Any, 0.0), 0));
+            }
+        }
+        Faction::Tempest => {
+            if world.tempest.as_ref().map_or(false, |t| t.exposed) {
+                d.extend(of(ShipType::TempestCore).into_iter().map(|c| Duty::each(attack(c, Weapon::Any, 0.0), 0)));
+            }
+            // A flipper has someone: Superzap.
+            for &(victim, _) in e.grabs.values() {
+                if world.players[victim as usize].trapped && !world.players[victim as usize].zapped {
+                    d.push(Duty::just(victim, Task::Zap));
+                }
+            }
+        }
+        // Tell it it's imperfect.
+        Faction::Nomad => d.extend(ships.iter().map(|&s| Duty::any(Task::Speak { target: s, r: NOMAD_EARSHOT, text: "Nomad, you are imperfect! You have made an error." }, 1))),
+        // Starve it: don't shoot, keep clear.
+        Faction::Armus => {
+            for &s in &ships {
+                d.push(Duty::each(Task::Spare { target: s }, 0));
+                d.push(Duty::each(avoid(s, ARMUS_BASE + world.players[s as usize].swell + 3000.0), 0));
+            }
+        }
+        // First contact: one ship on each beacon, everyone else clear of the shear.
+        Faction::TenC => {
+            for &s in &ships {
+                let (x, y) = pos(s);
+                let spin = world.tick as f64 * 0.002;
+                for k in 0..3 {
+                    let a = spin + k as f64 * TAU / 3.0;
+                    let bx = (x + a.cos() * BEACON_ORBIT).clamp(1000.0, GWIDTH - 1000.0);
+                    let by = (y + a.sin() * BEACON_ORBIT).clamp(1000.0, GWIDTH - 1000.0);
+                    d.push(Duty::any(Task::Hold { x: bx, y: by, r: BEACON_R * 0.5, min: 0.0, follow: None, quiet: true }, 1));
+                }
+                d.push(Duty::each(avoid(s, SHEAR + 1000.0), 0));
+            }
+        }
+        // The hatch emitter, from outside; ships shut inside make for the hatch.
+        Faction::Dyson => {
+            for &h in &ships {
+                let (hx, hy) = pos(h);
+                for &s in &e.inside {
+                    d.push(Duty::just(s, Task::Hold { x: hx, y: hy, r: 400.0, min: 0.0, follow: None, quiet: true }));
+                }
+                d.push(Duty::each(attack(h, Weapon::Any, 6000.0), 0));
+            }
+        }
+        // Into the Black Hole's well after it, firing from just inside the rim.
+        Faction::Cygnus => {
+            if let Some(hole) = world.terrain.iter().find(|t| t.kind == TerrainKind::GreatBlackHole) {
+                let (hx, hy, hr) = (hole.x, hole.y, hole.r);
+                for &s in &ships {
+                    let (cx, cy) = pos(s);
+                    let k = dist(cx, cy, hx, hy).max(1.0);
+                    let out = ((hr * 0.82 - k).max(3000.0)).min(5000.0);
+                    let st = (cx + (cx - hx) / k * out, cy + (cy - hy) / k * out);
+                    d.push(Duty::each(Task::Attack { target: s, weapon: Weapon::Torps, standoff: 0.0, station: Some(st) }, 0));
+                }
+            }
+        }
+        // Gather out of beam range; strike the moment its shields drop.
+        Faction::Krenim => {
+            for &s in &ships {
+                if world.tick < world.players[s as usize].revealed_until {
+                    d.push(Duty::each(attack(s, Weapon::Any, 0.0), 0));
+                } else {
+                    d.push(Duty::each(Task::Hold { x: 0.0, y: 0.0, r: 9000.0, min: 6500.0, follow: Some(s), quiet: true }, 3));
+                }
+            }
+        }
+        // Sit in its field (out of the planet's guns) until it fails.
+        Faction::Vaal => {
+            for &s in &ships {
+                let (x, y) = pos(s);
+                d.push(Duty::each(Task::Hold { x, y, r: VAAL_FIELD - 800.0, min: 2500.0, follow: None, quiet: true }, 3));
+            }
+        }
+        Faction::Landru => d.extend(ships.iter().filter_map(|s| e.goals.get(s)).map(|&k| Duty::each(Task::Take { planet: k }, 3))),
+        // Phasers: its point defences shoot torpedoes down.
+        Faction::Dreadnought => d.extend(ships.iter().map(|&s| Duty::each(attack(s, Weapon::Phasers, 0.0), 0))),
+        Faction::Nagilum => d.extend(ships.iter().map(|&s| Duty::each(avoid(s, NAGILUM_PULL_R + 1500.0), 0))),
+        // Kill the drill (everyone), and keep the Narada busy.
+        Faction::Narada => {
+            d.extend(of(ShipType::NaradaDrill).into_iter().map(|s| Duty::each(attack(s, Weapon::Any, 0.0), 0)));
+            d.extend(of(ShipType::Narada).into_iter().map(|s| Duty::each(attack(s, Weapon::Any, 0.0), 2)));
+        }
+        Faction::Bluegill => d.extend(of(ShipType::BluegillMother).into_iter().map(|s| Duty::each(attack(s, Weapon::Any, 0.0), 2))),
+        // Disrupt the thalaron weapon while it charges.
+        Faction::Scimitar => d.extend(ships.iter().filter(|s| e.progress.contains_key(s)).map(|&s| Duty::each(attack(s, Weapon::Any, 0.0), 0))),
+        Faction::Calamarain => d.extend(ships.iter().map(|&s| Duty::each(attack(s, Weapon::Phasers, 0.0), 2))),
+        Faction::Malon => d.extend(ships.iter().map(|&s| Duty::each(attack(s, Weapon::Any, 0.0), 2))),
+        _ => {}
+    }
+    // And whatever else has to be destroyed, wherever it is, a couple of
+    // robots from each empire go after it.
+    let special = |s: ShipType| {
+        s.pointless_target()
+            || matches!(
+                s,
+                ShipType::TempestCore | ShipType::CygnusShip | ShipType::KrenimTimeship | ShipType::Vaal | ShipType::Landru | ShipType::Mongo | ShipType::RogueMoon | ShipType::Eagle
+            )
+            || (s == ShipType::WarRocketAjax && world.ajax_adrift.is_some())
+    };
+    let hunted = !matches!(e.kind, Faction::Moonbase | Faction::Armus | Faction::Nagilum | Faction::Q | Faction::Metrons);
+    for &s in ships.iter().filter(|_| hunted) {
+        let ship = world.players[s as usize].ship;
+        if !special(ship) && world.players[s as usize].only_hurt_by.is_none() {
+            d.push(Duty::each(attack(s, if ship == ShipType::Bioship { Weapon::Torps } else { Weapon::Any }, 0.0), 2));
+        }
+    }
+    world.duties.extend(d);
+}
 
 /// Nearest empire ship within `range`, preferring team `prefer` if one is in range.
 fn nearest_enemy(world: &World, i: usize, range: f64, prefer: Option<Team>) -> Option<(usize, f64)> {
@@ -1099,6 +1605,19 @@ fn run_event(world: &mut World, e: &mut Event) {
                 ShipType::StarDestroyer => star_destroyer(world, e, i, tick),
                 _ => tie_fighter(world, e, i, tick),
             },
+            Faction::Narada => match world.players[i].ship {
+                ShipType::Narada => narada(world, e, i, tick),
+                _ => narada_drill(world, e, i, tick),
+            },
+            Faction::Krenim => krenim(world, e, i, tick),
+            Faction::Malon => malon(world, e, i, tick),
+            Faction::Vaal => vaal(world, e, i, tick),
+            Faction::Landru => landru(world, e, i, tick),
+            Faction::Bluegill => bluegill(world, e, i, tick),
+            Faction::Dreadnought => dreadnought(world, e, i, tick),
+            Faction::Scimitar => scimitar(world, e, i, tick),
+            Faction::Calamarain => calamarain(world, e, i, tick),
+            Faction::Nagilum => nagilum(world, e, i, tick),
         }
     }
     match e.kind {
@@ -2530,7 +3049,7 @@ fn nomad(world: &mut World, e: &mut Event, i: usize, tick: u32) {
     let talker = world
         .chatter
         .iter()
-        .find(|(from, text)| {
+        .find(|(from, text, _)| {
             let q = &world.players[*from as usize];
             let t = text.to_lowercase();
             q.alive() && q.faction.is_none() && dist(x, y, q.x, q.y) < NOMAD_EARSHOT && NOMAD_WORDS.iter().any(|w| t.contains(w))
@@ -4259,6 +4778,636 @@ fn kzinti_ship(world: &mut World, kz: &mut Kzinti, i: usize, home: usize, tick: 
     }
 }
 
+// ----------------------------------------------------------------------
+// The third wave: the Narada, the Krenim, the Malon, Vaal, Landru, the
+// bluegills, the Dreadnought, the Scimitar, the Calamarain and Nagilum.
+
+/// Fire at ship `t` without changing course: a torpedo led at it (with
+/// odds `odds` each call), and phasers if it's close.
+fn snipe(world: &mut World, i: usize, t: usize, odds: f64) {
+    let mut rng = rand::thread_rng();
+    let (p, q) = (&world.players[i], &world.players[t]);
+    let s = p.stats();
+    let d = dist(p.x, p.y, q.x, q.y);
+    let (vx, vy) = dir_vec(q.dir);
+    let v = q.speed as f64 * WARP1;
+    let aim = lead(p.x, p.y, q.x, q.y, vx * v, vy * v, s.torp_speed * WARP1);
+    let straight = dir_to(p.x, p.y, q.x, q.y);
+    if s.torp_damage > 0.0 && d < s.torp_speed * WARP1 * s.torp_fuse as f64 * 0.8 && rng.gen_bool(odds) {
+        cmd(world, i, ClientMsg::Torp((aim + rng.gen_range(-3.0..3.0)).rem_euclid(256.0) as u8));
+    }
+    if s.phaser_damage > 0.0 && d < PHASEDIST * s.phaser_damage / 100.0 * 0.75 && rng.gen_bool(0.25) {
+        cmd(world, i, ClientMsg::Phaser(straight as u8));
+    }
+}
+
+/// Hold ship `i` still at (x, y).
+fn hold(world: &mut World, i: usize, x: f64, y: f64) {
+    let p = &mut world.players[i];
+    (p.x, p.y, p.speed, p.desired_speed) = (x, y, 0, 0);
+    p.lock = Lock::None;
+}
+
+/// The Narada's drill: how long it takes, how close the Narada parks, how
+/// many worlds Nero means to destroy, and the rest between them.
+pub const DRILL_TICKS: i32 = 40 * UPS as i32;
+const NARADA_PARK: f64 = 3500.0;
+const NARADA_WORLDS: u8 = 2;
+const NARADA_REST: u32 = 25 * UPS as u32;
+
+/// The Narada (Star Trek, 2009): Nero picks the most populous colony,
+/// parks beside it and lowers a drill over it. If the drill runs for 40
+/// seconds, red matter collapses the planet into a black hole. Destroying
+/// the drill stops it (Nero tries again later). It fights back with heavy
+/// mining torpedoes.
+fn narada(world: &mut World, e: &mut Event, i: usize, tick: u32) {
+    let id = i as u8;
+    let (x, y) = (world.players[i].x, world.players[i].y);
+    let drill = e.ships.iter().map(|&s| s as usize).find(|&s| world.players[s].ship == ShipType::NaradaDrill && world.players[s].alive());
+    if drill.is_none() && e.dwell == 1 {
+        // The drill was destroyed.
+        e.dwell = 0;
+        e.next_at = tick + NARADA_REST;
+        e.goals.remove(&id);
+        announce(world, "The Narada's drill is destroyed! Nero is enraged; he'll try again.");
+    }
+    if drill.is_some() {
+        hold(world, i, x, y);
+        if tick % 3 == 0 {
+            if let Some((t, _)) = nearest_enemy(world, i, 11_000.0, None) {
+                snipe(world, i, t, 0.5);
+            }
+        }
+        return;
+    }
+    if tick < e.next_at {
+        if tick % 2 == 0 {
+            if let Some((t, _)) = nearest_enemy(world, i, 12_000.0, None) {
+                fight(world, i, t);
+            }
+        }
+        return;
+    }
+    let colony = |pl: &super::world::Planet| Team::PLAYABLE.contains(&pl.owner) && pl.armies > 0 && pl.flags & PL_HOME == 0;
+    let goal = match e.goals.get(&id) {
+        Some(&k) if colony(&world.planets[k]) => k,
+        _ => {
+            let Some(k) = (0..world.planets.len()).filter(|&k| colony(&world.planets[k])).max_by_key(|&k| world.planets[k].armies) else { return };
+            e.goals.insert(id, k);
+            k
+        }
+    };
+    let (px, py, name) = (world.planets[goal].x, world.planets[goal].y, world.planets[goal].name);
+    if dist(x, y, px, py) > NARADA_PARK {
+        if tick % 4 == 0 {
+            let max = world.players[i].stats().max_speed;
+            steer_to(world, i, px, py, max);
+        }
+        if tick % 3 == 0 {
+            if let Some((t, _)) = nearest_enemy(world, i, 9000.0, None) {
+                snipe(world, i, t, 0.4);
+            }
+        }
+        return;
+    }
+    // In position: lower the drill.
+    let Some(d) = world.spawn_alien("Drill", Faction::Narada, ShipType::NaradaDrill, px, py, 10.0) else { return };
+    e.ships.push(d);
+    e.goals.insert(d, goal);
+    e.progress.insert(d, 0);
+    e.dwell = 1;
+    hold(world, i, x, y);
+    announce(world, format!("The Narada lowers its DRILL over {}! In 40 seconds it will fire red matter into the planet's core. Destroy the drill!", name));
+}
+
+/// The drill: bores into the planet below it, then the red matter goes in.
+fn narada_drill(world: &mut World, e: &mut Event, i: usize, tick: u32) {
+    let id = i as u8;
+    let Some(&k) = e.goals.get(&id) else { return };
+    let (px, py, name) = (world.planets[k].x, world.planets[k].y, world.planets[k].name);
+    hold(world, i, px, py);
+    // The drill's beam, boring down.
+    if tick % 4 == 0 {
+        world.phasers.push(PhaserShot { info: PhaserInfo { owner: id, x1: px as i32, y1: (py - 500.0) as i32, x2: px as i32, y2: py as i32, hit: true }, ticks: 4 });
+    }
+    let n = e.progress.entry(id).or_insert(0);
+    *n += 1;
+    let left = DRILL_TICKS - *n;
+    if left == 20 * UPS as i32 || left == 10 * UPS as i32 {
+        announce(world, format!("The Narada's drill is {} seconds from {}'s core!", left / UPS as i32, name));
+    }
+    if left > 0 {
+        return;
+    }
+    // Red matter.
+    let pl = &mut world.planets[k];
+    let old = pl.owner;
+    (pl.owner, pl.armies, pl.flags, pl.alien) = (Team::Ind, 0, 0, Some(Faction::Narada));
+    world.terrain.push(Terrain::singularity(&format!("{} singularity", name), (px, py)));
+    let doomed: Vec<usize> = (0..MAXPLAYER)
+        .filter(|&j| j != i && world.players[j].alive() && world.players[j].faction.is_none() && dist(world.players[j].x, world.players[j].y, px, py) < 1500.0)
+        .collect();
+    for j in doomed {
+        world.kill(j, None, format!("was lost when {} collapsed", name));
+    }
+    announce(world, format!("RED MATTER! The drill fires into {}'s core, and the planet collapses into a BLACK HOLE.", name));
+    world.check_genocide(old, Team::Ind);
+    world.remove_player(id);
+    e.dwell = 0;
+    e.level += 1;
+    e.next_at = tick + NARADA_REST;
+    e.goals.retain(|_, g| *g != k);
+    // Two worlds: Nero has had his revenge.
+    if e.level >= NARADA_WORLDS {
+        for &s in &e.ships {
+            if world.players[s as usize].ship == ShipType::Narada {
+                world.remove_player(s);
+            }
+        }
+    }
+}
+
+/// The Krenim timeship: how often it fires, how far, and how long its
+/// temporal shields are down afterwards.
+const INCURSION_EVERY: u32 = 45 * UPS as u32;
+const INCURSION_RANGE: f64 = 35_000.0;
+pub const TEMPORAL_WINDOW: u32 = 15 * UPS as u32;
+
+/// The Krenim timeship ("Year of Hell"): Annorax drifts slowly, and every
+/// 45 seconds erases a colony from history (its owner, armies and
+/// everything it had). Its temporal shields make it untouchable except
+/// for a short while after each incursion. Destroying it restores every
+/// world it erased.
+fn krenim(world: &mut World, e: &mut Event, i: usize, tick: u32) {
+    let mut rng = rand::thread_rng();
+    let id = i as u8;
+    let (x, y) = (world.players[i].x, world.players[i].y);
+    if dist(x, y, e.waypoint.0, e.waypoint.1) < 3000.0 || tick % 900 == 0 {
+        e.waypoint = (rng.gen_range(15_000.0..85_000.0), rng.gen_range(15_000.0..85_000.0));
+    }
+    if tick % 5 == 0 {
+        steer_to(world, i, e.waypoint.0, e.waypoint.1, 2);
+    }
+    if tick % 30 == 0 {
+        if let Some((t, _)) = nearest_enemy(world, i, 6000.0, None) {
+            beam(world, i, t, 25.0, "was erased by a chroniton beam");
+        }
+    }
+    if tick < e.next_at {
+        return;
+    }
+    let target = (0..world.planets.len())
+        .filter(|&k| {
+            let pl = &world.planets[k];
+            Team::PLAYABLE.contains(&pl.owner) && pl.flags & PL_HOME == 0 && pl.armies > 0 && dist(x, y, pl.x, pl.y) < INCURSION_RANGE
+        })
+        .max_by_key(|&k| world.planets[k].armies);
+    let Some(k) = target else {
+        e.next_at = tick + 10 * UPS as u32;
+        return;
+    };
+    let pl = &mut world.planets[k];
+    e.erased.push((k, pl.owner, pl.armies, pl.flags));
+    let (px, py, name, old) = (pl.x, pl.y, pl.name, pl.owner);
+    (pl.owner, pl.armies, pl.flags, pl.alien) = (Team::Ind, 0, 0, Some(Faction::Krenim));
+    for p in world.players.iter_mut().filter(|p| p.orbiting == Some(k)) {
+        p.leave_orbit_pub();
+    }
+    world.phasers.push(PhaserShot { info: PhaserInfo { owner: id, x1: x as i32, y1: y as i32, x2: px as i32, y2: py as i32, hit: true }, ticks: 15 });
+    world.players[i].revealed_until = tick + TEMPORAL_WINDOW;
+    e.next_at = tick + INCURSION_EVERY;
+    announce(world, format!("TEMPORAL INCURSION! Annorax erases {} from history. The timeship's temporal shields are down for 15 seconds: attack now!", name));
+    world.check_genocide(old, Team::Ind);
+}
+
+/// The timeship is gone: every world it erased comes back as it was
+/// (unless someone has settled it since).
+fn restore_history(world: &mut World, e: &Event) {
+    for &(k, owner, armies, flags) in &e.erased {
+        let pl = &mut world.planets[k];
+        if pl.alien == Some(Faction::Krenim) && pl.owner == Team::Ind {
+            (pl.owner, pl.armies, pl.flags, pl.alien) = (owner, armies, flags, None);
+        }
+    }
+}
+
+/// The Malon freighter: how often it dumps theta radiation, and the burst
+/// when its tanks rupture.
+const THETA_EVERY: u32 = 3 * UPS as u32;
+const MALON_BURST: f64 = 7000.0;
+const MALON_BURST_DAMAGE: f64 = 70.0;
+
+/// A Malon export vessel ("Night"): it crawls across the galaxy at warp 3,
+/// leaving a trail of theta radiation, and burns anyone who closes in.
+fn malon(world: &mut World, e: &mut Event, i: usize, tick: u32) {
+    let id = i as u8;
+    let (x, y) = (world.players[i].x, world.players[i].y);
+    let (tx, ty) = e.waypoint;
+    steer_to(world, i, tx, ty, 3);
+    e.trail.insert(id, (x, y));
+    if dist(x, y, tx, ty) < 2500.0 || x <= 0.0 || y <= 0.0 || x >= GWIDTH || y >= GWIDTH {
+        world.remove_player(id);
+        e.level = 1;
+        return;
+    }
+    if tick % THETA_EVERY == 0 && !world.terrain.iter().any(|t| t.kind == TerrainKind::ThetaRadiation && dist(t.x, t.y, x, y) < 1800.0) {
+        world.terrain.push(Terrain::theta((x, y)));
+    }
+    if tick % 20 == 0 {
+        if let Some((t, _)) = nearest_enemy(world, i, 5000.0, None) {
+            beam(world, i, t, 15.0, "was burned by a Malon disruptor");
+        }
+    }
+}
+
+/// The Malon freighter has been destroyed: its tanks rupture.
+fn theta_burst(world: &mut World, e: &Event) {
+    let Some(&(x, y)) = e.trail.values().next() else { return };
+    for (j, d) in (0..MAXPLAYER)
+        .filter(|&j| world.players[j].alive() && world.players[j].faction.is_none())
+        .map(|j| (j, dist(world.players[j].x, world.players[j].y, x, y)))
+        .filter(|&(_, d)| d < MALON_BURST)
+        .collect::<Vec<_>>()
+    {
+        world.inflict(j, MALON_BURST_DAMAGE * (1.0 - 0.6 * d / MALON_BURST), None, "was caught in a theta radiation burst".into());
+    }
+    let mut rng = rand::thread_rng();
+    for _ in 0..3 {
+        world.terrain.push(Terrain::theta((x + rng.gen_range(-3000.0..3000.0), y + rng.gen_range(-3000.0..3000.0))));
+    }
+}
+
+/// Vaal: its field, what it drains from each ship there per tick, what
+/// that costs it, how fast it recovers with no one there, and the
+/// planet's people.
+pub const VAAL_FIELD: f64 = 6000.0;
+const VAAL_DRAIN_FUEL: f64 = 80.0;
+const VAAL_DRAIN_SHIELD: f64 = 3.0;
+const VAAL_COST: f64 = 100.0;
+const VAAL_FEED: f64 = 150.0;
+const VAAL_NATIVES: i32 = 20;
+const VAAL_REWARD: f64 = 2.0;
+
+/// Vaal ("The Apple"): it holds its planet and drains the power of every
+/// ship within 6,000. Draining costs it energy, and the natives feed it
+/// when nobody is near. Run it dry and it falls silent; taking its planet
+/// back works too.
+fn vaal(world: &mut World, e: &mut Event, i: usize, tick: u32) {
+    let id = i as u8;
+    let Some(&k) = e.goals.get(&id) else { return };
+    let (px, py, name) = (world.planets[k].x, world.planets[k].y, world.planets[k].name);
+    hold(world, i, px, py);
+    world.zones.push(ZoneInfo { kind: ZoneKind::EnergyDrain, x: px as i32, y: py as i32, r: VAAL_FIELD as i32 });
+    let ships = empire_ships_near(world, px, py, VAAL_FIELD);
+    if world.planets[k].alien != Some(Faction::Vaal) {
+        return vaal_falls(world, i, k, &ships);
+    }
+    let max = world.players[i].stats().max_fuel;
+    if ships.is_empty() {
+        let p = &mut world.players[i];
+        p.fuel = (p.fuel + VAAL_FEED).min(max);
+        return;
+    }
+    for &j in &ships {
+        let q = &mut world.players[j];
+        q.fuel = (q.fuel - VAAL_DRAIN_FUEL).max(0.0);
+        q.shield = (q.shield - VAAL_DRAIN_SHIELD).max(0.0);
+    }
+    let p = &mut world.players[i];
+    p.fuel -= VAAL_COST * ships.len() as f64;
+    let left = (p.fuel / max * 100.0).max(0.0);
+    if tick % 40 == 0 {
+        for &j in &ships {
+            world.warn(j as u8, format!("Vaal is draining your power! Its own energy is running down too: {:.0}% left", left));
+        }
+    }
+    if left < 50.0 && e.level == 0 {
+        e.level = 1;
+        announce(world, format!("Vaal's power is failing (half gone)! Keep ships in its field around {}.", name));
+    }
+    if world.players[i].fuel <= 0.0 {
+        vaal_falls(world, i, k, &ships);
+    }
+}
+
+fn vaal_falls(world: &mut World, i: usize, k: usize, ships: &[usize]) {
+    let pl = &mut world.planets[k];
+    if pl.alien == Some(Faction::Vaal) {
+        (pl.alien, pl.armies) = (None, 5);
+    }
+    for &j in ships {
+        award(world, j, VAAL_REWARD, "Silenced Vaal");
+    }
+    world.kill(i, None, "fell silent".into());
+}
+
+/// Landru: how often the Body absorbs, how far it reaches, and its garrison.
+const ABSORB_EVERY: u32 = 6 * UPS as u32;
+pub const LANDRU_REACH: f64 = 15_000.0;
+const LANDRU_ARMIES: i32 = 25;
+const LANDRU_REWARD: f64 = 3.0;
+
+/// Landru ("The Return of the Archons"): the computer holds its planet and
+/// the Body spreads from it, an army at a time from every colony near it.
+/// Weapons can't touch it from space: take the planet and it dies.
+fn landru(world: &mut World, e: &mut Event, i: usize, tick: u32) {
+    let id = i as u8;
+    let Some(&k) = e.goals.get(&id) else { return };
+    let (px, py, name) = (world.planets[k].x, world.planets[k].y, world.planets[k].name);
+    hold(world, i, px, py);
+    if world.planets[k].alien != Some(Faction::Landru) {
+        // Taken back: the computer is destroyed.
+        let owner = world.planets[k].owner;
+        if let Some(j) = (0..MAXPLAYER).find(|&j| world.players[j].alive() && world.players[j].orbiting == Some(k) && world.players[j].team == owner && owner != Team::Ind) {
+            award(world, j, LANDRU_REWARD, "Destroyed Landru");
+        }
+        for pl in world.planets.iter_mut().filter(|pl| pl.alien == Some(Faction::Landru)) {
+            pl.alien = None;
+        }
+        world.kill(i, None, "was destroyed".into());
+        return;
+    }
+    if tick % ABSORB_EVERY != 0 {
+        return;
+    }
+    for m in 0..world.planets.len() {
+        let pl = &mut world.planets[m];
+        if m == k || !Team::PLAYABLE.contains(&pl.owner) || pl.flags & PL_HOME != 0 || pl.armies <= 0 || dist(px, py, pl.x, pl.y) > LANDRU_REACH {
+            continue;
+        }
+        pl.armies -= 1;
+        if pl.armies == 0 {
+            let (n, old) = (pl.name, pl.owner);
+            (pl.owner, pl.alien, pl.armies) = (Team::Ind, Some(Faction::Landru), 4);
+            announce(world, format!("{} has been absorbed into the Body! \"Landru! Landru!\" Take {} back to stop it.", n, name));
+            world.check_genocide(old, Team::Ind);
+        }
+    }
+}
+
+/// The bluegill parasites ("Conspiracy"): the mother creature sits in orbit
+/// of its host empire's home world; the infected ships fly that empire's
+/// colours, hunt its ships first and bomb its colonies, and its planets
+/// hold their fire.
+fn bluegill(world: &mut World, e: &mut Event, i: usize, tick: u32) {
+    let id = i as u8;
+    let Some(host) = world.players[i].guise.map(|g| g.0) else { return };
+    if world.players[i].ship == ShipType::BluegillMother {
+        if let Some(&k) = e.goals.get(&id) {
+            if world.players[i].orbiting != Some(k) {
+                go_orbit(world, i, k);
+            }
+        }
+        return;
+    }
+    if tick % 2 != 0 {
+        return;
+    }
+    if let Some((t, _)) = nearest_enemy(world, i, 16_000.0, Some(host)) {
+        fight(world, i, t);
+        return;
+    }
+    let target = nearest_planet(world, i, |pl| pl.owner == host && pl.armies > 4 && pl.flags & PL_HOME == 0);
+    if let Some(k) = target {
+        if go_orbit(world, i, k) && !world.players[i].bombing {
+            cmd(world, i, ClientMsg::Bomb);
+        }
+    }
+}
+
+/// The Dreadnought: its speed, how close it must get to strike, its blast,
+/// and how far its point defences reach.
+const DREAD_SPEED: i32 = 3;
+pub const DREAD_STRIKE: f64 = 1800.0;
+const DREAD_BLAST: f64 = 6000.0;
+const DREAD_BLAST_DAMAGE: f64 = 80.0;
+const DREAD_DEFENCE: f64 = 2000.0;
+
+/// The Cardassian Dreadnought ("Dreadnought"): a missile with a mind, on a
+/// straight course for the most populous planet in the galaxy. It jinks,
+/// shoots down torpedoes and fires back; if it gets through, the planet
+/// is wiped out.
+fn dreadnought(world: &mut World, e: &mut Event, i: usize, tick: u32) {
+    let mut rng = rand::thread_rng();
+    let id = i as u8;
+    let Some(&k) = e.goals.get(&id) else { return };
+    let (px, py, name) = (world.planets[k].x, world.planets[k].y, world.planets[k].name);
+    let (x, y) = (world.players[i].x, world.players[i].y);
+    // Weaving toward its target.
+    let jink = ((tick / 25) as f64 * 1.7 + i as f64).sin() * 22.0;
+    let dir = (dir_to(x, y, px, py) + if dist(x, y, px, py) > 6000.0 { jink } else { 0.0 }).rem_euclid(256.0);
+    if tick % 3 == 0 {
+        cmd(world, i, ClientMsg::Course(dir as u8));
+        if world.players[i].desired_speed != DREAD_SPEED {
+            cmd(world, i, ClientMsg::Speed(DREAD_SPEED as u8));
+        }
+    }
+    // Point defences.
+    for t in world.torps.iter_mut() {
+        if t.explode == 0 && t.team != Team::Ind && dist(t.x, t.y, x, y) < DREAD_DEFENCE && rng.gen_bool(0.15) {
+            t.explode = 1;
+            t.damage = 0.0;
+        }
+    }
+    if tick % 10 == 0 {
+        if let Some((t, _)) = nearest_enemy(world, i, 8000.0, None) {
+            snipe(world, i, t, 0.7);
+        }
+    }
+    if dist(x, y, px, py) > DREAD_STRIKE {
+        return;
+    }
+    // Detonation.
+    let pl = &mut world.planets[k];
+    let old = pl.owner;
+    (pl.owner, pl.armies, pl.flags, pl.alien) = (Team::Ind, 0, 0, None);
+    let caught: Vec<(usize, f64)> = (0..MAXPLAYER)
+        .filter(|&j| j != i && world.players[j].alive() && world.players[j].faction.is_none())
+        .map(|j| (j, dist(world.players[j].x, world.players[j].y, px, py)))
+        .filter(|&(_, d)| d < DREAD_BLAST)
+        .collect();
+    for (j, d) in caught {
+        world.inflict(j, DREAD_BLAST_DAMAGE * (1.0 - 0.6 * d / DREAD_BLAST), None, "was caught in the Dreadnought's blast".into());
+    }
+    announce(world, format!("The Dreadnought strikes {}! Its warhead detonates, and the planet is laid waste.", name));
+    world.check_genocide(old, Team::Ind);
+    world.remove_player(id);
+    e.level = 1;
+}
+
+/// The Scimitar's thalaron weapon: its reach, how long it charges, how
+/// often, how much damage disrupts it, and what it does to a hull.
+pub const THALARON_R: f64 = 10_000.0;
+const THALARON_CHARGE: i32 = 15 * UPS as i32;
+const THALARON_EVERY: u32 = 60 * UPS as u32;
+const THALARON_BREAK: f64 = 80.0;
+const THALARON_HULL: f64 = 40.0;
+
+/// Shinzon's Scimitar (Nemesis): it hunts the leading empire's ships under
+/// cloak, firing as it goes. Every minute it decloaks and charges its
+/// thalaron weapon, which kills the crews (armies) of every ship near it
+/// and thins out the planets too, unless it's hit hard enough while it
+/// charges.
+fn scimitar(world: &mut World, e: &mut Event, i: usize, tick: u32) {
+    let id = i as u8;
+    let (x, y) = (world.players[i].x, world.players[i].y);
+    if let Some(n) = e.progress.get(&id).copied() {
+        hold(world, i, x, y);
+        world.players[i].cloaked = false;
+        world.zones.push(ZoneInfo { kind: ZoneKind::Thalaron, x: x as i32, y: y as i32, r: THALARON_R as i32 });
+        let taken = world.players[i].damage - e.dwell as f64 / 10.0;
+        if taken >= THALARON_BREAK {
+            e.progress.remove(&id);
+            e.next_at = tick + 45 * UPS as u32;
+            world.players[i].cloaked = true;
+            announce(world, "The Scimitar's thalaron generator is disrupted! It cloaks and slips away.");
+            return;
+        }
+        e.progress.insert(id, n + 1);
+        if THALARON_CHARGE - n == 5 * UPS as i32 {
+            announce(world, "The Scimitar's thalaron weapon fires in 5 seconds!");
+        }
+        if n + 1 < THALARON_CHARGE {
+            return;
+        }
+        // It fires.
+        e.progress.remove(&id);
+        e.next_at = tick + THALARON_EVERY;
+        world.players[i].cloaked = true;
+        let caught = empire_ships_near(world, x, y, THALARON_R);
+        for &j in &caught {
+            world.players[j].armies = 0;
+            world.players[j].crew = world.players[j].crew.min(1);
+            world.hit_kind = super::world::HitKind::Polaron;
+            world.inflict(j, THALARON_HULL, Some(id), "was bathed in thalaron radiation".into());
+        }
+        for pl in world.planets.iter_mut().filter(|pl| Team::PLAYABLE.contains(&pl.owner) && dist(pl.x, pl.y, x, y) < THALARON_R) {
+            pl.armies -= pl.armies / 3;
+        }
+        announce(world, format!("THALARON RADIATION! The Scimitar's weapon fires: {} ships lose their crews, and nearby worlds are decimated.", caught.len()));
+        return;
+    }
+    // Under cloak (a hit shows it up for a while).
+    if tick >= world.players[i].revealed_until {
+        world.players[i].cloaked = true;
+    }
+    if tick >= e.next_at && !empire_ships_near(world, x, y, THALARON_R).is_empty() {
+        e.progress.insert(id, 0);
+        e.dwell = (world.players[i].damage * 10.0) as i32;
+        world.players[i].cloaked = false;
+        announce(world, format!("The Scimitar decloaks near {} and begins charging its THALARON weapon! Hit it hard to disrupt it, or get more than 10,000 away.", nearest_planet_name(world, x, y)));
+        return;
+    }
+    if tick % 2 == 0 {
+        match nearest_enemy(world, i, 40_000.0, leading_empire(world)) {
+            Some((t, _)) => fight(world, i, t),
+            None => steer_to(world, i, e.waypoint.0, e.waypoint.1, 6),
+        }
+    }
+}
+
+/// The Calamarain: how close they envelop a ship, and what they take from
+/// it each tick.
+pub const CALAMARAIN_R: f64 = 2500.0;
+const CALAMARAIN_SHIELD: f64 = 4.0;
+const CALAMARAIN_HULL: f64 = 0.8;
+
+/// The Calamarain ("Déjà Q"): a cloud that hunts the most decorated
+/// captain about (highest rank, then most kills), and strips the shields
+/// and then the hull of any ship inside it.
+fn calamarain(world: &mut World, e: &mut Event, i: usize, tick: u32) {
+    let id = i as u8;
+    let (x, y) = (world.players[i].x, world.players[i].y);
+    let prey_ok = e.prey.map_or(false, |p| world.players[p as usize].alive() && world.players[p as usize].faction.is_none());
+    if !prey_ok || tick % 300 == 0 {
+        e.prey = (0..MAXPLAYER)
+            .filter(|&j| world.players[j].alive() && world.players[j].faction.is_none() && !world.players[j].ship.is_alien())
+            .max_by(|&a, &b| {
+                let (pa, pb) = (&world.players[a], &world.players[b]);
+                (pa.rank.unwrap_or(0), !pa.robot).cmp(&(pb.rank.unwrap_or(0), !pb.robot)).then(pa.total_kills.total_cmp(&pb.total_kills))
+            })
+            .map(|j| j as u8);
+        if let Some(p) = e.prey.filter(|_| !prey_ok) {
+            world.warn(p, "The Calamarain are coming for you!");
+        }
+    }
+    if let Some(p) = e.prey {
+        let (tx, ty) = (world.players[p as usize].x, world.players[p as usize].y);
+        if tick % 4 == 0 {
+            let max = world.players[i].stats().max_speed;
+            steer_to(world, i, tx, ty, if dist(x, y, tx, ty) < 800.0 { 2 } else { max });
+        }
+    }
+    for j in empire_ships_near(world, x, y, CALAMARAIN_R) {
+        let q = &mut world.players[j];
+        q.shield = (q.shield - CALAMARAIN_SHIELD).max(0.0);
+        if q.shield <= 0.0 || !q.shields_up {
+            world.hit_kind = super::world::HitKind::Polaron;
+            world.inflict(j, CALAMARAIN_HULL, Some(id), "was torn apart by the Calamarain".into());
+        }
+        if (tick + j as u32) % 50 == 0 {
+            world.warn(j as u8, "Enveloped by the Calamarain! Phasers hurt them; torpedoes pass through");
+        }
+    }
+}
+
+/// Nagilum: how far it pulls, how hard, the maw that swallows ships, how
+/// long it keeps them, and how many it wants to study.
+pub const NAGILUM_PULL_R: f64 = 7000.0;
+const NAGILUM_PULL: f64 = 18.0;
+pub const NAGILUM_MAW: f64 = 1500.0;
+pub const NAGILUM_TICKS: u32 = 20 * UPS as u32;
+const NAGILUM_SUBJECTS: u8 = 4;
+
+/// Nagilum ("Where Silence Has Lease"): a hole in space that drifts toward
+/// ships, pulls in those that come near, and swallows them for a while to
+/// study them. When it has studied enough of us, it leaves.
+fn nagilum(world: &mut World, e: &mut Event, i: usize, tick: u32) {
+    let id = i as u8;
+    let (x, y) = (world.players[i].x, world.players[i].y);
+    if e.level >= NAGILUM_SUBJECTS {
+        // Studied enough: once the last is back, it goes.
+        if !world.players.iter().any(|p| matches!(p.away, Some((super::world::Away::Nagilum, _)))) {
+            world.remove_player(id);
+            e.dwell = 1;
+        }
+        return;
+    }
+    if tick % 10 == 0 {
+        match nearest_enemy(world, i, 40_000.0, None) {
+            Some((t, _)) => {
+                let (tx, ty) = (world.players[t].x, world.players[t].y);
+                steer_to(world, i, tx, ty, 1);
+            }
+            None => steer_to(world, i, x, y, 0),
+        }
+    }
+    let tick_now = world.tick;
+    for j in empire_ships_near(world, x, y, NAGILUM_PULL_R) {
+        let q = &world.players[j];
+        let d = dist(q.x, q.y, x, y).max(1.0);
+        if d < NAGILUM_MAW && tick_now >= q.wormhole_until {
+            let who = q.label();
+            world.send_away(j, super::world::Away::Nagilum, NAGILUM_TICKS);
+            let p = &mut world.players[j];
+            (p.x, p.y) = (x, y);
+            e.level += 1;
+            world.warn(j as u8, "Nagilum has taken you. \"What is this... death?\" (20 s)");
+            announce(world, format!("Nagilum swallows {}! \"I wish to study your death.\"", who));
+            if e.level >= NAGILUM_SUBJECTS {
+                break;
+            }
+            continue;
+        }
+        if q.orbiting.is_none() && !q.techs.contains(&Tech::MetaphasicShields) && !super::terrain::anti_gravity(q.ship) {
+            let pull = 6.0 + NAGILUM_PULL * (1.0 - d / NAGILUM_PULL_R);
+            let q = &mut world.players[j];
+            q.x += (x - q.x) / d * pull;
+            q.y += (y - q.y) / d * pull;
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -4302,7 +5451,9 @@ mod tests {
                     ["Khan", "Gorn", "Tholian", "Fesarius", "Balok", "Terran", "planet killer", "amoeba", "Borg", "V'Ger",
                         "Crystalline", "probe", "8472", "Jem'Hadar", "wormhole", "ribble", "Chang", "Hirogen", "Q", "Ferengi",
                         "warm", "TEMPEST", "Tempest", "NOMAD", "Nomad", "Armus", "anite", "hangeling", "Metron", "Pakled", "10-C",
-                        "Caretaker", "Horta", "Sphere", "DYSON", "Dyson", "Kzin", "Death Star", "Imperial", "CYGNUS", "Cygnus", "MOON", "Moon", "MONGO", "Ming"]
+                        "Caretaker", "Horta", "Sphere", "DYSON", "Dyson", "Kzin", "Death Star", "Imperial", "CYGNUS", "Cygnus", "MOON", "Moon", "MONGO", "Ming",
+                        "NARADA", "Narada", "TIMESHIP", "Krenim", "Malon", "VAAL", "Vaal", "LANDRU", "Landru", "CONSPIRACY", "bluegill", "DREADNOUGHT", "Dreadnought",
+                        "SCIMITAR", "Scimitar", "CALAMARAIN", "Calamarain", "NAGILUM", "Nagilum"]
                         .iter()
                         .any(|k| m.contains(k))
                 })
@@ -5546,6 +6697,7 @@ mod tests {
             stolen: HashMap::new(),
             inside: Vec::new(),
             cooldown: 0,
+            erased: Vec::new(),
         }
     }
 
@@ -5680,4 +6832,392 @@ mod tests {
         }
         assert_eq!(TempestShape::Circle.next().next().next(), TempestShape::Circle);
     }
+
+    /// An event of `kind` with one alien ship of `ship` at (x, y).
+    fn one_alien(w: &mut World, kind: Faction, ship: ShipType, x: f64, y: f64) -> (Event, usize) {
+        let id = w.spawn_alien("Alien", kind, ship, x, y, 10.0).unwrap();
+        let mut e = test_event(kind);
+        e.ships.push(id);
+        e.started = w.tick;
+        (e, id as usize)
+    }
+
+    /// A colony (not a home world) owned by an empire.
+    fn colony(w: &World, team: Team) -> usize {
+        (0..PLANETS.len()).find(|&k| w.planets[k].owner == team && w.planets[k].flags & PL_HOME == 0).unwrap()
+    }
+
+    #[test]
+    fn narada_drills_a_planet_into_a_black_hole() {
+        let mut w = World::new();
+        let k = colony(&w, Team::Fed);
+        w.planets[k].armies = 55;
+        let (px, py) = (w.planets[k].x, w.planets[k].y);
+        let (mut e, n) = one_alien(&mut w, Faction::Narada, ShipType::Narada, px + 2000.0, py);
+        run_event(&mut w, &mut e);
+        let drill = e.ships.iter().map(|&s| s as usize).find(|&s| w.players[s].ship == ShipType::NaradaDrill).expect("drill lowered");
+        assert!(alerts(&mut w).iter().any(|m| m.contains("DRILL")));
+        // Planets can't shoot it down.
+        for _ in 0..20 {
+            w.tick();
+        }
+        assert_eq!(w.players[drill].damage, 0.0);
+        for _ in 0..DRILL_TICKS {
+            w.tick += 1;
+            run_event(&mut w, &mut e);
+        }
+        assert_eq!(w.planets[k].alien, Some(Faction::Narada));
+        assert_eq!((w.planets[k].armies, w.planets[k].owner), (0, Team::Ind));
+        assert!(w.terrain.iter().any(|t| t.kind == TerrainKind::BlackHole && dist(t.x, t.y, px, py) < 1.0), "a black hole where it was");
+        assert_eq!(e.level, 1);
+        // A destroyed drill stops it; Nero tries again later.
+        e.next_at = 0;
+        let k2 = colony(&w, Team::Rom);
+        w.planets[k2].armies = 59;
+        (w.players[n].x, w.players[n].y) = (w.planets[k2].x + 2000.0, w.planets[k2].y);
+        run_event(&mut w, &mut e);
+        let drill = e.ships.iter().map(|&s| s as usize).find(|&s| w.players[s].ship == ShipType::NaradaDrill && w.players[s].alive()).unwrap();
+        w.kill(drill, None, "test".into());
+        w.tick += 1;
+        run_event(&mut w, &mut e);
+        assert!(alerts(&mut w).iter().any(|m| m.contains("drill is destroyed")));
+        assert!(e.next_at > w.tick && w.planets[k2].alien.is_none());
+    }
+
+    #[test]
+    fn krenim_erase_worlds_and_history_comes_back() {
+        let (mut w, kirk) = with_cruiser(0.0, 0.0);
+        let k = colony(&w, Team::Fed);
+        w.planets[k].armies = 50;
+        let (px, py) = (w.planets[k].x, w.planets[k].y);
+        let (mut e, t) = one_alien(&mut w, Faction::Krenim, ShipType::KrenimTimeship, px + 3000.0, py);
+        // Temporal shields: untouchable.
+        w.players[t].shields_up = false;
+        w.players[kirk as usize].x = px;
+        w.inflict(t, 50.0, Some(kirk), "test".into());
+        assert_eq!(w.players[t].damage, 0.0);
+        run_event(&mut w, &mut e);
+        assert_eq!((w.planets[k].owner, w.planets[k].armies, w.planets[k].alien), (Team::Ind, 0, Some(Faction::Krenim)));
+        // Its shields are down for a while after an incursion.
+        w.inflict(t, 50.0, Some(kirk), "test".into());
+        assert!(w.players[t].damage > 0.0);
+        let hit = w.players[t].damage;
+        w.tick += TEMPORAL_WINDOW + 1;
+        w.inflict(t, 50.0, Some(kirk), "test".into());
+        assert_eq!(w.players[t].damage, hit, "shields back up");
+        restore_history(&mut w, &e);
+        assert_eq!((w.planets[k].owner, w.planets[k].armies, w.planets[k].alien), (Team::Fed, 50, None));
+    }
+
+    #[test]
+    fn malon_dump_theta_and_their_tanks_burst() {
+        let (mut w, kirk) = with_cruiser(50_000.0, 52_000.0);
+        let (mut e, m) = one_alien(&mut w, Faction::Malon, ShipType::MalonFreighter, 50_000.0, 50_000.0);
+        e.waypoint = (99_000.0, 50_000.0);
+        for _ in 0..THETA_EVERY {
+            w.tick += 1;
+            run_event(&mut w, &mut e);
+        }
+        assert!(w.terrain.iter().any(|t| t.kind == TerrainKind::ThetaRadiation));
+        w.kill(m, Some(kirk), "test".into());
+        w.players[kirk as usize].shields_up = false;
+        let before = w.players[kirk as usize].damage;
+        theta_burst(&mut w, &e);
+        assert!(w.players[kirk as usize].damage > before + 20.0);
+        // Across the galaxy: gone, not beaten.
+        let (mut e, m) = one_alien(&mut w, Faction::Malon, ShipType::MalonFreighter, 98_000.0, 50_000.0);
+        e.waypoint = (99_000.0, 50_000.0);
+        run_event(&mut w, &mut e);
+        assert!(!w.players[m].in_use && departed(&e));
+    }
+
+    #[test]
+    fn vaal_drains_ships_until_it_falls_silent() {
+        let (mut w, kirk) = with_cruiser(0.0, 0.0);
+        let mut d = Director::new(AlienConfig { kinds: vec![Faction::Vaal], interval: 30 });
+        d.spawn_kind(&mut w, Faction::Vaal, None);
+        let v = d.events[0].ships[0] as usize;
+        let k = d.events[0].goals[&(v as u8)];
+        assert_eq!(w.planets[k].alien, Some(Faction::Vaal));
+        let k_id = kirk as usize;
+        (w.players[k_id].x, w.players[k_id].y) = (w.planets[k].x + 3000.0, w.planets[k].y);
+        let fuel = w.players[k_id].fuel;
+        w.inflict(v, 500.0, Some(kirk), "test".into());
+        assert!(w.players[v].alive(), "weapons can't touch it");
+        let mut e = d.events.remove(0);
+        run_event(&mut w, &mut e);
+        assert!(w.players[k_id].fuel < fuel, "drained");
+        w.players[v].fuel = 50.0;
+        let kills = w.players[k_id].kills;
+        run_event(&mut w, &mut e);
+        assert!(!w.players[v].alive(), "silent");
+        assert_eq!(w.planets[k].alien, None);
+        assert_eq!(w.players[k_id].kills, kills + VAAL_REWARD);
+        assert!(w.players[k_id].alive(), "and it didn't blow up");
+    }
+
+    #[test]
+    fn landru_absorbs_colonies_and_dies_with_its_planet() {
+        let (mut w, kirk) = with_cruiser(0.0, 0.0);
+        let mut d = Director::new(AlienConfig { kinds: vec![Faction::Landru], interval: 30 });
+        d.spawn_kind(&mut w, Faction::Landru, None);
+        let mut e = d.events.remove(0);
+        let l = e.ships[0] as usize;
+        let k = e.goals[&(l as u8)];
+        let (px, py) = (w.planets[k].x, w.planets[k].y);
+        // A colony nearby with a single army left.
+        let near = (0..PLANETS.len())
+            .filter(|&m| m != k && Team::PLAYABLE.contains(&w.planets[m].owner) && w.planets[m].flags & PL_HOME == 0)
+            .min_by(|&a, &b| dist(px, py, w.planets[a].x, w.planets[a].y).total_cmp(&dist(px, py, w.planets[b].x, w.planets[b].y)))
+            .unwrap();
+        (w.planets[near].x, w.planets[near].y, w.planets[near].armies) = (px + 8000.0, py, 1);
+        w.tick = ABSORB_EVERY * 10;
+        run_event(&mut w, &mut e);
+        assert_eq!(w.planets[near].alien, Some(Faction::Landru), "absorbed into the Body");
+        // Take Landru's planet back.
+        let ki = kirk as usize;
+        (w.planets[k].owner, w.planets[k].alien) = (Team::Fed, None);
+        (w.players[ki].x, w.players[ki].y, w.players[ki].orbiting) = (px, py + ORBDIST, Some(k));
+        let kills = w.players[ki].kills;
+        w.tick += 1;
+        run_event(&mut w, &mut e);
+        assert!(!w.players[l].alive());
+        assert_eq!(w.planets[near].alien, None, "the Body is free");
+        assert_eq!(w.players[ki].kills, kills + LANDRU_REWARD);
+    }
+
+    #[test]
+    fn bluegill_ships_fly_their_hosts_colours() {
+        let (mut w, kirk) = with_cruiser(0.0, 0.0);
+        let mut d = Director::new(AlienConfig { kinds: vec![Faction::Bluegill], interval: 30 });
+        d.spawn_kind(&mut w, Faction::Bluegill, None);
+        let ships = d.events[0].ships.clone();
+        assert_eq!(ships.len(), 4);
+        let mother = ships[0] as usize;
+        let host = w.players[mother].guise.unwrap().0;
+        let infected = ships[1];
+        // A host-empire pilot sees one of its own ships; an observer sees the truth.
+        let pilot = w.add_player("Host", false).unwrap();
+        w.join(pilot, host, ShipType::Cruiser).unwrap();
+        let seen = w.frame_for(pilot).players.into_iter().find(|p| p.id == infected).unwrap();
+        assert_eq!((seen.team, seen.faction), (host, None));
+        let truth = w.frame_for_observer(None).players.into_iter().find(|p| p.id == infected).unwrap();
+        assert_eq!(truth.faction, Some(Faction::Bluegill));
+        // The host's planets hold their fire.
+        let home = host.home_planet();
+        let i = infected as usize;
+        (w.players[i].x, w.players[i].y, w.players[i].shields_up) = (w.planets[home].x + 500.0, w.planets[home].y, false);
+        for _ in 0..10 {
+            w.tick();
+            (w.players[i].x, w.players[i].y) = (w.planets[home].x + 500.0, w.planets[home].y);
+        }
+        assert_eq!(w.players[i].damage, 0.0);
+        // Kill the mother creature and they're all gone.
+        w.kill(mother, Some(kirk), "test".into());
+        for _ in 0..30 {
+            d.tick(&mut w);
+            w.tick();
+        }
+        assert!(d.events.is_empty());
+        assert!(!w.players.iter().any(|p| p.in_use && p.faction == Some(Faction::Bluegill)));
+    }
+
+    #[test]
+    fn dreadnought_wipes_out_its_target() {
+        let (mut w, kirk) = with_cruiser(0.0, 0.0);
+        let k = most_populous(&w).unwrap();
+        let (px, py) = (w.planets[k].x, w.planets[k].y);
+        let (mut e, dn) = one_alien(&mut w, Faction::Dreadnought, ShipType::DreadnoughtMissile, px + 5000.0, py);
+        e.goals.insert(dn as u8, k);
+        // Its point defences shoot down incoming torpedoes.
+        let ki = kirk as usize;
+        (w.players[ki].x, w.players[ki].y) = (px + 5000.0, py + 3000.0);
+        for _ in 0..8 {
+            w.handle(kirk, ClientMsg::Torp(0));
+        }
+        let mut downed = 0;
+        for _ in 0..12 {
+            w.tick += 1;
+            run_event(&mut w, &mut e);
+            downed += w.torps.iter().filter(|t| t.owner == kirk && t.explode > 0 && t.damage == 0.0).count();
+            w.tick();
+        }
+        assert!(downed > 0, "torpedoes shot down");
+        (w.players[dn].x, w.players[dn].y) = (px + 1000.0, py);
+        w.tick += 1;
+        run_event(&mut w, &mut e);
+        assert_eq!((w.planets[k].armies, w.planets[k].owner), (0, Team::Ind));
+        assert!(departed(&e) && !w.players[dn].in_use);
+    }
+
+    #[test]
+    fn scimitar_fires_cloaked_and_its_thalaron_weapon_kills_crews() {
+        let (mut w, kirk) = with_cruiser(50_000.0, 54_000.0);
+        let (mut e, sc) = one_alien(&mut w, Faction::Scimitar, ShipType::Scimitar, 50_000.0, 50_000.0);
+        w.players[sc].cloaked = true;
+        w.handle(sc as u8, ClientMsg::Torp(0));
+        assert!(w.torps.iter().any(|t| t.owner == sc as u8), "fires under cloak");
+        let ki = kirk as usize;
+        w.players[ki].armies = 4;
+        e.next_at = 0;
+        run_event(&mut w, &mut e);
+        assert!(e.progress.contains_key(&(sc as u8)), "charging");
+        assert!(w.zones.iter().any(|z| z.kind == ZoneKind::Thalaron) || !w.players[sc].cloaked);
+        for _ in 0..THALARON_CHARGE + 1 {
+            w.tick += 1;
+            run_event(&mut w, &mut e);
+        }
+        assert_eq!(w.players[ki].armies, 0, "its crew are dead");
+        assert!(w.players[ki].damage > 0.0);
+        // Hit it hard while it charges and it's disrupted.
+        e.next_at = 0;
+        w.tick += 1;
+        run_event(&mut w, &mut e);
+        assert!(e.progress.contains_key(&(sc as u8)));
+        w.players[sc].shields_up = false;
+        w.inflict(sc, THALARON_BREAK + 1.0, Some(kirk), "test".into());
+        w.tick += 1;
+        run_event(&mut w, &mut e);
+        assert!(!e.progress.contains_key(&(sc as u8)), "disrupted");
+    }
+
+    #[test]
+    fn calamarain_envelop_and_shrug_off_torpedoes() {
+        let (mut w, kirk) = with_cruiser(50_000.0, 50_000.0);
+        let (mut e, c) = one_alien(&mut w, Faction::Calamarain, ShipType::Calamarain, 51_000.0, 50_000.0);
+        let ki = kirk as usize;
+        let shield = w.players[ki].shield;
+        run_event(&mut w, &mut e);
+        assert!(w.players[ki].shield < shield, "enveloped");
+        assert_eq!(e.prey, Some(kirk));
+        w.hit_kind = super::super::world::HitKind::Photon;
+        w.inflict(c, 100.0, Some(kirk), "test".into());
+        assert!((w.players[c].damage - 10.0).abs() < 1e-6, "torpedoes pass through");
+        w.hit_kind = super::super::world::HitKind::Phaser;
+        w.inflict(c, 100.0, Some(kirk), "test".into());
+        assert!((w.players[c].damage - 110.0).abs() < 1e-6, "phasers burn");
+    }
+
+    #[test]
+    fn nagilum_takes_ships_and_gives_them_back() {
+        let (mut w, kirk) = with_cruiser(50_000.0, 54_000.0);
+        let (mut e, n) = one_alien(&mut w, Faction::Nagilum, ShipType::Nagilum, 50_000.0, 50_000.0);
+        let ki = kirk as usize;
+        run_event(&mut w, &mut e);
+        assert!(w.players[ki].y < 54_000.0, "pulled in");
+        (w.players[ki].x, w.players[ki].y) = (50_000.0, 50_800.0);
+        run_event(&mut w, &mut e);
+        assert!(w.players[ki].away.is_some() && !w.players[ki].alive(), "swallowed");
+        assert_eq!(e.level, 1);
+        w.inflict(n, 1000.0, Some(kirk), "test".into());
+        assert_eq!(w.players[n].damage, 0.0);
+        for _ in 0..NAGILUM_TICKS + 2 {
+            w.tick();
+        }
+        assert!(w.players[ki].alive(), "released");
+        assert!(dist(w.players[ki].x, w.players[ki].y, 50_000.0, 50_000.0) > NAGILUM_MAW, "thrown clear");
+    }
+
+    /// Did the robots deal with this incursion properly? `log` is every
+    /// alert from its arrival to its end.
+    fn handled(kind: Faction, ending: Ending, log: &[String]) -> bool {
+        let said = |t: &str| log.iter().any(|m| m.contains(t));
+        match kind {
+            Faction::Moonbase => said("is saved"),
+            Faction::Nagilum => ending != Ending::Departed,
+            Faction::Q => ending == Ending::Beaten && !said("How disappointing"),
+            Faction::Ferengi => ending == Ending::Beaten && !said("escapes with"),
+            Faction::Pakleds => ending == Ending::Beaten && !said("gets away"),
+            _ => ending == Ending::Beaten,
+        }
+    }
+
+    /// One incursion against a four-empire robot war that has been going for
+    /// a minute: how it ended, and whether the robots handled it.
+    fn robots_versus(kind: Faction) -> (Ending, bool, Vec<String>) {
+        let mut world = World::new();
+        let mut bots = Vec::new();
+        // EMPIRES=2 for the classic Federation vs Romulan game (six a side).
+        let two = std::env::var("EMPIRES").map_or(false, |v| v == "2");
+        let empires: &[Team] = if two { &[Team::Fed, Team::Rom] } else { &Team::PLAYABLE };
+        for &t in empires {
+            for _ in 0..(if two { 6 } else { 3 }) {
+                bots.push(bot::spawn(&mut world, t).unwrap());
+            }
+        }
+        if kind == Faction::Cygnus {
+            world.terrain.push(super::super::terrain::tests_make(TerrainKind::GreatBlackHole, 50_000.0, 50_000.0, super::super::terrain::GREAT_HOLE_R));
+        }
+        let mut director = Director::new(AlienConfig { kinds: vec![kind], interval: 100_000 });
+        director.next_spawn = 60 * UPS as u32;
+        let mut log = Vec::new();
+        for _ in 0..(UPS as u32 * 60 * 13) {
+            director.tick(&mut world);
+            for b in bots.iter_mut() {
+                b.think(&mut world);
+            }
+            world.tick();
+            log.extend(world.outbox.drain(..).filter(|o| o.msg.from == "ALERT").map(|o| o.msg.text));
+            world.warnings.clear();
+            if let Some(&(_, ending)) = director.log.first() {
+                let ok = handled(kind, ending, &log);
+                return (ending, ok, log);
+            }
+        }
+        (Ending::Withdrew, false, log)
+    }
+
+    /// How well robots cope with each incursion (run with --ignored --nocapture).
+    #[test]
+    #[ignore]
+    fn robot_alien_report() {
+        let trials: usize = std::env::var("TRIALS").ok().and_then(|v| v.parse().ok()).unwrap_or(3);
+        let only = std::env::var("ONLY").ok();
+        for kind in Faction::ALL {
+            if kind == Faction::Kzinti || only.as_ref().map_or(false, |o| !o.split(',').any(|k| k == kind.key())) {
+                continue;
+            }
+            let mut ok = 0;
+            let mut endings = Vec::new();
+            for _ in 0..trials {
+                let (ending, good, log) = robots_versus(kind);
+                ok += usize::from(good);
+                endings.push(format!("{:?}", ending));
+                if only.is_some() {
+                    for m in &log {
+                        println!("    {}", m);
+                    }
+                    println!("    ---");
+                }
+            }
+            println!("{:12} {}/{}  {}", kind.key(), ok, trials, endings.join(" "));
+        }
+    }
+
+    /// Robots deal with every incursion that takes more than fighting: each
+    /// is run against a robot war several times, and the robots must do
+    /// what it takes (join V'Ger, answer the probe, talk Nomad down, hold
+    /// 10-C's beacons, starve Vaal, catch the Krenim with its shields down,
+    /// plasma the bioships...) at least two times in three. The hardest (the
+    /// Borg, Ferengi who might slip away, bioships, tribbles, the Dyson
+    /// sphere) at least once in five.
+    #[test]
+    fn robots_deal_with_the_aliens() {
+        let hard = [Faction::Borg, Faction::Ferengi, Faction::Species8472, Faction::Tribbles, Faction::Dyson];
+        let kinds = [
+            Faction::Fesarius, Faction::Doomsday, Faction::Borg, Faction::Vger, Faction::Crystal, Faction::Probe, Faction::Species8472,
+            Faction::Tribbles, Faction::Q, Faction::Ferengi, Faction::Tempest, Faction::Nomad, Faction::Armus, Faction::TenC,
+            Faction::Dyson, Faction::Cygnus, Faction::Krenim, Faction::Vaal, Faction::Landru, Faction::Dreadnought, Faction::Nagilum,
+        ];
+        let mut failures = Vec::new();
+        for kind in kinds {
+            let (tries, need) = if hard.contains(&kind) { (5, 1) } else { (3, 2) };
+            let ok = (0..tries).filter(|_| robots_versus(kind).1).count();
+            if ok < need {
+                failures.push(format!("{:?} {}/{}", kind, ok, tries));
+            }
+        }
+        assert!(failures.is_empty(), "robots didn't cope with: {}", failures.join(", "));
+    }
 }
+

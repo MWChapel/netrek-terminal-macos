@@ -19,7 +19,7 @@ const FUNNEL: f32 = 5000.0;
 
 /// Whether `t` is a stretch between two points rather than a round patch.
 fn is_segment(t: &TerrainInfo) -> bool {
-    matches!(t.kind, TerrainKind::Corridor | TerrainKind::Comet | TerrainKind::GalacticBarrier)
+    matches!(t.kind, TerrainKind::Corridor | TerrainKind::Comet | TerrainKind::GalacticBarrier | TerrainKind::Nexus | TerrainKind::HekarasCorridor | TerrainKind::NeutralZone)
 }
 
 /// Depth to sort `t` by among everything else in view, or None if it's
@@ -36,7 +36,8 @@ pub(super) fn depth(cam: &Cam, t: &TerrainInfo) -> Option<f32> {
     }
     let mouths: &[(i32, i32)] = if t.kind == TerrainKind::Wormhole { &[(t.x, t.y), (t.x2, t.y2)] } else { &[(t.x, t.y)] };
     let reach = match t.kind {
-        TerrainKind::Wormhole | TerrainKind::FluidicRift => 2000.0,
+        TerrainKind::Wormhole | TerrainKind::FluidicRift | TerrainKind::GuardianOfForever => 2000.0,
+        TerrainKind::GenesisPlanet => GENESIS_REACH,
         TerrainKind::Derelict | TerrainKind::AbandonedStation => 1500.0,
         TerrainKind::BlackHole => r.min(3000.0),
         _ => r,
@@ -668,6 +669,140 @@ pub(super) fn draw(c: &mut Canvas, cam: &Cam, t: &TerrainInfo, tick: u32, tr: &T
             }
             label(c, tr, cam, x, y, 1800.0, &t.name, RIFT, fs);
         }
+        TerrainKind::BriarPatch => {
+            cloud(c, cam, t, (BRIAR, BRIAR_ROSE), 40, 0.12, sd);
+            label(c, tr, cam, x, y, r * 0.35, &t.name, BRIAR, fs);
+        }
+        TerrainKind::Badlands => {
+            cloud(c, cam, t, (BADLANDS, rgb(0x9040c0)), 34, 0.11, sd);
+            // Plasma fire flaring through the storm.
+            let flicker = (tick / 4) as u64;
+            for k in 0..5u64 {
+                let ang = rnd(sd ^ flicker, k) * TAU;
+                let d = rnd(sd ^ flicker, k + 30).sqrt() * r * 0.9;
+                let p = cam.at(x + ang.cos() * d, y + ang.sin() * d, (rnd(sd ^ flicker, k + 60) - 0.5) * r * 0.3);
+                glow3(c, cam, p, 900.0, PLASMA_FIRE, 0.6);
+                glow3(c, cam, p, 250.0, mix(PLASMA_FIRE, WHITE, 0.5), 0.9);
+            }
+            label(c, tr, cam, x, y, r * 0.35, &t.name, BADLANDS, fs);
+        }
+        TerrainKind::Nexus => {
+            // A ribbon of energy, twisting as it stands across the plane.
+            let (x2, y2) = (t.x2 as f32, t.y2 as f32);
+            let n = 60;
+            for (k, col) in [(0.0f32, NEXUS), (1.7, NEXUS_HOT)] {
+                let pts: Vec<V3> = (0..=n)
+                    .map(|j| {
+                        let s = j as f32 / n as f32;
+                        let tw = s * 18.0 + tickf * 0.12 + k;
+                        cam.at(x + (x2 - x) * s, y + (y2 - y) * s, 900.0 * tw.sin())
+                    })
+                    .collect();
+                poly3(c, cam, &pts, false, 5.0, col, 0.18, false);
+                poly3(c, cam, &pts, false, 1.5, mix(col, WHITE, 0.4), 0.85, false);
+            }
+            for j in 0..12u64 {
+                let s = (rnd(sd, j) + tickf * 0.002).fract();
+                glow3(c, cam, cam.at(x + (x2 - x) * s, y + (y2 - y) * s, 0.0), 700.0, NEXUS, 0.35);
+            }
+            label(c, tr, cam, (x + x2) / 2.0, (y + y2) / 2.0, 1400.0, &t.name, NEXUS, fs);
+        }
+        TerrainKind::TykensRift => {
+            ring3(c, cam, x, y, r, 0.0, 1.2, TYKEN, 0.6, true);
+            // A dark vortex drawing energy in.
+            for arm in 0..5 {
+                let a0 = arm as f32 / 5.0 * TAU - tickf * 0.03;
+                let pts: Vec<V3> = (0..=16)
+                    .map(|k| {
+                        let s = k as f32 / 16.0;
+                        let a = a0 + s * 2.5;
+                        cam.at(x + a.cos() * r * (1.0 - s * 0.85), y + a.sin() * r * (1.0 - s * 0.85), -s * 1500.0)
+                    })
+                    .collect();
+                poly3(c, cam, &pts, false, 1.2, TYKEN, 0.55, false);
+            }
+            glow3(c, cam, cam.at(x, y, -1500.0), 900.0, mix(TYKEN, WHITE, 0.4), 0.7);
+            label(c, tr, cam, x, y, 900.0, &t.name, TYKEN, fs);
+        }
+        TerrainKind::GenesisPlanet => {
+            let k = t.phase as f32 / 255.0;
+            let col = mix(GENESIS, GENESIS_DYING, k * k);
+            ring3(c, cam, x, y, GENESIS_REACH, 0.0, 1.0, GENESIS, 0.3, true);
+            if k > 0.6 {
+                glow3(c, cam, ctr, r * (2.0 + 0.5 * (tickf * 0.5).sin()), GENESIS_DYING, 0.3 * k);
+            }
+            sphere(c, cam, ctr, r, col, 0.2);
+            label(c, tr, cam, x, y, r * 1.3, &t.name, col, fs);
+        }
+        TerrainKind::QuantumFilaments => {
+            ring3(c, cam, x, y, r, 0.0, 1.0, FILAMENT, 0.25, true);
+            let flicker = (tick / 6) as u64;
+            for k in 0..3u64 {
+                let a = rnd(sd ^ flicker, k) * TAU;
+                let d = rnd(sd ^ flicker, k + 50).sqrt() * r;
+                let (gx, gy) = (x + a.cos() * d, y + a.sin() * d);
+                let b = rnd(sd ^ flicker, k + 90) * TAU;
+                let pts = [cam.at(gx - b.cos() * 1200.0, gy - b.sin() * 1200.0, 0.0), cam.at(gx + b.cos() * 1200.0, gy + b.sin() * 1200.0, 0.0)];
+                poly3(c, cam, &pts, false, 1.0, FILAMENT, 0.6, false);
+            }
+            label(c, tr, cam, x, y, r * 0.25, &t.name, FILAMENT, fs);
+        }
+        TerrainKind::HekarasCorridor | TerrainKind::NeutralZone => {
+            let col = if t.kind == TerrainKind::NeutralZone { NEUTRAL } else { HEKARAS };
+            let (x2, y2) = (t.x2 as f32, t.y2 as f32);
+            let (dx, dy) = (x2 - x, y2 - y);
+            let len = (dx * dx + dy * dy).sqrt().max(1.0);
+            let (nx, ny) = (-dy / len, dx / len);
+            let n = (len / 600.0).max(2.0) as usize;
+            for s in [-1.0f32, 1.0] {
+                let pts: Vec<V3> = (0..=n)
+                    .map(|k| {
+                        let f = k as f32 / n as f32;
+                        cam.at(x + dx * f + nx * r * s, y + dy * f + ny * r * s, 0.0)
+                    })
+                    .collect();
+                poly3(c, cam, &pts, false, 1.2, col, 0.6, t.kind == TerrainKind::NeutralZone);
+            }
+            // Marker buoys down both edges.
+            let gap = 3000.0;
+            let mut d = gap / 2.0;
+            while d < len {
+                for s in [-1.0f32, 1.0] {
+                    let (bx, by) = (x + dx / len * d + nx * r * s, y + dy / len * d + ny * r * s);
+                    poly3(c, cam, &[cam.at(bx, by, 0.0), cam.at(bx, by, 600.0)], false, 1.0, col, 0.5, false);
+                    glow3(c, cam, cam.at(bx, by, 600.0), 120.0, col, 0.8);
+                }
+                d += gap;
+            }
+            label(c, tr, cam, x + dx * 0.5, y + dy * 0.5, r, &t.name, col, fs);
+        }
+        TerrainKind::OmegaZone => {
+            for (k, h) in [(1.0f32, 0.0f32), (0.75, 300.0), (0.5, 600.0)] {
+                ring3(c, cam, x, y, r * k, h, 1.2, OMEGA, 0.5 * k, false);
+            }
+            glow3(c, cam, ctr, r * 0.4, OMEGA, 0.12);
+            glow3(c, cam, ctr, 500.0, WHITE, 0.6 + 0.3 * (tickf * 0.4).sin());
+            label(c, tr, cam, x, y, 1500.0, &t.name, OMEGA, fs);
+        }
+        TerrainKind::GuardianOfForever => {
+            // A ring of old stone standing on edge, the mists of time within.
+            let alt = r * 1.2;
+            let ring = |rad: f32| -> Vec<V3> {
+                (0..40).map(|k| {
+                    let a = k as f32 / 40.0 * TAU;
+                    cam.at(x + a.cos() * rad, y, alt + a.sin() * rad)
+                }).collect()
+            };
+            glow3(c, cam, cam.at(x, y, alt), r * 0.9, TIME_MIST, 0.35 + 0.2 * (tickf * 0.2).sin());
+            poly3(c, cam, &ring(r), true, 6.0, scale(GUARDIAN, 0.5), 0.9, false);
+            poly3(c, cam, &ring(r * 1.15), true, 1.2, GUARDIAN, 0.9, false);
+            poly3(c, cam, &ring(r * 0.85), true, 1.0, GUARDIAN, 0.7, false);
+            label(c, tr, cam, x, y, alt + r * 1.5, &t.name, GUARDIAN, fs);
+        }
+        TerrainKind::ThetaRadiation => {
+            let left = (t.phase as f32 / 255.0).max(0.25);
+            cloud(c, cam, t, (THETA, rgb(0x40a020)), 14, 0.1 * left, sd);
+        }
     }
 }
 
@@ -698,6 +833,16 @@ pub(super) fn draw_inside(c: &mut Canvas, cam: &Cam, f: &Frame, w: f32, h: f32, 
             TerrainKind::GravitonEddy => (EDDY, 0.05),
             TerrainKind::Minefield => (MINES, 0.04),
             TerrainKind::GreatBlackHole => (MAELSTROM, 0.04 + 0.2 * deep * deep),
+            TerrainKind::BriarPatch => (BRIAR, 0.12 + 0.1 * deep),
+            TerrainKind::Badlands => {
+                // Plasma fire flaring around you.
+                let flare = rnd(seed(t) ^ (tick / 4) as u64, 999) < 0.15;
+                (if flare { PLASMA_FIRE } else { BADLANDS }, if flare { 0.25 } else { 0.1 + 0.08 * deep })
+            }
+            TerrainKind::TykensRift => (TYKEN, 0.1 + 0.2 * deep),
+            TerrainKind::OmegaZone => (OMEGA, 0.06),
+            TerrainKind::QuantumFilaments => (FILAMENT, 0.03),
+            TerrainKind::ThetaRadiation => (THETA, 0.08 * (t.phase as f32 / 255.0).max(0.3)),
             _ => continue,
         };
         c.fill_rect(0.0, 0.0, w, h, col, a);
@@ -1137,6 +1282,31 @@ pub(super) fn draw_zone_piece(c: &mut Canvas, cam: &Cam, f: &Frame, piece: ZoneP
                     }).collect();
                     poly3(c, cam, &wall, true, 1.2, mix(DISPLACE, WHITE, 0.4), 0.5, false);
                 }
+                ZoneKind::SubspaceTear => {
+                    // A crack in space standing up out of the plane.
+                    let pts: Vec<V3> = crack(z.x as u64 ^ (z.y as u64) << 20, (tick / 3.0) as u64, 10)
+                        .into_iter()
+                        .map(|(a, b)| cam.at(x + a * r * 0.6, y, 300.0 + b * r))
+                        .collect();
+                    glow3(c, cam, cam.at(x, y, 300.0), r, TEAR, 0.35);
+                    poly3(c, cam, &pts, false, 3.0, TEAR, 0.3, false);
+                    poly3(c, cam, &pts, false, 1.3, mix(TEAR, WHITE, 0.5), 0.95, false);
+                }
+                ZoneKind::Thalaron => {
+                    let pulse = (tick * 0.15).fract();
+                    ring3(c, cam, x, y, r, 0.0, 2.0, THALARON, 0.7, false);
+                    ring3(c, cam, x, y, r * (1.0 - pulse), 400.0 * (1.0 - pulse), 1.5, THALARON, 0.6 * pulse, false);
+                    glow3(c, cam, ctr, 1500.0, THALARON, 0.4);
+                }
+                ZoneKind::EnergyDrain => {
+                    ring3(c, cam, x, y, r, 0.0, 1.2, VAAL_FIELD, 0.6, true);
+                    ring3(c, cam, x, y, r * 0.5, 800.0, 1.0, VAAL_FIELD, 0.3, false);
+                }
+                ZoneKind::Tanagra => {
+                    ring3(c, cam, x, y, r, 0.0, 1.5, TANAGRA, 0.75, true);
+                    ring3(c, cam, x, y, r, 600.0, 1.0, TANAGRA, 0.3, false);
+                    label(c, tr, cam, x, y, 900.0, "Tanagra", TANAGRA, fs);
+                }
                 ZoneKind::DysonShell => {}
             }
         }
@@ -1269,6 +1439,8 @@ mod tests {
         kinds.push((TerrainKind::Nebula, true));
         kinds.push((TerrainKind::IonStorm, true));
         kinds.push((TerrainKind::Star, true));
+        kinds.push((TerrainKind::ThetaRadiation, false));
+        kinds.push((TerrainKind::Badlands, true));
         let (pw, ph, cols) = (380, 190, 4);
         let rows = (kinds.len() as i32 + cols - 1) / cols;
         let mut c = Canvas::new(cols * (pw + 6), rows * (ph + 6), [30.0, 30.0, 30.0]);
@@ -1281,6 +1453,13 @@ mod tests {
                 TerrainKind::Wormhole => 600,
                 TerrainKind::Corridor => 700,
                 TerrainKind::Comet => 500,
+                TerrainKind::Nexus => 600,
+                TerrainKind::HekarasCorridor => 1300,
+                TerrainKind::NeutralZone => 1500,
+                TerrainKind::GenesisPlanet => 1500,
+                TerrainKind::GuardianOfForever => 800,
+                TerrainKind::TykensRift => 3500,
+                TerrainKind::ThetaRadiation => 2500,
                 _ => 5500,
             };
             let ahead = |lat: i32, d: i32| (mx + lat, my - d);
@@ -1288,7 +1467,9 @@ mod tests {
                 _ if inside => (ahead(800, 1500), ahead(800, 1500)),
                 TerrainKind::Corridor => (ahead(-9000, 2500), ahead(9000, 16000)),
                 TerrainKind::Comet => (ahead(-2500, 6000), ahead(7000, 14000)),
-                TerrainKind::GalacticBarrier => (ahead(-15000, 6000), ahead(15000, 9000)),
+                TerrainKind::GalacticBarrier | TerrainKind::Nexus => (ahead(-15000, 6000), ahead(15000, 9000)),
+                TerrainKind::HekarasCorridor | TerrainKind::NeutralZone => (ahead(-9000, 2500), ahead(9000, 16000)),
+                TerrainKind::GuardianOfForever | TerrainKind::GenesisPlanet => (ahead(0, 7000), ahead(0, 7000)),
                 TerrainKind::Wormhole => (ahead(0, 5000), (10_000, 10_000)),
                 TerrainKind::Derelict | TerrainKind::AbandonedStation => (ahead(0, 3000), ahead(0, 3000)),
                 TerrainKind::Planetoid | TerrainKind::FluidicRift => (ahead(0, 7000), ahead(0, 7000)),

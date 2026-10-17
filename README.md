@@ -17,7 +17,7 @@ that runs entirely inside a terminal window on macOS.
 - **Trek-style ships:** each empire has its own ship designs (Federation saucers and
   nacelles, Klingon D7s and Birds-of-Prey, Romulan warbirds, Orion raiders).
 - **Robots:** AI pilots fight, bomb, carry armies and capture planets, so you can play solo.
-- **Alien incursions** (optional): thirty-six threats, from Khan, the Borg and the
+- **Alien incursions** (optional): forty-six threats, from Khan, the Borg and the
   planet killer to V'Ger, Species 8472, the Jem'Hadar, General Chang, Q, Nomad, the
   Metrons' arena, a Dyson sphere and a plague of tribbles, drop into the game, and the
   Kzinti arrive with a Ringworld that stays until they lose it. From a galaxy far, far
@@ -25,7 +25,7 @@ that runs entirely inside a terminal window on macOS.
   Black Hole, the Moon drifts through with Moonbase Alpha, and Ming the Merciless brings
   the planet Mongo.
 - **Extras** (optional, each its own server option): career ranks and service records,
-  personal orders from command, treaties between empires, 22 kinds of space terrain (10
+  personal orders from command, treaties between empires, 32 kinds of space terrain (10
   in any one galaxy), supply convoys that buy upgrades for your empire, subsystem damage,
   boarding parties that capture enemy ships, and outposts (defences, shipyards and
   sensor arrays) built on your planets.
@@ -158,12 +158,12 @@ netrek <COMMAND>
 | `-b, --bind <ADDR>` | `0.0.0.0` | Address to bind; use `127.0.0.1` for local-only |
 | `--bots <N>` | `6` | Robot players kept in the game |
 | `-e, --empires <LIST>` | `fed,rom` | Empires the robots play for: `all`, or a comma list such as `fed,rom,kli` |
-| `--aliens [LIST]` | off | Alien incursions: bare `--aliens` for all thirty-six, or a list such as `khan,borg,vger`. See [Alien incursions](#alien-incursions) |
+| `--aliens [LIST]` | off | Alien incursions: bare `--aliens` for all forty-six, or a list such as `khan,borg,vger`. See [Alien incursions](#alien-incursions) |
 | `--alien-interval <SECS>` | `150` | Average seconds between incursions |
 | `--ranks [FILE]` | off | Career ranks, service records and a leaderboard, saved to `FILE` (default `~/.netrek/service-records.tsv`). See [Extras](#extras) |
 | `--orders` | off | Personal orders from command, with rewards |
 | `--diplomacy` | off | Treaties between empires |
-| `--terrain` | off | Space terrain: 10 of 22 kinds per galaxy (nebulae, black holes, minefields, a galactic barrier...) |
+| `--terrain` | off | Space terrain: 10 of 32 kinds per galaxy (nebulae, black holes, minefields, a galactic barrier...) |
 | `--supply` | off | Supply convoys and empire upgrades |
 | `--subsystems` | off | [Subsystem damage](#subsystem-damage): hits can knock out warp, phasers, shields and more |
 | `--boarding` | off | [Boarding parties](#boarding-parties): capture enemy ships with the armies you carry |
@@ -593,6 +593,33 @@ Robots keep the game lively when there aren't enough people. They:
 - make **trench runs** on the Death Star when they're flying a scout or destroyer: they
   swing round its flanks, get right behind it and fire down the exhaust port. In bigger
   ships they leave it alone and fight its escorts
+- know how to deal with **every other incursion** too. Each one tells the robots what it
+  takes, and they share the jobs out among the nearest suitable ships of each empire,
+  dropping their own war to do them:
+  - **gang up** on the big monsters from outside their reach (the Fesarius, the Borg,
+    whom they gather to attack together and close in on while a cube's tractor is busy
+    with someone, the planet killer, the Dreadnought with phasers, the Krenim timeship in
+    the 15 seconds its shields are down, the Narada's drill, the Scimitar while it
+    charges, the Tempest's core when it's exposed), and finish a monster at close range
+    once its shields are nearly gone. A badly damaged robot flies into the planet
+    killer's maw and blows itself up there, as Commodore Decker did
+  - use the **right weapon**: phasers from many ships at once on the Crystalline Entity
+    and the Calamarain, plasma on Species 8472 (robots without it chip away with
+    torpedoes from out of beam range), and plasma whenever it's ready against the monsters
+  - do **what each one asks**: one ship joins with V'Ger at its core while the rest keep
+    out of the cloud; a ship with two armies waits for the whale probe where it's going;
+    one tells Nomad it's imperfect; three hold 10-C's beacons; robots sit in Vaal's field
+    until it fails, bomb and take Landru's planet, bring Q tribute or fight his champion,
+    and fight the Cygnus from inside the Black Hole's well
+  - **stay clear** where that's what it takes: Armus (and never shoot it), Nagilum, the
+    whale probe's drain, 10-C's shear and V'Ger's cloud
+  - hunt **Ferengi** marauders from the start (battleships go to meet them, since they
+    surrender to one), and cut off any that's loaded at the edge it's running for; go after the bluegill mother creature; and when shut inside a
+    **Dyson sphere**, make for the hatch while the rest attack the emitter from outside
+  - **tribbles**: Klingon robots clear infested planets and meet ships carrying them,
+    other empires bomb infested enemy worlds and keep out of orbit there, and a robot
+    carrying tribbles flies to the nearest Klingon ship
+  - on the Tempest's rim, a robot a flipper has grabbed sets off its **Superzapper**
 
 By default robots play the classic two-empire **Federation vs Romulan** game. Use
 `--empires all` (or a list such as `fed,rom,kli`) to have them fly for more empires:
@@ -619,7 +646,7 @@ with aliens on the server keeps 8 of them free for incursions (11 with the Kzint
 is announced to everyone as a magenta **ALERT** message with a klaxon.
 
 ```sh
-netrek server --empires all --bots 12 --aliens            # all thirty-six
+netrek server --empires all --bots 12 --aliens            # all forty-six
 netrek solo --aliens khan,borg,doomsday --alien-interval 90
 ```
 
@@ -641,7 +668,7 @@ netrek solo --aliens khan,borg,doomsday --alien-interval 90
 | `tribbles` | **Tribbles** (*The Trouble with Tribbles*): an outbreak with no ships. An infested planet (marked `T`) stops growing armies and slowly loses them as its food is eaten, and every 30 seconds the tribbles breed their way to a neighbouring world. Ships that orbit an infested planet **pick them up**: they drain fuel, and the ship **infests the next planet it orbits**. **Tribbles hate Klingons**: Klingon planets are never infested, a Klingon ship orbiting an infested planet clears it in 3 seconds, and they flee any ship a Klingon comes within 2,000 units of. Bombing a planet also clears it. The outbreak is over when no planet or ship carries them. |
 | `chang` | **General Chang** (*The Undiscovered Country*): a Klingon Bird-of-Prey that **fires while cloaked**, quoting Shakespeare. You see only a fuzzy blip and its torpedoes. **Any hit** (a stray torpedo, a phaser, even planetary fire) lights up its exhaust and makes it **visible for 20 seconds**. |
 | `hirogen` | **Hirogen hunters** (Voyager): three hunters mark the **best pilot in the galaxy** (most kills this life) as their **prey** and chase only them, fending off anyone who gets close. If they kill their prey they take a **trophy**: half the kills the prey made that life come off its career total, and the hunters repair. Then they pick the next prey. A prey that destroys a hunter earns **an extra kill**. |
-| `q` | **Q** (TNG): appears near the home world of the empire holding the most planets and puts it **on trial** for 90 seconds, with one of three tests: **hold** your territory (lose no more than two planets), bring Q a **tribute** of five armies, or destroy Q's **champion**, a warship only that empire's weapons can hurt. Pass and every ship of that empire is repaired and refuelled and its home world gains 5 armies. Fail and Q hands its richest colony to the weakest empire. Q himself is invulnerable. |
+| `q` | **Q** (TNG): appears near the home world of the empire holding the most planets (of those with ships in play) and puts it **on trial** for 90 seconds, with one of three tests: **hold** your territory (lose no more than two planets), bring Q a **tribute** of five armies, or destroy Q's **champion**, a warship only that empire's weapons can hurt. Pass and every ship of that empire is repaired and refuelled and its home world gains 5 armies. Fail and Q hands its richest colony to the weakest empire. Q himself is invulnerable. |
 | `ferengi` | **Ferengi marauders** (*The Last Outpost*): three marauders loot armies from undefended colonies, tractor passing ships to siphon their fuel, and once full (6 armies) run for the edge of the galaxy. If one escapes, its armies are gone. Destroy one and its stolen armies **spill into space** (shown as a gold `+N`), where the first ship of any empire to fly over them takes them. Marauders **surrender** to any battleship or starbase that gets within 2,500 units (+1 kill). |
 | `swarm` | **The Swarm** (Voyager): eight tiny, fast ships that **latch onto hulls**, draining fuel and slowly eating the ship. Detonating (`d`) shakes off every swarm ship within range, and the swarm always leaves enough fuel in the tank to do it. Each swarm ship is worth only a fifth of a kill. |
 | `tempest` | **The Tempest** (after Atari's 1981 vector arcade game): a neon-blue web, 13,000 across, forms in open space. As in the arcade, it comes in several shapes (a round 16-lane tube, a **square** of 16 lanes, or a **triangle** of 15), starts in a random one, and **reshapes at every new level**. Any empire ship that touches it is **trapped on its rim**: it can only slide around the edge, and there's no escape until the Tempest dies or dissolves. Creatures climb the lanes out of the core in waves, each wave bigger and faster, and ride the web as in the arcade game: small deep in the tube, growing to fill their lane as they reach the rim. **Flippers** (red bowties) climb while flipping end over end into neighbouring lanes, then flip along the rim toward you and **grab** you, dragging you into the core after 5 seconds unless someone shoots them. **Tankers** (purple diamonds) climb dead straight and split into two flippers. **Pulsars** (cyan zigzags) climb slowly, flipping now and then, and electrify their whole lane. **Fuseballs** ride the spokes between lanes, drifting in and out and darting across lanes. They can only be hit while crossing a lane (on a spoke they show as a ghost), and they burn anything they touch at the rim. Trapped ships get one **Superzapper** each (`d`), which destroys everything on the web. The **core** is untouchable while anything is on the web; clear a wave and it's exposed for 20 seconds. Ships trapped on the rim hit it full on; ships outside the web do half damage. It slowly regenerates while shielded, has 1,600 hull, and is worth 6 kills. |
@@ -661,6 +688,16 @@ netrek solo --aliens khan,borg,doomsday --alien-interval 90
 | `cygnus` | **The USS Cygnus** (Disney's *The Black Hole*): only comes when **the Black Hole** is in the galaxy (a `--terrain` feature, so it needs `--terrain` too), and then turns up at the same interval as any other incursion. Dr. Hans Reinhardt's ship, lost for twenty years, hangs **inside the Black Hole's gravity well**, about halfway in, held there by its anti-gravity field. It **never moves from its spot**. Its sentry robots' red **laser batteries** hit any ship within 7,000 every 1.2 seconds (18 damage), and its **torpedoes** reach out to 11,000 (the Black Hole bends them too). **Fire from outside the gravity well can't touch it**: the Black Hole bends it away, and the shooter is told so. To destroy it you have to go into the well after it, where the gravity is pulling you toward the eye. 400 shields, 1,200 hull, 4 kills. When the incursion runs out, the Cygnus drifts over the event horizon and is gone. |
 | `moon` | **The Moon** (*Space: 1999*): blasted out of Earth orbit, the Moon **drifts in at one edge of the galaxy** at warp 2 and heads straight across, **leaving off the far side** about four minutes later, carrying Moonbase Alpha. **Nothing can hurt it.** When it arrives, **Nuclear Waste Area 2 is going critical**, with 150 seconds to go (alerts at 60 and 30). **To save the Moon, stay within 4,000 of it for 10 seconds** while Alpha vents the dumps through your ship's systems (it keeps moving, so match its course). The first to manage it **earns 5 kills**. Ships that have fired on Alpha can't help. If no one saves it, the dumps **explode**: every empire ship within 8,000 takes up to 60 damage, and the Moon is hurled on out of the galaxy at warp 6. Alpha launches an **Eagle** every 30 seconds (up to three at once). Eagles patrol round the Moon and **leave you alone unless you've fired on the Moon or an Eagle**: then they come after you. Robots and overwatch hold their fire on Eagles for the same reason. Robots race to save the Moon too: each empire sends its nearest robot. Eagles are worth 1.5 kills. |
 | `mongo` | **Ming the Merciless** (*Flash Gordon*): "Klytus, I'm bored." A wormhole tears open and **the planet Mongo comes through, 11,000 from a random empire's home world**. Ming has chosen that world as his plaything: every 30 seconds he sends **hot hail, earthquakes or hurricanes** down on it, killing a quarter of its armies (at least 3, never the last) and battering every ship in orbit (15 damage). **Mingo City's lightning field** (3,500 round Mongo) strikes every ship inside it every 2 seconds (12 damage) and **turns aside all fire**: Mongo can't be hurt. His armada guards it: **War Rocket Ajax**, his flagship, patrols round Mongo and attacks anyone near; **Imperial rockets** (a new one launches every 25 seconds, up to five) swarm ships near Mongo or over the home world. **To beat Ming, do what Flash did:** Ajax **can't be destroyed, only disabled**. Wear its hull down to a fifth and it's **left adrift for 45 seconds**, engines and shields dead. **Push it with a pressor beam (or tow it with a tractor) into Mingo City**, within 3,400 of Mongo's centre, and it **crashes through the lightning field into Ming's palace**: Ming is dead, Mongo goes back through its wormhole with the armada, and whoever brought Ajax in earns **8 kills**. After 45 seconds Ajax comes back on line, patched up to half its hull. If Ajax is ever lost, Mongo launches another a minute later. Otherwise Ming tires of his plaything after 6 minutes. |
+| `narada` | **The Narada** (*Star Trek*, 2009): Nero's vast black mining ship comes out of a storm in space, picks the **most populous colony** and parks beside it. It lowers a **drill** over the planet (an alert goes out), which bores for **40 seconds** (alerts at 20 and 10), and then fires **red matter** into the core: the planet is destroyed and becomes a **black hole** (pull 6,000), and every ship within 1,500 goes with it. Planetary guns can't touch the drill (180 hull), but ships can: **destroy it** and Nero tries again 25 seconds later. While drilling the Narada holds position and fires heavy mining torpedoes (60) at anything within 11,000. After two worlds Nero has had his revenge and leaves. Narada: 300 shields, 700 hull, 4 kills; the drill 2. |
+| `krenim` | **The Krenim timeship** (*Year of Hell*, Voyager): Annorax drifts slowly through the galaxy, and every **45 seconds** fires a temporal incursion at the richest colony within 35,000: the planet is **erased from history** (no owner, no armies, no resources). Its **temporal shields** make it untouchable, except for **15 seconds after each incursion** (an alert tells you when). Destroy it and **history is restored**: every world it erased comes back with its old owner and armies (unless someone has resettled it). If it withdraws, they stay erased. 700 hull, 4 kills. |
+| `malon` | **A Malon export vessel** (*Night*, Voyager) crawls across the galaxy at warp 3, from one edge to the other, dumping a patch of **theta radiation** every 3 seconds. Theta radiation lingers for 90 seconds: ships inside lose an army every 2 seconds and take a little hull damage. Its disruptors burn ships within 5,000. **Destroy it and its tanks rupture**: up to 70 damage to every ship within 7,000, and more radiation. 600 hull, 3 kills. |
+| `vaal` | **Vaal** (*The Apple*, TOS) awakens on a colony and takes it (20 natives). Its field **drains 80 fuel and 3 shields a tick from every ship within 6,000**. Weapons can't touch it, but **every ship it drains costs it power**, and the natives feed it when nobody is near. Keep ships in its field (outside the planet's own guns, 1,500) and it **falls silent**: the planet is freed and every ship in the field earns 2 kills. Taking its planet back works too. |
+| `landru` | **Landru** (*The Return of the Archons*, TOS): the computer takes a colony (25 armies) and the **Body** spreads from it. Every 6 seconds it **absorbs an army from every colony within 15,000**; a colony that loses its last becomes part of the Body. Landru can't be shot from space: **bomb and invade its planet** and the computer dies, freeing every absorbed world, and the ship in orbit earns 3 kills. |
+| `bluegill` | **Bluegill parasites** (*Conspiracy*, TNG) take over an empire's high command. Three of its ships (**Quinn**, **Savar** and **Remmick**: a cruiser, destroyer and battleship) still **fly its colours**, so its own pilots see friendly ships, but they hunt that empire's ships and bomb its colonies, and **its planets won't fire on them**. The **mother creature** sits in orbit of the empire's home world (its guns won't fire on it either): **destroy it** and the parasites die and the infected ships fall silent. Mother 160 hull, 3.5 kills; infected ships 1.8. |
+| `dreadnought` | **The Cardassian Dreadnought** (*Dreadnought*, Voyager): a missile with an artificial mind comes in from the far edge on a course for the **most populous world in the galaxy**, at warp 3. It **jinks**, its **point defences shoot down torpedoes** that come within 2,000, and it fires back. If it gets within 1,800 of its target it **detonates**: the planet is wiped out (no owner, armies or resources) and every ship within 6,000 takes up to 80 damage. 400 shields, 400 hull, 4 kills. |
+| `scimitar` | **Shinzon's Scimitar** (*Nemesis*): a Reman warbird that **fires while cloaked**, hunting the leading empire's ships. Any hit shows it up for 10 seconds. Every minute (once there are ships near) it **decloaks and charges its thalaron weapon** for 15 seconds, holding still, with a green ring showing its 10,000 reach. When it fires, every empire ship inside **loses all its armies** and most of its crew and takes 40 damage through the shields, and planets inside lose a third of their armies. **Hit it for 80 damage while it charges** and it's disrupted. 300 shields, 450 hull, 4.5 kills. |
+| `calamarain` | **The Calamarain** (*Déjà Q*, TNG): a living cloud of ionized gas that hunts the **most decorated captain** about (highest rank, then most kills). Any ship it envelops (within 2,500) loses 4 shields a tick, then hull. **Torpedoes do only 10%** (plasma 30%); **phasers burn it** at full strength. 450 hull, 3.5 kills. |
+| `nagilum` | **Nagilum** (*Where Silence Has Lease*, TNG): a hole in space with a mind behind it opens in open space and drifts toward ships. It **pulls in** ships within 7,000, and one that reaches its maw (1,500) is **swallowed for 20 seconds**: out of normal space, unseen and untouchable. Nagilum is studying death: it sends you back thrown clear, with **two systems knocked out** (with `--subsystems`; otherwise 30% hull damage) and a gift (a full tank, +1 kill, or full shields and ablative armour). It can't be harmed. When it has studied four ships it leaves. |
 
 **How aliens behave:**
 
@@ -683,7 +720,7 @@ netrek solo --aliens khan,borg,doomsday --alien-interval 90
 - **Ending:** an incursion ends when all its ships are destroyed (or V'Ger is joined, the
   probe answered, Q's trial judged, Nomad talked into destroying itself, Armus starved,
   the Metrons' duel decided, first contact made with Species 10-C, peace made with the
-  Horta, the Dyson sphere's hatch destroyed, the Death Star blown up, the Cygnus destroyed, the Moon gone off the far edge, Ming's palace brought down, or the last tribble or nanite cleared), or it withdraws after 4–6 minutes. The Kzinti
+  Horta, the Dyson sphere's hatch destroyed, the Death Star blown up, the Cygnus destroyed, the Moon gone off the far edge, Ming's palace brought down, the Narada destroyed, Vaal silenced, Landru's planet retaken, the bluegill mother killed, or the last tribble or nanite cleared), or it withdraws after 4–6 minutes. Some leave of their own accord: the Narada after two worlds, the Malon freighter off the far edge, the Dreadnought when it detonates, Nagilum when it has studied four ships. The Kzinti
   are the exception: they stay until they've lost the whole Ringworld. If an empire loses its last planet to aliens, it
   has been wiped out by alien invaders.
 
@@ -726,6 +763,16 @@ netrek solo --aliens khan,borg,doomsday --alien-interval 90
 | USS Cygnus | pale green | `CY` | A long open lattice of girders lit like a cathedral, with the command tower amidships, the glass observation dome on its forward boom and outrigger pods. On the viewscreen it's covered in twinkling lights, and its lasers are red |
 | Moonbase Alpha | moon-dust grey | `MA` | The Moon: a great grey cratered disc (a mottled sphere on the viewscreen) with the lights of Moonbase Alpha. Eagles are white: a nose cone, an open-frame spine over the passenger pod, four leg pods and four engine bells |
 | Ming the Merciless | imperial gold | `MG` | Mongo: a world banded in red and gold with Mingo City's spires on its face, ringed by a crackling red lightning field (a dome of lightning on the viewscreen). Ming's rockets are red and gold, with pointed noses, gold bands, swept fins and a sparkling exhaust; War Rocket Ajax is bigger, with flanged wings |
+| Narada | rust red | `NR` | A black, squid-like mining ship, all spines and tendrils; its drill is a diamond-shaped platform on a chain, with a red beam boring into the planet |
+| Krenim timeship | amber | `KR` | A long, segmented hull round a glowing temporal core |
+| Malon | olive | `ML` | A slab of a freighter carrying great round tanks; theta radiation is a toxic green haze |
+| Vaal | stone red | `VA` | A serpent's head carved in stone, its mouth open, in a red dashed ring (its field) |
+| Landru | pale violet | `LD` | The computer's staring lens, ringed |
+| Bluegill parasites | blue-green | `BL` | Infected ships look like their empire's own; the mother creature is a swollen body with gills |
+| Dreadnought | Cardassian tan | `DR` | A huge finned arrowhead of a missile |
+| Scimitar | Reman green | `RE` | A vast warbird with swept, folded wings; a pulsing green ring when its thalaron weapon charges |
+| Calamarain | electric blue | `CM` | A crackling knot of gas clouds |
+| Nagilum | violet | `NG` | A hole in space, rimmed with faint light, with two eyes in it |
 
 The status line shows **HUNTED** (vector mode: **PREY**) when the Hirogen are after you,
 **TRIBBLES** (**TRIB**) when you're carrying them, and **NANITES** (**NANO**) when you're
@@ -779,6 +826,18 @@ infected.
 | Mongo | 0 | – | – | lightning field 12 (3,500); can't be hurt | – |
 | War Rocket Ajax | 9 | 140 | 150 | torpedo 40, ray cannon 65 (through shields); can't be destroyed, only disabled | 3.5 |
 | Imperial rocket | 11 | 30 | 45 | torpedo 20 | 0.5 |
+| Narada | 6 | 300 | 700 | mining torpedo 60, the drill and red matter | 4 |
+| Narada drill | – | – | 180 | turns a planet into a black hole in 40 s; planets can't hurt it | 2 |
+| Krenim timeship | 3 | 400 | 700 | chroniton beam 25, temporal incursions; only hurt for 15 s after each | 4 |
+| Malon export vessel | 3 | 120 | 600 | disruptor 15, theta radiation; its tanks rupture (70) | 3 |
+| Vaal | – | invulnerable | | drains fuel and shields within 6,000; runs out of power | 2 per ship in its field when it falls |
+| Landru | – | invulnerable | | absorbs armies within 15,000; dies when its planet is taken | 3 for the taker |
+| Bluegill mother creature | 2 | – | 160 | none; its host's planets won't fire on it | 3.5 |
+| Bluegill-infected ships | as Starfleet CA / DD / BB | | | the host empire's planets won't fire on them | 1.8 |
+| Cardassian Dreadnought | 3 | 400 | 400 | torpedo 30, point defence, warhead (wipes out a planet, 80 within 6,000) | 4 |
+| Scimitar | 9 | 300 | 450 | torpedo 50, phaser 120, fires while cloaked, thalaron weapon (10,000) | 4.5 |
+| Calamarain | 6 | – | 450 | strips shields and hull within 2,500; 10% damage from torpedoes | 3.5 |
+| Nagilum | 1 | invulnerable | | pulls in within 7,000, swallows ships for 20 s | – |
 
 The monsters regenerate quickly. The planet killer only takes 40% of normal weapon
 damage, and a Borg cube's resistance builds as it's hit.
@@ -827,7 +886,8 @@ damage, and a Borg cube's resistance builds as it's hit.
   them: a badly damaged one will try to ram you.
 - **Tribbles:** don't orbit an infested planet (`T`) unless you're a Klingon, and if you
   pick some up, don't orbit your own planets until they're gone. Klingon players are the
-  cure, so other empires may want to ask them for help. Robots don't know any of this.
+  cure, so other empires may want to ask them for help. Robots know this: Klingon robots
+  clear infested planets and carriers, the others stay out of orbit there.
 - **General Chang:** watch where the torpedoes come from, then fire a spread or phasers
   that way. The first hit reveals him for 20 seconds, so call it out and pile on. He
   can't hide near enemy planets: their fire lights him up.
@@ -914,6 +974,27 @@ damage, and a Borg cube's resistance builds as it's hit.
   bigger ships to keep the TIE fighters and Vader busy, and attack Star Destroyers **from
   behind**: they can't fire back there, they turn slowly, and they take double damage.
   Get every ship out of orbit of the target world before it fires.
+- **Narada:** ignore the Narada itself and **kill the drill**: it has no shields and only
+  180 hull, but the Narada guards it with heavy torpedoes, so come in from the far side of
+  the planet and get ships out of orbit there before the red matter goes in.
+- **Krenim timeship:** don't waste fire while its shields are up. Gather nearby, and when
+  the incursion alert goes out you have **15 seconds**: everyone at once.
+- **Malon:** kill it early, before its trail of theta radiation spreads, and **never fly
+  through the green haze carrying armies**. Back off before it dies: the tanks rupture.
+- **Vaal:** take turns sitting in its field, outside the planet's guns, with a full tank;
+  peel off to refuel before you run dry. The more ships at once, the faster it fails.
+- **Landru:** it's a planet to take, not a ship to shoot: bomb it down from 25 and land
+  armies. The longer you wait, the more colonies it absorbs.
+- **Bluegills:** if you're the infected empire, check your "friendly" ships. Everyone
+  else: the quickest cure is the mother creature in orbit of that empire's home world.
+- **Dreadnought:** torpedoes are mostly shot down, so use **phasers** and plasma, and
+  catch it early on its long run in. Don't be near the target when it hits.
+- **Scimitar:** watch for torpedoes coming out of nowhere. When it decloaks to charge,
+  either **pile in hard** (80 damage stops it) or **get more than 10,000 away** with your armies.
+- **Calamarain:** **phasers**, not torpedoes. If it's after you, run toward friends with
+  phasers ready.
+- **Nagilum:** stay more than 7,000 away and it can't pull you. If you're taken, you'll be
+  back in 20 seconds with something broken; make sure a friend is near.
 - **Borg:** a cube assimilates a ship it holds in its tractor beam within about 2,600
   units for four seconds. Its tractor is far stronger than any pressor, so don't try to
   push free. Instead stay out of range, and if you're caught, run at full speed: cubes
@@ -1029,7 +1110,7 @@ table, with what's needed if you don't qualify yet.
 **Relic ships** (Commodore and up, key `u`): ships of long-vanished or far-off
 civilizations, found, captured or salvaged. Apart from the USS Cygnus (salvaged from the
 Black Hole), the Eagle (from Moonbase Alpha) and War Rocket Ajax (Ming's flagship), none
-of them are ships you'll meet as alien incursions. You don't choose which: one of sixteen is **drawn at random** each time you
+of them are ships you'll meet as alien incursions. You don't choose which: one of twenty-six is **drawn at random** each time you
 launch, and it's drawn in your empire's colours.
 
 | Relic | Speed | Shields | Hull | What makes it special |
@@ -1050,6 +1131,16 @@ launch, and it's drawn in your empire's colours.
 | **USS Cygnus** (`CG`) | 8 | 150 | 170 | Reinhardt's anti-gravity field: black holes (the Black Hole included) and graviton eddies can't pull it, and enemy tractor and pressor beams can't move it (a ship tractoring it pulls itself in instead). The event horizon still swallows it if you fly in |
 | **Eagle transporter** (`EA`) | 9 | 90 | 110 | VTOL: drops straight into orbit at any speed, instead of slowing to warp 2 first (carries 6 armies) |
 | **War Rocket Ajax** (`AJ`) | 9 | 140 | 150 | Ming's ray cannons: its phasers (65) go **straight through shields** to the hull |
+| **Promellian battlecruiser** (`PB`) | 8 | 150 | 170 | Aceton assimilators: every enemy ship within 3,000 loses 25 fuel a tick (250 a second), and it all goes into your tanks |
+| **Gomtuu** (`GT`) | 10 | 110 | 130 | A living ship: its hull heals more than twice as fast as any other, and once each life, a blow that would destroy it instead folds space and throws it 18,000 away, badly hurt |
+| **Bajoran solar sail** (`SL`) | 8 | 60 | 80 | A lightship: warp costs no fuel at all, and in a star's corona, a pulsar's beam or a comet's tail the tachyon eddies carry it along at +5 warp |
+| **Sikarian trajector ship** (`SK`) | 9 | 110 | 110 | Spatial trajector: lock onto (`l`) any ship within 20,000 and it folds space to appear right behind it. Recharges in 20 s |
+| **Dauntless** (`DN`) | 10 | 100 | 110 | Quantum slipstream: hold top speed and the drive kicks in, carrying you on at +10 warp for 5 seconds. Recharges in 30 s |
+| **Son'a battleship** (`SO`) | 8 | 150 | 150 | Isolytic torpedoes: where one hits, it tears subspace. The tear burns any enemy ship that flies through it for 8 seconds |
+| **Hierarchy surveillance ship** (`HY`) | 9 | 90 | 100 | Eavesdropping: your whole team sees every enemy ship within 15,000 of it, cloaked, in a nebula or not, and the armies each one carries |
+| **Pralor automated unit** (`PR`) | 9 | 120 | 140 | No crew: hits never knock out its systems (with `--subsystems`), boarding parties have no one to fight, and a Kelvan neural field has no one to paralyse |
+| **Tamarian cruiser** (`TM`) | 8 | 140 | 150 | Darmok and Jalad at Tanagra: lock onto (`l`) an enemy within 6,000 to bind it to you for 30 seconds. Neither ship can leave the ring around you both (shown on the map) until one is destroyed or time runs out. Recharges 30 s after |
+| **Baxial** (`BX`) | 8 | 90 | 110 | Neelix's freighter, a scrounger: salvages derelicts three times as fast, and whenever a ship is destroyed within 5,000 it picks over the wreck for fuel, spare parts and a survivor (+1 army) |
 
 Special and relic ships get your advanced tech like any other hull. Robots never fly
 them. While you fly one, the controls panel names it and says what it does, above your
@@ -1101,14 +1192,14 @@ With `--diplomacy`, empires can sign **treaties of alliance**.
 ### Space terrain
 
 With `--terrain`, every galaxy gets a fresh set of terrain, placed clear of the planets.
-There are **22 kinds**, and each galaxy uses **10 of them, picked at random**, so every game
+There are **32 kinds**, and each galaxy uses **10 of them, picked at random**, so every game
 (and every galaxy after a reset) has a different mix. Terrain is charted for everyone and
 drawn on both maps. It affects the empires' ships; aliens ignore it, except the tachyon
 grid, and anyone's weapons can set off a Metreon cloud.
 
 | Feature | Looks like | What it does |
 |---|---|---|
-| **Nebula** ×3 (Mutara Nebula, Briar Patch...) | Purple clouds | Ships inside are **hidden** from anyone more than 3,000 away. Shields won't hold and top speed is warp 6. Good for ambushes and escapes. |
+| **Nebula** ×3 (Mutara Nebula, Hourglass Nebula...) | Purple clouds | Ships inside are **hidden** from anyone more than 3,000 away. Shields won't hold and top speed is warp 6. Good for ambushes and escapes. |
 | **Ion storm** | A drifting blue cloud with lightning | Wanders the galaxy. Ships inside are hidden, **phasers are knocked out**, and lightning strikes now and then (12 damage). |
 | **Asteroid field** ×2 | Scattered rocks | Faster than warp 4, you take hull damage. Torpedoes that fly in are often **soaked up**, so it's cover. |
 | **Black hole** | A black disc in a spinning orange accretion disc | Pulls in ships and torpedoes within 7,000, harder the closer you get. The **event horizon** destroys anything that reaches it. Go to full impulse to break free. |
@@ -1131,7 +1222,20 @@ grid, and anyone's weapons can set off a Metreon cloud.
 | **Abandoned station** | A K-7 style station | A neutral outpost: hold within 1,500 at warp 2 or less to be **repaired and refuelled**, whatever your empire. |
 | **The Black Hole** (Disney's *The Black Hole*) | A vast whirlpool of glowing violet and ice-blue arms spiralling into a black eye; on the viewscreen, a funnel sinking below the plane | Massive: its gravity reaches **12,000** (the ordinary black hole's reaches 7,000) and is far stronger. It drags in ships and torpedoes and **sweeps them round** as it pulls; a warning tells you the warp you need to break free (about warp 2–3 halfway in, warp 7 near the eye). The **event horizon** (1,500) swallows anything that reaches it. Orbiting a planet at its edge holds you. With `--aliens`, the **USS Cygnus** can turn up inside it (see [Alien incursions](#alien-incursions)). |
 
-Robots steer clear of the black holes (they'll go into the Black Hole after the Cygnus, but not deep), the star and the comet, and slow down among
+| **The Briar Patch** (*Insurrection*) | Amber and rose clouds | Metaphasic radiation: ships inside are **hidden**, held to **warp 4** and can't use **transporters** (no beaming, no boarding parties), but the radiation slowly **heals your hull**. |
+| **The Badlands** | A dark red storm with swirling plasma | Ships inside are **hidden**. Every 1½ seconds four **plasma eruptions** flare up somewhere inside, each doing 20 damage to ships within 1,200. |
+| **The Nexus** (*Generations*) | A long golden ribbon, twisting | Drifts sideways across the galaxy. Touch it and you **vanish into the Nexus** for 20 seconds: nobody can see or hurt you, and you can't do anything. Then you come back somewhere at random, **fully repaired and refuelled**. |
+| **Tyken's Rift** | A violet vortex | **Drains 60 fuel a tick** and drags ships toward its heart, so a slow or empty ship can't get out. **Detonate a torpedo** within 800 of the centre (fire one in, then `D`) to collapse it. It reforms elsewhere later. |
+| **The Genesis Planet** (*Star Trek III*) | A small green world in a dashed ring | Solid. Hold within 3,500 at warp 2 or less and **colonists beam aboard**, an army every 3 seconds, no kills needed. But the protomatter is unstable: after two minutes it **tears itself apart** (up to 50 damage within 6,000, with warnings at 15 and 5 seconds). It reforms elsewhere a minute later. |
+| **Quantum filaments** | A faint dashed boundary | Seven invisible strands. Brush one and it **knocks out a random system** (with `--subsystems`; otherwise 20 hull damage and your shields drop). Then it drifts somewhere else in the field. |
+| **The Hekaras Corridor** | A blue lane with markers | Above **warp 5** inside it, your warp field **tears subspace** behind you: the tears burn any empire ship that flies through them for 8 seconds, including the ones following you. |
+| **Omega particle zone** | A white ring with cracks radiating from a bright core | Subspace is destroyed: **no warp** (warp 2 at most, no transwarp). It **grows** steadily. Hold still at its core for 10 seconds to **neutralise** it (+2 kills). |
+| **The Neutral Zone** | A pale green dashed strip between two empires' home worlds | **Cloaked ships inside are revealed**. Fire any weapon inside and its border outposts **fire on you** (15 damage, every 3 seconds at most). With `--diplomacy`, a captain who fires there **breaks the treaty** between the two empires it divides. |
+| **The Guardian of Forever** (*City on the Edge of Forever*) | A ring of old stone, misty inside | Fly through it and your ship goes **back in time**: back to where it was up to 30 seconds ago, with the fuel, shields and hull damage it had then. Great for escaping, terrible when you've just been repaired. |
+
+With `--aliens`, Malon freighters also dump patches of **theta radiation** that sicken the armies a ship carries.
+
+Robots steer clear of the black holes (they'll go into the Black Hole after the Cygnus, but not deep), the star, the comet, Tyken's Rift, Omega zones, theta radiation and a Genesis Planet that's about to blow, and slow down among
 asteroids.
 
 ### Supply convoys and upgrades
@@ -1408,7 +1512,12 @@ The tests include:
 
 - **`four_empire_game`:** 16 robots across all four empires. Checks every empire gets
   its share of ships and that the fighting spreads across the galaxy.
-- **`every_incursion_plays_out`:** runs each of the thirty-six alien incursions against a
+- **`robots_deal_with_the_aliens`:** runs each incursion that takes more than fighting
+  (V'Ger, the whale probe, Nomad, Species 10-C, Vaal, the Krenim, the Borg...) against a
+  robot war three times, and checks the robots dealt with it properly most of the time.
+  `robot_alien_report` (run with `--ignored --nocapture`, `TRIALS=` and `ONLY=`) prints
+  how well robots cope with every incursion.
+- **`every_incursion_plays_out`:** runs each of the forty-six alien incursions against a
   four-empire robot war and checks it arrives, acts and ends cleanly.
 - **Alien mechanics:** `vger_merge_ends_the_threat`, `crystal_shatters_on_resonance`,
   `whale_probe_drains_and_is_answered`, `bioships_only_fear_plasma`,
@@ -1437,7 +1546,7 @@ The tests include:
   `cygnus_only_comes_with_its_black_hole`, `cygnus_holds_its_spot_and_fires_on_passing_ships`
   and `cygnus_only_hurt_from_inside_the_gravity_well`.
 - **`retaking_alien_planets`:** liberated and resettled planets lose their alien mark.
-- **Extras:** `galaxy_has_ten_kinds_of_terrain_clear_of_planets` (ten of the 22 kinds in
+- **Extras:** `galaxy_has_ten_kinds_of_terrain_clear_of_planets` (ten of the 32 kinds in
   every galaxy, all of them turning up over many) and a test for each terrain effect; `treaties_between_players`, `one_ally_at_a_time_and_robots_decide`,
   `upgrades_boost_torpedoes`, `starbase_needs_rank`, `tech_comes_with_rank`,
   `captain_weapons`, `fleet_captain_defences`, `commodore_tricks`,

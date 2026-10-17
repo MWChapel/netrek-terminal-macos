@@ -32,6 +32,29 @@ pub(super) const PLANETOID: Rgb = rgb(0x9a9088);
 pub(super) const BARRIER: Rgb = rgb(0xb070ff);
 pub(super) const RIFT: Rgb = rgb(0xff90d0);
 pub(super) const STATION: Rgb = rgb(0xc0c8d8);
+/// The Briar Patch's metaphasic clouds: amber and rose.
+pub(super) const BRIAR: Rgb = rgb(0xd08858);
+pub(super) const BRIAR_ROSE: Rgb = rgb(0xff90a0);
+/// The Badlands' plasma storms: red fire and magenta.
+pub(super) const BADLANDS: Rgb = rgb(0xe04060);
+pub(super) const PLASMA_FIRE: Rgb = rgb(0xffa040);
+/// The Nexus ribbon: gold and flame.
+pub(super) const NEXUS: Rgb = rgb(0xffc860);
+pub(super) const NEXUS_HOT: Rgb = rgb(0xff6a40);
+pub(super) const TYKEN: Rgb = rgb(0x8a60d0);
+/// The Genesis Planet: green and blue, turning red as it breaks up.
+pub(super) const GENESIS: Rgb = rgb(0x60c890);
+pub(super) const GENESIS_DYING: Rgb = rgb(0xff4020);
+pub(super) const FILAMENT: Rgb = rgb(0x90b8ff);
+pub(super) const HEKARAS: Rgb = rgb(0x8090ff);
+pub(super) const OMEGA: Rgb = rgb(0xe0c8ff);
+pub(super) const NEUTRAL: Rgb = rgb(0x9fd0a0);
+/// The Guardian of Forever: old stone, and the mists of time inside it.
+pub(super) const GUARDIAN: Rgb = rgb(0xc8b890);
+pub(super) const TIME_MIST: Rgb = rgb(0xa0d8ff);
+pub(super) const THETA: Rgb = rgb(0x98ff30);
+/// The Genesis Planet's reach (matches the server).
+pub(super) const GENESIS_REACH: f32 = 3500.0;
 /// The Black Hole's whirlpool: deep violet at the edge, ice blue-white at
 /// the eye.
 pub(super) const MAELSTROM: Rgb = rgb(0x6a4cff);
@@ -91,7 +114,10 @@ pub fn draw_vec(
         let (x2, y2) = to(t.x2 as f64, t.y2 as f64);
         let r = u(t.r as f64).max(1.0);
         let sd = seed(t);
-        let segment = matches!(t.kind, TerrainKind::Corridor | TerrainKind::Comet | TerrainKind::Wormhole | TerrainKind::GalacticBarrier);
+        let segment = matches!(
+            t.kind,
+            TerrainKind::Corridor | TerrainKind::Comet | TerrainKind::Wormhole | TerrainKind::GalacticBarrier | TerrainKind::Nexus | TerrainKind::HekarasCorridor | TerrainKind::NeutralZone
+        );
         if !segment && !on_screen(x, y, r * 1.2) {
             continue;
         }
@@ -526,6 +552,192 @@ pub fn draw_vec(
                 px.disc(x, y, s * 0.55, scale(STATION, 0.5), 1.0);
                 px.ring(x, y, s * 0.55, 1.2, STATION, 1.0);
             }
+            TerrainKind::BriarPatch => {
+                px.glow(x, y, r * 1.15, BRIAR, if detail { 0.28 } else { 0.35 });
+                if detail {
+                    for k in 0..9 {
+                        let a = rnd(sd, k) * TAU;
+                        let d = rnd(sd, k + 50) * r * 0.65;
+                        let c = mix(BRIAR, BRIAR_ROSE, rnd(sd, k + 90));
+                        px.glow(x + a.cos() * d, y + a.sin() * d, r * (0.3 + 0.3 * rnd(sd, k + 20)), c, 0.2);
+                    }
+                    label(px, x, y - r * 0.8, BRIAR);
+                }
+            }
+            TerrainKind::Badlands => {
+                px.glow(x, y, r * 1.1, BADLANDS, 0.24);
+                px.ring_dashed(x, y, r, 1.0, BADLANDS, 0.35, 7.0);
+                if detail {
+                    // Swirling plasma currents, and fire flaring here and there.
+                    for arm in 0..4 {
+                        let a0 = rnd(sd, arm) * TAU + tick * 0.01;
+                        let pts: Vec<(f32, f32)> = (0..=14)
+                            .map(|k| {
+                                let s = k as f32 / 14.0;
+                                let a = a0 + s * 2.2;
+                                (x + a.cos() * r * (0.2 + 0.75 * s), y + a.sin() * r * (0.2 + 0.75 * s))
+                            })
+                            .collect();
+                        px.polyline(&pts, false, 2.0, mix(BADLANDS, PLASMA_FIRE, 0.4), 0.35, 0.0);
+                    }
+                    let flicker = (tick / 4.0) as u64;
+                    for k in 0..4 {
+                        let a = rnd(sd ^ flicker, k) * TAU;
+                        let d = rnd(sd ^ flicker, k + 9).sqrt() * r * 0.9;
+                        px.glow(x + a.cos() * d, y + a.sin() * d, r * 0.12, PLASMA_FIRE, 0.5);
+                    }
+                    label(px, x, y - r * 0.85, BADLANDS);
+                }
+            }
+            TerrainKind::Nexus => {
+                let (dx, dy) = (x2 - x, y2 - y);
+                let len = (dx * dx + dy * dy).sqrt().max(1.0);
+                let (nx, ny) = (-dy / len, dx / len);
+                px.line(x, y, x2, y2, u(1400.0).max(5.0), NEXUS, 0.14, 0.0);
+                // The ribbon twists as it goes.
+                let steps = (len / 5.0).max(10.0) as usize;
+                for (k, col) in [(0.0f32, NEXUS), (1.7, NEXUS_HOT)] {
+                    let pts: Vec<(f32, f32)> = (0..=steps)
+                        .map(|j| {
+                            let s = j as f32 / steps as f32;
+                            let off = (s * 18.0 + tick * 0.12 + k).sin() * u(500.0);
+                            (x + dx * s + nx * off, y + dy * s + ny * off)
+                        })
+                        .collect();
+                    px.polyline(&pts, false, 1.5, mix(col, WHITE, 0.3), 0.85, 0.0);
+                }
+                label(px, (x + x2) / 2.0 + nx * 16.0, (y + y2) / 2.0 + ny * 16.0, NEXUS);
+            }
+            TerrainKind::TykensRift => {
+                px.disc(x, y, r, scale(TYKEN, 0.18), 0.6);
+                px.ring_dashed(x, y, r, 1.2, TYKEN, 0.7, 5.0);
+                if detail {
+                    // Energy spiralling in toward the heart of the rift.
+                    for arm in 0..5 {
+                        let a0 = arm as f32 / 5.0 * TAU - tick * 0.03;
+                        let pts: Vec<(f32, f32)> = (0..=12)
+                            .map(|k| {
+                                let s = k as f32 / 12.0;
+                                let a = a0 + s * 2.5;
+                                (x + a.cos() * r * (1.0 - s * 0.85), y + a.sin() * r * (1.0 - s * 0.85))
+                            })
+                            .collect();
+                        px.polyline(&pts, false, 1.0, TYKEN, 0.6, 0.0);
+                    }
+                    label(px, x, y - r - 6.0, TYKEN);
+                }
+                px.glow(x, y, u(800.0).max(2.0), mix(TYKEN, WHITE, 0.4), 0.6);
+            }
+            TerrainKind::GenesisPlanet => {
+                let k = t.phase as f32 / 255.0;
+                let col = mix(GENESIS, GENESIS_DYING, k * k);
+                if k > 0.6 {
+                    px.glow(x, y, r * (1.6 + 0.4 * (tick * 0.5).sin()), GENESIS_DYING, 0.3 * k);
+                }
+                px.disc(x, y, r, scale(col, 0.5), 1.0);
+                px.ring(x, y, r, 1.3, col, 1.0);
+                if detail {
+                    px.disc(x - r * 0.25, y - r * 0.2, r * 0.35, scale(mix(col, rgb(0x4080ff), 0.5), 0.8), 0.8);
+                    px.ring_dashed(x, y, u(GENESIS_REACH as f64), 1.0, GENESIS, 0.35, 4.0);
+                    label(px, x, y - r - 6.0, col);
+                }
+            }
+            TerrainKind::QuantumFilaments => {
+                px.ring_dashed(x, y, r, 1.0, FILAMENT, 0.25, 3.0);
+                if detail {
+                    // The strands themselves don't show: now and then one glints.
+                    let flicker = (tick / 6.0) as u64;
+                    for k in 0..3 {
+                        let a = rnd(sd ^ flicker, k) * TAU;
+                        let d = rnd(sd ^ flicker, k + 50).sqrt() * r;
+                        let (gx, gy) = (x + a.cos() * d, y + a.sin() * d);
+                        let b = rnd(sd ^ flicker, k + 90) * TAU;
+                        let h = u(500.0);
+                        px.line(gx - b.cos() * h, gy - b.sin() * h, gx + b.cos() * h, gy + b.sin() * h, 1.0, FILAMENT, 0.6, 0.0);
+                    }
+                    label(px, x, y - r * 0.9, FILAMENT);
+                }
+            }
+            TerrainKind::HekarasCorridor => {
+                let (dx, dy) = (x2 - x, y2 - y);
+                let len = (dx * dx + dy * dy).sqrt().max(1.0);
+                let (nx, ny) = (-dy / len * r, dx / len * r);
+                px.line(x, y, x2, y2, r * 2.0, HEKARAS, 0.06, 0.0);
+                for side in [1.0f32, -1.0] {
+                    px.line(x + nx * side, y + ny * side, x2 + nx * side, y2 + ny * side, 1.2, HEKARAS, 0.7, 0.0);
+                }
+                if detail {
+                    // Warp-5 markers down the lane.
+                    let n = (len / u(3000.0).max(1.0)) as usize;
+                    for k in 1..n.max(1) {
+                        let s = k as f32 / n as f32;
+                        let (mx, my) = (x + dx * s, y + dy * s);
+                        px.line(mx - nx * 0.3, my - ny * 0.3, mx + nx * 0.3, my + ny * 0.3, 1.0, HEKARAS, 0.5, 0.0);
+                    }
+                    let l = (nx * nx + ny * ny).sqrt().max(1.0);
+                    label(px, (x + x2) / 2.0 + nx / l * (r + 12.0), (y + y2) / 2.0 + ny / l * (r + 12.0), HEKARAS);
+                }
+            }
+            TerrainKind::OmegaZone => {
+                px.glow(x, y, r, OMEGA, 0.12);
+                px.ring(x, y, r, 1.5, OMEGA, 0.8);
+                if detail {
+                    // Subspace shattered: cracks radiating from the molecule.
+                    for k in 0..8 {
+                        let a = rnd(sd, k) * TAU;
+                        let pts: Vec<(f32, f32)> = (0..=5)
+                            .map(|j| {
+                                let s = j as f32 / 5.0;
+                                let wob = (rnd(sd, k * 10 + j) - 0.5) * 0.25;
+                                (x + (a + wob).cos() * r * s, y + (a + wob).sin() * r * s)
+                            })
+                            .collect();
+                        px.polyline(&pts, false, 1.0, OMEGA, 0.45, 0.0);
+                    }
+                    label(px, x, y - r - 6.0, OMEGA);
+                }
+                px.glow(x, y, u(700.0).max(2.0), WHITE, 0.6 + 0.3 * (tick * 0.4).sin());
+            }
+            TerrainKind::NeutralZone => {
+                let (dx, dy) = (x2 - x, y2 - y);
+                let len = (dx * dx + dy * dy).sqrt().max(1.0);
+                let (nx, ny) = (-dy / len * r, dx / len * r);
+                px.line(x, y, x2, y2, r * 2.0, NEUTRAL, 0.07, 0.0);
+                for side in [1.0f32, -1.0] {
+                    let (ax, ay, bx, by) = (x + nx * side, y + ny * side, x2 + nx * side, y2 + ny * side);
+                    let n = (len / 8.0).max(2.0) as usize;
+                    for k in (0..n).step_by(2) {
+                        let (s0, s1) = (k as f32 / n as f32, ((k + 1) as f32 / n as f32).min(1.0));
+                        px.line(ax + (bx - ax) * s0, ay + (by - ay) * s0, ax + (bx - ax) * s1, ay + (by - ay) * s1, 1.2, NEUTRAL, 0.75, 0.0);
+                    }
+                }
+                if detail {
+                    let l = (nx * nx + ny * ny).sqrt().max(1.0);
+                    label(px, (x + x2) / 2.0 + nx / l * (r + 12.0), (y + y2) / 2.0 + ny / l * (r + 12.0), NEUTRAL);
+                }
+            }
+            TerrainKind::GuardianOfForever => {
+                let rr = r.max(3.0);
+                px.glow(x, y, rr * 2.0, TIME_MIST, 0.25 + 0.15 * (tick * 0.2).sin());
+                px.ring(x, y, rr, (rr * 0.3).max(2.0), scale(GUARDIAN, 0.6), 1.0);
+                px.ring(x, y, rr * 1.15, 1.2, GUARDIAN, 1.0);
+                px.ring(x, y, rr * 0.85, 1.0, GUARDIAN, 0.8);
+                if detail {
+                    label(px, x, y - rr * 2.0, GUARDIAN);
+                }
+            }
+            TerrainKind::ThetaRadiation => {
+                let left = t.phase as f32 / 255.0;
+                px.glow(x, y, r * 1.1, THETA, 0.25 * left.max(0.2));
+                if detail {
+                    let flicker = (tick / 3.0) as u64;
+                    for k in 0..16 {
+                        let a = rnd(sd ^ flicker, k) * TAU;
+                        let d = rnd(sd ^ flicker, k + 100).sqrt() * r;
+                        px.dot(x + a.cos() * d, y + a.sin() * d, THETA, 0.7 * left.max(0.3));
+                    }
+                }
+            }
         }
     }
 }
@@ -597,6 +809,28 @@ pub fn draw_tempest_braille(b: &mut Braille, f: &Frame, to_dot: &dyn Fn(f64, f64
 pub(super) const SLICK: Rgb = rgb(0x9a80b8);
 pub(super) const ARENA: Rgb = rgb(0xf4f0ff);
 pub(super) const BEACON: Rgb = rgb(0x9060ff);
+/// A tear in subspace: a hot magenta crack.
+pub(super) const TEAR: Rgb = rgb(0xff50b0);
+/// The Tamarian tether's ring: the sand and sun of El-Adrel.
+pub(super) const TANAGRA: Rgb = rgb(0xe8b860);
+/// The Scimitar's thalaron weapon charging: a sickly green-white.
+pub(super) const THALARON: Rgb = rgb(0xa0ff90);
+/// Vaal's power-draining field.
+pub(super) const VAAL_FIELD: Rgb = rgb(0xd84a30);
+
+/// A jagged crack through (0, 0), from -1 to 1 along x: points (x, y),
+/// jittering every few frames.
+pub(super) fn crack(seed: u64, frame: u64, n: usize) -> Vec<(f32, f32)> {
+    let tilt = rnd(seed, 3) * TAU;
+    let (c, s) = (tilt.cos(), tilt.sin());
+    (0..=n)
+        .map(|k| {
+            let t = k as f32 / n as f32 * 2.0 - 1.0;
+            let off = if k == 0 || k == n { 0.0 } else { (rnd(seed ^ frame, k as u64) - 0.5) * 0.35 };
+            (t * c - off * s, t * s + off * c)
+        })
+        .collect()
+}
 pub(super) const DISPLACE: Rgb = rgb(0x80e0ff);
 pub(super) const DYSON: Rgb = rgb(0xd0a860);
 /// Mingo City's lightning field: red bolts, gold-white at the core.
@@ -705,6 +939,35 @@ pub fn draw_zones_vec(px: &mut Canvas, f: &Frame, to: &dyn Fn(f64, f64) -> (f32,
                 px.glow(x, y, r * 0.9, rgb(0xfff0c0), 0.4 * pulse);
                 px.ring_dashed(x, y, r * 0.6, 1.5, rgb(0xfff0c0), 0.9, 4.0);
             }
+            ZoneKind::SubspaceTear => {
+                let pts: Vec<(f32, f32)> = crack(z.x as u64 ^ (z.y as u64) << 20, (tick / 3.0) as u64, if detail { 9 } else { 4 })
+                    .into_iter()
+                    .map(|(a, b)| (x + a * r, y + b * r))
+                    .collect();
+                px.glow(x, y, r, TEAR, 0.25);
+                px.polyline(&pts, false, 3.0, TEAR, 0.3, 0.0);
+                px.polyline(&pts, false, 1.2, mix(TEAR, WHITE, 0.5), 0.95, 0.0);
+            }
+            ZoneKind::Tanagra => {
+                px.ring_dashed(x, y, r, 1.5, TANAGRA, 0.8, 6.0);
+                if detail {
+                    px.ring(x, y, r, 5.0, TANAGRA, 0.1);
+                }
+            }
+            ZoneKind::Thalaron => {
+                // Rings of radiation pulsing inward as it charges.
+                let pulse = (tick * 0.15).fract();
+                px.glow(x, y, r, THALARON, 0.08);
+                px.ring(x, y, r, 2.0, THALARON, 0.8);
+                px.ring(x, y, r * (1.0 - pulse), 1.5, THALARON, 0.6 * pulse);
+            }
+            ZoneKind::EnergyDrain => {
+                px.ring_dashed(x, y, r, 1.2, VAAL_FIELD, 0.6, 5.0);
+                if detail {
+                    let pulse = 0.5 + 0.5 * (tick * 0.2).sin();
+                    px.ring(x, y, r * 0.97, 4.0, VAAL_FIELD, 0.08 * pulse);
+                }
+            }
         }
     }
 }
@@ -783,6 +1046,16 @@ pub fn draw_zones_braille(b: &mut Braille, f: &Frame, to_dot: &dyn Fn(f64, f64) 
             }
             ZoneKind::DysonHatch => b.circle(x, y, (r * 0.4).max(1.0), Color::Yellow, 2),
             ZoneKind::DysonHatchOpen => b.disc(x, y, (r * 0.4).max(1.0), Color::White, 2),
+            ZoneKind::SubspaceTear => {
+                let pts = crack(z.x as u64 ^ (z.y as u64) << 20, f.tick as u64 / 3, 4);
+                for k in 0..pts.len() - 1 {
+                    let (p, q) = (pts[k], pts[k + 1]);
+                    b.line(x + p.0 as f64 * r, y + p.1 as f64 * r, x + q.0 as f64 * r, y + q.1 as f64 * r, Color::Magenta, 2);
+                }
+            }
+            ZoneKind::Tanagra => b.arc(x, y, r, Color::DarkYellow, 1, 3),
+            ZoneKind::Thalaron => b.circle(x, y, r, if f.tick / 3 % 2 == 0 { Color::Green } else { Color::White }, 1),
+            ZoneKind::EnergyDrain => b.arc(x, y, r, Color::DarkRed, 1, 3),
         }
     }
 }
@@ -809,7 +1082,10 @@ pub fn draw_braille(
         let (x2, y2) = to_dot(t.x2 as f64, t.y2 as f64);
         let r = t.r as f64 / per_dot;
         let sd = seed(t);
-        let segment = matches!(t.kind, TerrainKind::Corridor | TerrainKind::Comet | TerrainKind::Wormhole);
+        let segment = matches!(
+            t.kind,
+            TerrainKind::Corridor | TerrainKind::Comet | TerrainKind::Wormhole | TerrainKind::GalacticBarrier | TerrainKind::Nexus | TerrainKind::HekarasCorridor | TerrainKind::NeutralZone
+        );
         if !segment && !on(x, y, r) {
             continue;
         }
@@ -992,6 +1268,95 @@ pub fn draw_braille(
                 b.line(x, y - s * 1.8, x, y + s * 1.8, Color::Grey, 1);
                 name(x, y - s * 3.0, t, Color::Grey);
             }
+            TerrainKind::BriarPatch => {
+                b.arc(x, y, r, Color::DarkYellow, 0, 2);
+                if detail {
+                    for k in 0..50 {
+                        let a = rnd(sd, k) as f64 * std::f64::consts::TAU;
+                        let d = (rnd(sd, k + 300) as f64).sqrt() * r;
+                        b.dotf(x + a.cos() * d, y + a.sin() * d, Color::DarkRed, 0);
+                    }
+                }
+                name(x, y - r * 0.8, t, Color::DarkYellow);
+            }
+            TerrainKind::Badlands => {
+                b.arc(x, y, r, Color::Red, 0, 3);
+                if detail {
+                    let flicker = (tick / 4.0) as u64;
+                    for k in 0..4 {
+                        let a = rnd(sd ^ flicker, k) as f64 * std::f64::consts::TAU;
+                        let d = (rnd(sd ^ flicker, k + 9) as f64).sqrt() * r * 0.9;
+                        b.disc(x + a.cos() * d, y + a.sin() * d, 1.0, Color::Yellow, 2);
+                    }
+                }
+                name(x, y - r * 0.85, t, Color::Red);
+            }
+            TerrainKind::Nexus => {
+                b.line(x, y, x2, y2, Color::Yellow, 1);
+                if detail {
+                    name((x + x2) / 2.0, (y + y2) / 2.0 - 3.0, t, Color::Yellow);
+                }
+            }
+            TerrainKind::TykensRift => {
+                b.arc(x, y, r, Color::DarkMagenta, 0, 3);
+                b.circle(x, y, (800.0 / per_dot).max(1.0), Color::Magenta, 1);
+                name(x, y - r - 2.0, t, Color::Magenta);
+            }
+            TerrainKind::GenesisPlanet => {
+                let dying = t.phase > 200 && (f.tick / 3) % 2 == 0;
+                b.disc(x, y, r, if dying { Color::Red } else { Color::DarkGreen }, 1);
+                b.circle(x, y, r, Color::Green, 1);
+                if detail {
+                    b.arc(x, y, 3500.0 / per_dot, Color::DarkGreen, 0, 3);
+                }
+                name(x, y - r - 2.0, t, Color::Green);
+            }
+            TerrainKind::QuantumFilaments => {
+                b.arc(x, y, r, Color::DarkBlue, 0, 4);
+                name(x, y - r * 0.9, t, Color::Blue);
+            }
+            TerrainKind::HekarasCorridor => {
+                let (dx, dy) = (x2 - x, y2 - y);
+                let len = (dx * dx + dy * dy).sqrt().max(1.0);
+                let (nx, ny) = (-dy / len * r, dx / len * r);
+                b.line(x + nx, y + ny, x2 + nx, y2 + ny, Color::Blue, 1);
+                b.line(x - nx, y - ny, x2 - nx, y2 - ny, Color::Blue, 1);
+                if detail {
+                    name((x + x2) / 2.0 + nx * 1.5, (y + y2) / 2.0 + ny * 1.5, t, Color::Blue);
+                }
+            }
+            TerrainKind::OmegaZone => {
+                b.circle(x, y, r, Color::White, 1);
+                b.disc(x, y, (700.0 / per_dot).max(1.0), Color::White, 2);
+                name(x, y - r - 2.0, t, Color::White);
+            }
+            TerrainKind::NeutralZone => {
+                let (dx, dy) = (x2 - x, y2 - y);
+                let len = (dx * dx + dy * dy).sqrt().max(1.0);
+                let (nx, ny) = (-dy / len * r, dx / len * r);
+                b.line_pattern(x + nx, y + ny, x2 + nx, y2 + ny, Color::DarkGreen, 0, 3);
+                b.line_pattern(x - nx, y - ny, x2 - nx, y2 - ny, Color::DarkGreen, 0, 3);
+                if detail {
+                    name((x + x2) / 2.0 + nx * 1.5, (y + y2) / 2.0 + ny * 1.5, t, Color::Green);
+                }
+            }
+            TerrainKind::GuardianOfForever => {
+                let rr = r.max(1.5);
+                b.circle(x, y, rr, Color::Grey, 2);
+                b.circle(x, y, rr * 0.6, Color::Cyan, 1);
+                name(x, y - rr * 2.0, t, Color::Grey);
+            }
+            TerrainKind::ThetaRadiation => {
+                if detail {
+                    for k in 0..20 {
+                        let a = rnd(sd, k) as f64 * std::f64::consts::TAU;
+                        let d = (rnd(sd, k + 300) as f64).sqrt() * r;
+                        b.dotf(x + a.cos() * d, y + a.sin() * d, Color::Green, 0);
+                    }
+                } else {
+                    b.arc(x, y, r, Color::DarkGreen, 0, 3);
+                }
+            }
         }
     }
 }
@@ -1022,18 +1387,26 @@ mod tests {
                     TerrainKind::Wormhole => 600.0,
                     TerrainKind::Corridor => 700.0,
                     TerrainKind::Comet => 500.0,
+                    TerrainKind::Nexus => 600.0,
+                    TerrainKind::HekarasCorridor => 1300.0,
+                    TerrainKind::NeutralZone => 1500.0,
+                    TerrainKind::GenesisPlanet => 1500.0,
+                    TerrainKind::GuardianOfForever => 800.0,
+                    TerrainKind::TykensRift => 3500.0,
+                    TerrainKind::ThetaRadiation => 2500.0,
                     _ => 5500.0,
                 };
                 let (x2, y2) = match kind {
                     TerrainKind::Wormhole => (cx + 4000.0, cy + 3000.0),
                     TerrainKind::Corridor => (cx + 6000.0, cy - 4000.0),
                     TerrainKind::Comet => (cx + 6000.0, cy + 4000.0),
-                    TerrainKind::GalacticBarrier => (cx + 5000.0, cy + 5000.0),
+                    TerrainKind::GalacticBarrier | TerrainKind::Nexus | TerrainKind::NeutralZone => (cx + 5000.0, cy + 5000.0),
+                    TerrainKind::HekarasCorridor => (cx + 6000.0, cy - 4000.0),
                     _ => (cx, cy),
                 };
                 let (x, y) = match kind {
-                    TerrainKind::Wormhole | TerrainKind::Corridor | TerrainKind::Comet => (cx - 5000.0, cy),
-                    TerrainKind::GalacticBarrier => (cx - 5000.0, cy - 5000.0),
+                    TerrainKind::Wormhole | TerrainKind::Corridor | TerrainKind::Comet | TerrainKind::HekarasCorridor => (cx - 5000.0, cy),
+                    TerrainKind::GalacticBarrier | TerrainKind::Nexus | TerrainKind::NeutralZone => (cx - 5000.0, cy - 5000.0),
                     _ => (cx, cy),
                 };
                 TerrainInfo { kind, x: x as i32, y: y as i32, r: r as i32, x2: x2 as i32, y2: y2 as i32, phase: 95, name: format!("{:?}", kind) }
@@ -1063,7 +1436,8 @@ mod tests {
             banner: None,
         };
         let upd = 40.0;
-        let mut c = Canvas::new((6.0 * cell / upd) as i32, (4.0 * cell / upd) as i32, [0.0, 0.0, 0.0]);
+        let rows = kinds.len().div_ceil(6) as f64;
+        let mut c = Canvas::new((6.0 * cell / upd) as i32, (rows * cell / upd) as i32, [0.0, 0.0, 0.0]);
         let tr = TextRenderer::load();
         let to = |x: f64, y: f64| ((x / upd) as f32, (y / upd) as f32);
         let u = |d: f64| (d / upd) as f32;

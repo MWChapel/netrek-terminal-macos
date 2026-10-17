@@ -104,6 +104,20 @@ pub fn faction_rgb(f: Faction) -> Rgb {
         Faction::Moonbase => rgb(0xe8dcc0),
         // Ming's imperial red and gold.
         Faction::Ming => rgb(0xf0a020),
+        // The Narada: a black mining ship lit rust red.
+        Faction::Narada => rgb(0xc8603a),
+        Faction::Krenim => rgb(0xd8a040),
+        Faction::Malon => rgb(0x98b050),
+        // Vaal's red stone serpent.
+        Faction::Vaal => rgb(0xd84a30),
+        Faction::Landru => rgb(0xb0b0ff),
+        Faction::Bluegill => rgb(0x5ab8c8),
+        // Cardassian tan.
+        Faction::Dreadnought => rgb(0xc8a878),
+        // Reman green.
+        Faction::Scimitar => rgb(0x78a070),
+        Faction::Calamarain => rgb(0x70c8ff),
+        Faction::Nagilum => rgb(0x9a78d0),
     }
 }
 
@@ -126,7 +140,7 @@ pub const TEMPEST_BLUE: Rgb = rgb(0x2060ff);
 /// the Death Star has destroyed: the ones the Empire occupies have armies).
 pub fn planet_rgb(info: &PlanetInfo) -> Rgb {
     match info.alien {
-        Some(Faction::Doomsday | Faction::Species8472) => rgb(0x55595f),
+        Some(Faction::Doomsday | Faction::Species8472 | Faction::Narada | Faction::Krenim) => rgb(0x55595f),
         Some(Faction::GalacticEmpire) if info.armies == 0 => rgb(0x55595f),
         Some(f) => faction_rgb(f),
         None => team_rgb(info.owner),

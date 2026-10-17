@@ -1,7 +1,7 @@
 //! Simple robot pilots, in the spirit of the old Netrek "hoser" robots.
 //! Robots drive the same command interface human clients use.
 
-use super::world::World;
+use super::world::{Task, Weapon, World};
 use crate::consts::*;
 use crate::proto::{ClientMsg, PState};
 use rand::Rng;
@@ -24,6 +24,8 @@ enum Goal {
     /// Push Ming's disabled War Rocket Ajax (the first) into Mingo City on
     /// Mongo (the second).
     CrashAjax(u8, u8),
+    /// A job an alien incursion calls for (see `World::duties`).
+    Duty(Task),
 }
 
 pub struct Bot {
@@ -33,6 +35,10 @@ pub struct Bot {
     think_timer: i32,
     jink: f64,
     aggression: f64,
+    /// When we last spoke to an alien (so as not to repeat ourselves).
+    said_at: u32,
+    /// Planets not to orbit (tribbles).
+    shun: Vec<usize>,
 }
 
 pub fn spawn(world: &mut World, team: Team) -> Option<Bot> {
@@ -46,6 +52,8 @@ pub fn spawn(world: &mut World, team: Team) -> Option<Bot> {
         think_timer: 0,
         jink: 0.0,
         aggression: rng.gen_range(0.6..1.0),
+        said_at: 0,
+        shun: Vec::new(),
     })
 }
 
@@ -117,6 +125,23 @@ impl Bot {
         let s = p.stats();
         let (x, y, team) = (p.x, p.y, p.team);
         let mut cmds: Vec<ClientMsg> = Vec::new();
+        // What the aliens about call for: our own job, ships not to fire
+        // on, places to keep out of, planets not to orbit.
+        let duty = world.assigned.get(i).copied().flatten().and_then(|n| world.duties.get(n)).map(|d| d.task);
+        let mut spare: Vec<u8> = Vec::new();
+        let mut avoid: Vec<(f64, f64, f64)> = Vec::new();
+        self.shun.clear();
+        for d in &world.duties {
+            if d.team.map_or(false, |t| t != team) {
+                continue;
+            }
+            match d.task {
+                Task::Spare { target } => spare.push(target),
+                Task::Avoid { x, y, r } => avoid.push((x, y, r)),
+                Task::Shun { planet } => self.shun.push(planet),
+                _ => {}
+            }
+        }
         // Ring frenzy: while the Kzinti's Ringworld is here, robots only
         // fight for it. They go after its sections and nothing else, and only
         // battle ships at the ring (or ones that come right at them).
@@ -139,6 +164,10 @@ impl Bot {
             .filter(|q| q.faction != Some(Faction::Moonbase) || p.alpha_foe)
             // Only scouts and destroyers can make a trench run on the Death Star.
             .filter(|q| q.ship != ShipType::DeathStar || small)
+            // The Krenim timeship can only be hurt while its temporal shields are down.
+            .filter(|q| q.ship != ShipType::KrenimTimeship || world.tick < q.revealed_until)
+            // Aliens that shooting only makes worse.
+            .filter(|q| !spare.contains(&q.id))
             .filter(|q| near_ring(q.x, q.y) || dist(x, y, q.x, q.y) < 5000.0)
             .map(|q| (q, dist(x, y, q.x, q.y)))
             .min_by(|a, b| a.1.total_cmp(&b.1))
@@ -226,7 +255,7 @@ impl Bot {
         // Mingo City and finish Ming.
         let pusher = world.ajax_adrift.filter(|&(a, _)| {
             let ajax = &world.players[a as usize];
-            dist(x, y, ajax.x, ajax.y) < 25_000.0
+            dist(x, y, ajax.x, ajax.y) < 60_000.0
                 && world
                     .players
                     .iter()
@@ -234,9 +263,12 @@ impl Bot {
                     .min_by(|a, b| dist(a.x, a.y, ajax.x, ajax.y).total_cmp(&dist(b.x, b.y, ajax.x, ajax.y)))
                     .map_or(false, |q| q.id == self.id)
         });
-        self.goal = if (hurt > 0.6 || low_fuel || crippled || (prev == Goal::Retreat && (hurt > 0.1 || p.fuel / s.max_fuel < 0.9)))
-            && p.armies == 0
-        {
+        let gambit = matches!(duty, Some(Task::Gambit { .. }));
+        self.goal = if (hurt > 0.6 || low_fuel || crippled) && p.armies == 0 && !gambit {
+            Goal::Retreat
+        } else if let Some(task) = duty.filter(|_| world.ajax_adrift.is_none() || gambit) {
+            self.duty_goal(world, i, task)
+        } else if prev == Goal::Retreat && (hurt > 0.1 || p.fuel / s.max_fuel < 0.9) && p.armies == 0 {
             Goal::Retreat
         } else if let Some((a, m)) = pusher.filter(|&(a, _)| {
             let ajax = &world.players[a as usize];
@@ -362,31 +394,7 @@ impl Bot {
         }
 
         match self.goal {
-            Goal::Fight if world.players[enemy.unwrap().0 as usize].ship == ShipType::DeathStar => {
-                // A trench run: get right behind it, then fire down the exhaust port.
-                let ds = &world.players[enemy.unwrap().0 as usize];
-                if super::aliens::in_trench(ds, p) {
-                    cmds.push(ClientMsg::Course(dir_to(x, y, ds.x, ds.y) as u8));
-                    cmds.push(ClientMsg::Speed((s.max_speed / 2) as u8));
-                    if p.wtemp / s.max_wtemp < 0.8 && p.fuel > s.torp_cost * 2.0 && rng.gen_bool(0.6) {
-                        cmds.push(ClientMsg::Torp(dir_to(x, y, ds.x, ds.y) as u8));
-                    }
-                } else {
-                    let (bx, by) = dir_vec(ds.dir + 128.0);
-                    let back = ds.ship.hit_radius() + super::aliens::TRENCH_DEPTH * 0.5;
-                    let (sx, sy) = (ds.x + bx * back, ds.y + by * back);
-                    // Swing wide round the hull rather than through its turbolasers.
-                    let (cx, cy) = (x - ds.x, y - ds.y);
-                    let wide = if dist(x, y, ds.x, ds.y) < back * 1.3 && dir_diff(dir_to(ds.x, ds.y, x, y), ds.dir + 128.0).abs() > 64.0 {
-                        let side = if cx * by - cy * bx > 0.0 { 32.0 } else { -32.0 };
-                        dir_to(ds.x, ds.y, x, y) + side
-                    } else {
-                        dir_to(x, y, sx, sy)
-                    };
-                    cmds.push(ClientMsg::Course(wide.rem_euclid(256.0) as u8));
-                    cmds.push(ClientMsg::Speed(s.max_speed as u8));
-                }
-            }
+            Goal::Fight if world.players[enemy.unwrap().0 as usize].ship == ShipType::DeathStar => trench_run(world, i, enemy.unwrap().0 as usize, &mut cmds),
             Goal::Fight => {
                 let (tid, tx, ty, tdir, tspeed, d) = enemy.unwrap();
                 let (tvx, tvy) = dir_vec(tdir as f64);
@@ -462,6 +470,7 @@ impl Bot {
                     cmds.push(ClientMsg::Speed(moon.speed.max(1) as u8));
                 }
             }
+            Goal::Duty(task) => self.do_duty(world, i, task, &mut cmds),
             Goal::Retreat => {
                 let target = self
                     .pick_planet(world, x, y, |_, pl| pl.owner == team && pl.flags & PL_REPAIR != 0)
@@ -485,6 +494,20 @@ impl Bot {
                 } else {
                     self.go_to(world, i, k, &mut cmds);
                 }
+            }
+        }
+
+        // Keep out of where the aliens make it unhealthy to be (unless our
+        // job is in there).
+        let job_at = duty.and_then(|t| super::world::Duty::each(t, 0).place(world));
+        let keep_out = avoid
+            .iter()
+            .filter(|&&(ax, ay, r)| dist(x, y, ax, ay) < r && job_at.map_or(true, |(jx, jy)| dist(jx, jy, ax, ay) > r))
+            .min_by(|a, b| (dist(x, y, a.0, a.1) - a.2).total_cmp(&(dist(x, y, b.0, b.1) - b.2)));
+        if let Some(&(ax, ay, _)) = keep_out {
+            if p.orbiting.is_none() || dist(x, y, ax, ay) < 3000.0 {
+                cmds.push(ClientMsg::Course(dir_to(ax, ay, x, y) as u8));
+                cmds.push(ClientMsg::Speed(s.max_speed as u8));
             }
         }
 
@@ -529,6 +552,196 @@ impl Bot {
         }
     }
 
+    /// The goal a duty comes to: some are done the usual way (picking up
+    /// armies, bombing and invading), the rest by `do_duty`.
+    fn duty_goal(&self, world: &World, i: usize, task: Task) -> Goal {
+        let p = &world.players[i];
+        let depot = || self.pick_planet(world, p.x, p.y, |_, pl| pl.owner == p.team && pl.armies > 3);
+        match task {
+            Task::Deliver { armies, .. } if p.armies < armies => depot().map_or(Goal::Duty(task), Goal::Pickup),
+            Task::Take { planet } => {
+                let pl = &world.planets[planet];
+                if pl.owner == p.team {
+                    Goal::Patrol(planet)
+                } else if p.armies > 0 && (p.armies as i32 > pl.armies || pl.armies <= 4) {
+                    Goal::Invade(planet)
+                } else if pl.armies > 4 {
+                    Goal::Bomb(planet)
+                } else {
+                    match depot().filter(|_| p.max_armies_now() > p.armies) {
+                        Some(k) => Goal::Pickup(k),
+                        None => Goal::Bomb(planet),
+                    }
+                }
+            }
+            Task::Bomb { planet } => Goal::Bomb(planet),
+            _ => Goal::Duty(task),
+        }
+    }
+
+    /// Carry out a duty an alien incursion calls for.
+    fn do_duty(&mut self, world: &World, i: usize, task: Task, cmds: &mut Vec<ClientMsg>) {
+        let mut rng = rand::thread_rng();
+        let p = &world.players[i];
+        let s = p.stats();
+        let (x, y) = (p.x, p.y);
+        let steer = |cmds: &mut Vec<ClientMsg>, dir: f64, speed: i32| {
+            cmds.push(ClientMsg::Course(dir.rem_euclid(256.0) as u8));
+            cmds.push(ClientMsg::Speed(speed.clamp(0, s.max_speed) as u8));
+        };
+        if p.orbiting.is_some() && !matches!(task, Task::Orbit { .. }) {
+            // Out of orbit to get on with it.
+            steer(cmds, p.dir, s.max_speed);
+        }
+        match task {
+            Task::Attack { target, .. } if world.players[target as usize].ship == ShipType::DeathStar => trench_run(world, i, target as usize, cmds),
+            Task::Attack { target, weapon, standoff, station } => {
+                let q = &world.players[target as usize];
+                if !q.alive() {
+                    return;
+                }
+                let d = dist(x, y, q.x, q.y);
+                let (tvx, tvy) = dir_vec(q.dir);
+                let tv = q.speed as f64 * WARP1;
+                let tspd = s.torp_speed * WARP1;
+                let aim = lead(x, y, q.x, q.y, tvx * tv, tvy * tv, tspd);
+                let straight = dir_to(x, y, q.x, q.y);
+                let phrange = PHASEDIST * s.phaser_damage / 100.0;
+                let torp_range = tspd * s.torp_fuse as f64 * 0.8;
+                let plasma_range = s.plasma_speed * WARP1 * s.plasma_fuse as f64 * 0.8;
+                // Where to fight from: at a safe range, but once its shields
+                // are all but gone, close in for the kill.
+                let finish = q.stats().max_shield > 0.0 && q.shield < q.stats().max_shield * 0.15 && weapon != Weapon::Plasma;
+                let keep = match weapon {
+                    _ if finish => standoff * 0.6,
+                    Weapon::Phasers => standoff.max(phrange * 0.55),
+                    _ => standoff,
+                };
+                if let Some((sx, sy)) = station {
+                    let ds = dist(x, y, sx, sy);
+                    if ds > 1200.0 {
+                        steer(cmds, dir_to(x, y, sx, sy), if ds > 4000.0 { s.max_speed } else { 4 });
+                    } else {
+                        steer(cmds, straight, 1);
+                    }
+                } else if keep > 0.0 {
+                    if rng.gen_bool(0.1) {
+                        self.jink = rng.gen_range(-20.0..20.0);
+                    }
+                    if d < keep - 1000.0 {
+                        steer(cmds, dir_to(q.x, q.y, x, y) + self.jink, s.max_speed);
+                    } else if d > keep + 1500.0 {
+                        steer(cmds, aim + self.jink * 0.3, s.max_speed);
+                    } else {
+                        // Circle at range.
+                        steer(cmds, straight + 64.0 + self.jink, (s.max_speed / 2).max(3));
+                    }
+                } else if d > 2500.0 && q.speed >= 4 && dir_diff(q.dir, straight).abs() < 48.0 {
+                    // It's running: a stern chase, straight at where it's going.
+                    let aim = lead(x, y, q.x, q.y, tvx * tv, tvy * tv, s.max_speed as f64 * WARP1);
+                    steer(cmds, aim, s.max_speed);
+                } else {
+                    if rng.gen_bool(0.15) {
+                        self.jink = rng.gen_range(-40.0..40.0);
+                    }
+                    let course = if d > 7000.0 { aim + self.jink * 0.4 } else { aim + 64.0 * self.jink.signum() * 0.6 + self.jink };
+                    steer(cmds, course, if d > 9000.0 { s.max_speed } else { (s.max_speed * 2 / 3).max(3) });
+                }
+                // Fire.
+                let cool = p.wtemp / s.max_wtemp < 0.75;
+                let torps = matches!(weapon, Weapon::Any | Weapon::Torps);
+                let phasers = matches!(weapon, Weapon::Any | Weapon::Phasers);
+                if torps && s.torp_damage > 0.0 && d < torp_range && cool && p.fuel > s.torp_cost * 4.0 && rng.gen_bool(0.5) {
+                    cmds.push(ClientMsg::Torp((aim + rng.gen_range(-3.0..3.0)).rem_euclid(256.0) as u8));
+                }
+                let eager = if weapon == Weapon::Phasers { 0.9 } else { 0.6 };
+                if phasers && s.phaser_damage > 0.0 && d < phrange * eager && p.phaser_timer == 0 && cool && p.fuel > s.phaser_cost * 2.0 {
+                    cmds.push(ClientMsg::Phaser(straight as u8));
+                }
+                // Plasma whenever it's ready against the monsters, now and then otherwise.
+                let monster = q.stats().max_damage >= 1000.0;
+                if (weapon == Weapon::Plasma || (weapon == Weapon::Any && (monster || rng.gen_bool(0.1)))) && s.plasma_damage > 0.0 && d < plasma_range {
+                    cmds.push(ClientMsg::Plasma(straight as u8));
+                }
+            }
+            Task::Hold { x: hx, y: hy, r, min, follow, .. } => {
+                let (cx, cy, fdir, fspeed) = match follow.map(|f| &world.players[f as usize]) {
+                    Some(f) => (f.x, f.y, f.dir, f.speed),
+                    None => (hx, hy, p.dir, 0),
+                };
+                let d = dist(x, y, cx, cy);
+                if d > r {
+                    let (vx, vy) = dir_vec(fdir);
+                    let v = fspeed as f64 * WARP1;
+                    let aim = lead(x, y, cx, cy, vx * v, vy * v, s.max_speed as f64 * WARP1);
+                    let speed = if d > r + 4000.0 { s.max_speed } else { (fspeed + 3).max(3) };
+                    steer(cmds, aim, speed);
+                } else if d < min {
+                    steer(cmds, dir_to(cx, cy, x, y), if follow.is_some() { s.max_speed } else { 4 });
+                } else if follow.is_some() {
+                    // Alongside: its course, nudged in if drifting toward the edge.
+                    let drift = if d > r * 0.6 { dir_diff(fdir, dir_to(x, y, cx, cy)).clamp(-32.0, 32.0) } else { 0.0 };
+                    steer(cmds, fdir + drift, fspeed);
+                } else {
+                    // On station: creep toward the spot (it may be moving).
+                    steer(cmds, dir_to(x, y, cx, cy), ((d / 300.0) as i32).clamp(0, 4));
+                }
+            }
+            Task::Deliver { x: dx, y: dy, r, .. } => {
+                let d = dist(x, y, dx, dy);
+                if d > r * 0.6 {
+                    self.go_toward(cmds, x, y, dx, dy, d, s.max_speed);
+                } else {
+                    steer(cmds, dir_to(x, y, dx, dy), 0);
+                }
+            }
+            Task::Speak { target, r, text } => {
+                let q = &world.players[target as usize];
+                let d = dist(x, y, q.x, q.y);
+                if d > r * 0.6 {
+                    self.go_toward(cmds, x, y, q.x, q.y, d, s.max_speed);
+                } else {
+                    steer(cmds, dir_to(x, y, q.x, q.y), q.speed.max(1));
+                }
+                if d < r * 0.9 && world.tick >= self.said_at + 30 {
+                    self.said_at = world.tick;
+                    cmds.push(ClientMsg::Message { to: crate::proto::MsgTarget::All, text: text.into() });
+                }
+            }
+            Task::Orbit { planet, .. } => {
+                if p.orbiting != Some(planet) {
+                    self.go_to(world, i, planet, cmds);
+                }
+            }
+            Task::Meet { target, r } => {
+                let q = &world.players[target as usize];
+                let d = dist(x, y, q.x, q.y);
+                let (vx, vy) = dir_vec(q.dir);
+                let v = q.speed as f64 * WARP1;
+                let aim = lead(x, y, q.x, q.y, vx * v, vy * v, s.max_speed as f64 * WARP1);
+                steer(cmds, aim, if d > r { s.max_speed } else { q.speed.max(2) });
+            }
+            Task::Gambit { target } => {
+                // Into the maw, and blow up there.
+                let q = &world.players[target as usize];
+                let (fx, fy) = dir_vec(q.dir);
+                let (mx, my) = (q.x + fx * 1600.0, q.y + fy * 1600.0);
+                steer(cmds, dir_to(x, y, mx, my), s.max_speed);
+                if dist(x, y, mx, my) < 900.0 {
+                    cmds.push(ClientMsg::Quit);
+                }
+            }
+            Task::Zap => cmds.push(ClientMsg::DetEnemy),
+            Task::Take { .. } | Task::Bomb { .. } | Task::Avoid { .. } | Task::Spare { .. } | Task::Shun { .. } => {}
+        }
+    }
+
+    /// Head for (tx, ty), slowing as we arrive.
+    fn go_toward(&self, cmds: &mut Vec<ClientMsg>, x: f64, y: f64, tx: f64, ty: f64, d: f64, max: i32) {
+        cmds.push(ClientMsg::Course(dir_to(x, y, tx, ty) as u8));
+        cmds.push(ClientMsg::Speed((if d > 6000.0 { max } else { ((d / 800.0) as i32).clamp(2, max) }) as u8));
+    }
+
     fn go_to(&self, world: &World, i: usize, k: usize, cmds: &mut Vec<ClientMsg>) {
         let p = &world.players[i];
         if p.lock != super::world::Lock::Planet(k) {
@@ -550,9 +763,40 @@ impl Bot {
             .planets
             .iter()
             .enumerate()
-            .filter(|&(k, pl)| ok(k, pl))
+            .filter(|&(k, pl)| ok(k, pl) && !self.shun.contains(&k))
             .map(|(k, pl)| (k, dist(x, y, pl.x, pl.y)))
             .min_by(|a, b| a.1.total_cmp(&b.1))
             .map(|(k, _)| k)
     }
 }
+
+/// A trench run on the Death Star (`ds`): get right behind it, then fire
+/// down the exhaust port.
+fn trench_run(world: &World, i: usize, ds: usize, cmds: &mut Vec<ClientMsg>) {
+    let mut rng = rand::thread_rng();
+    let (p, ds) = (&world.players[i], &world.players[ds]);
+    let s = p.stats();
+    let (x, y) = (p.x, p.y);
+    if super::aliens::in_trench(ds, p) {
+        cmds.push(ClientMsg::Course(dir_to(x, y, ds.x, ds.y) as u8));
+        cmds.push(ClientMsg::Speed((s.max_speed / 2) as u8));
+        if p.wtemp / s.max_wtemp < 0.8 && p.fuel > s.torp_cost * 2.0 && rng.gen_bool(0.6) {
+            cmds.push(ClientMsg::Torp(dir_to(x, y, ds.x, ds.y) as u8));
+        }
+    } else {
+        let (bx, by) = dir_vec(ds.dir + 128.0);
+        let back = ds.ship.hit_radius() + super::aliens::TRENCH_DEPTH * 0.5;
+        let (sx, sy) = (ds.x + bx * back, ds.y + by * back);
+        // Swing wide round the hull rather than through its turbolasers.
+        let (cx, cy) = (x - ds.x, y - ds.y);
+        let wide = if dist(x, y, ds.x, ds.y) < back * 1.3 && dir_diff(dir_to(ds.x, ds.y, x, y), ds.dir + 128.0).abs() > 64.0 {
+            let side = if cx * by - cy * bx > 0.0 { 32.0 } else { -32.0 };
+            dir_to(ds.x, ds.y, x, y) + side
+        } else {
+            dir_to(x, y, sx, sy)
+        };
+        cmds.push(ClientMsg::Course(wide.rem_euclid(256.0) as u8));
+        cmds.push(ClientMsg::Speed(s.max_speed as u8));
+    }
+}
+
