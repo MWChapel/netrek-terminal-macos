@@ -1001,8 +1001,9 @@ table, with what's needed if you don't qualify yet.
 | Orion | **Corsair** | 12 | 80 | 90 | 30 | 80 | The fastest ship in the game; carries 3 armies per kill |
 
 **Relic ships** (Commodore and up, key `u`): ships of long-vanished or far-off
-civilizations, found, captured or salvaged. None of them are races you'll meet as
-alien incursions. You don't choose which: one of thirteen is **drawn at random** each time you
+civilizations, found, captured or salvaged. Apart from the USS Cygnus (salvaged from the
+Black Hole), none of them are ships you'll meet as alien incursions. You don't choose
+which: one of fourteen is **drawn at random** each time you
 launch, and it's drawn in your empire's colours.
 
 | Relic | Speed | Shields | Hull | What makes it special |
@@ -1020,6 +1021,7 @@ launch, and it's drawn in your empire's colours.
 | **Husnock warship** | 8 | 140 | 150 | Planet cracker: bombs 3 armies at a time, and can bomb a planet down to 1 army instead of 4 |
 | **Suliban cell ship** (`SU`) | 11 | 70 | 80 | Enhanced reflexes: about 35% of shots and hits against it miss entirely |
 | **Excalbian shapeshifter** | 9 | 110 | 120 | To enemy pilots more than 3,000 away it looks like one of their own cruisers. Up close, the disguise fails |
+| **USS Cygnus** (`CG`) | 8 | 150 | 170 | Reinhardt's anti-gravity field: black holes (the Black Hole included) and graviton eddies can't pull it, and enemy tractor and pressor beams can't move it (a ship tractoring it pulls itself in instead). The event horizon still swallows it if you fly in |
 
 Special and relic ships get your advanced tech like any other hull. Robots never fly
 them. While you fly one, the controls panel names it and says what it does, above your

@@ -139,7 +139,12 @@ fn light(glows: Vec<(V3, f32, [f32; 3], f32)>, lines: Vec<(V3, V3)>, line_col: [
 
 /// The alien's own model, or None to raise it from its drawing as usual.
 pub(super) fn alien_model(ship: ShipType, faction: Option<Faction>, tick: u32, fine: bool) -> Option<Model> {
-    let f = faction?;
+    // The Cygnus relic is the incursion's ship in an empire's service.
+    let f = match faction {
+        Some(f) => f,
+        None if ship == ShipType::CygnusRelic => Faction::Cygnus,
+        None => return None,
+    };
     let seg = if fine { 28 } else { 12 };
     let lv = seg / 2;
     let t = tick as f32;
@@ -621,7 +626,8 @@ pub(super) fn alien_model(ship: ShipType, faction: Option<Faction>, tick: u32, f
             // The engine block.
             boxy([0.0, 0.88, 0.0], [0.3, 0.08, 0.13], &mut faces);
             let mut m = Model::from_mesh((faces, lines));
-            m.hull = Some(rgb(0x4a5250));
+            // The relic is painted in its empire's colours.
+            m.hull = if faction.is_some() { Some(rgb(0x4a5250)) } else { None };
             m.line_col = Some(rgb(0xa8b8b0));
             // Thousands of lights: along the lattice, up the tower, in the dome.
             let lit = rgb(0xe8ffd8);

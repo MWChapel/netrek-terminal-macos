@@ -439,6 +439,8 @@ pub enum ShipType {
     TieAdvanced,
     /// The USS Cygnus, hanging at the edge of the Black Hole.
     CygnusShip,
+    /// The USS Cygnus as a relic ship, flown by players (Commodore and up).
+    CygnusRelic,
 }
 
 impl ShipType {
@@ -470,7 +472,7 @@ impl ShipType {
     pub const SPECIALS: [ShipType; 4] = [ShipType::Defiant, ShipType::Warbird, ShipType::NeghVar, ShipType::Corsair];
 
     /// Relic ships of alien make, for Commodores and up (one drawn at random).
-    pub const RELICS: [ShipType; 13] = [
+    pub const RELICS: [ShipType; 14] = [
         ShipType::IconianShip,
         ShipType::BreenWarship,
         ShipType::VidiianHarvester,
@@ -484,6 +486,7 @@ impl ShipType {
         ShipType::HusnockWarship,
         ShipType::SulibanCell,
         ShipType::ExcalbianShip,
+        ShipType::CygnusRelic,
     ];
 
     pub fn special_for(team: Team) -> Option<ShipType> {
@@ -548,6 +551,7 @@ impl ShipType {
             ShipType::HusnockWarship => "planet cracker: bombs 3 armies at a time, down to 1 army",
             ShipType::SulibanCell => "enhanced reflexes: 35% of hits against it miss",
             ShipType::ExcalbianShip => "to distant enemy pilots it looks like one of their own cruisers",
+            ShipType::CygnusRelic => "anti-gravity field: black holes, eddies and enemy tractor or pressor beams can't move it",
             _ => "",
         }
     }
@@ -791,7 +795,7 @@ pub struct ShipStats {
     pub tract_str: f64,
 }
 
-pub static SHIPS: [ShipStats; 65] = [
+pub static SHIPS: [ShipStats; 66] = [
     ShipStats {
         name: "Scout", abbr: "SC", max_speed: 12, max_shield: 75.0, max_damage: 75.0,
         max_fuel: 5000.0, max_armies: 2, torp_damage: 25.0, torp_speed: 16.0, torp_fuse: 16,
@@ -1376,6 +1380,15 @@ pub static SHIPS: [ShipStats; 65] = [
         recharge: 500.0, repair: 60.0, warp_cost: 0.0, cloak_cost: 0.0, shield_cost: 0.0,
         turns: 0.0, acc: 0, dec: 1000, wpn_cool: 50.0, egn_cool: 50.0,
         max_etemp: 100_000.0, max_wtemp: 100_000.0, mass: 1_000_000.0, tract_range: 1.0, tract_str: 1.0,
+    },
+    ShipStats {
+        name: "USS Cygnus", abbr: "CG", max_speed: 8, max_shield: 150.0, max_damage: 170.0,
+        max_fuel: 15000.0, max_armies: 8, torp_damage: 35.0, torp_speed: 12.0, torp_fuse: 40,
+        torp_cost: 7.0 * 35.0, phaser_damage: 95.0, phaser_cost: 7.0 * 95.0,
+        plasma_damage: 0.0, plasma_speed: 0.0, plasma_fuse: 0, plasma_cost: 0.0,
+        recharge: 15.0, repair: 125.0, warp_cost: 4.0, cloak_cost: 28.0, shield_cost: 3.0,
+        turns: 110000.0, acc: 110, dec: 250, wpn_cool: 2.5, egn_cool: 7.0,
+        max_etemp: 1200.0, max_wtemp: 1100.0, mass: 3000.0, tract_range: 1.0, tract_str: 3000.0,
     },
 ];
 

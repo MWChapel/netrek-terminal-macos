@@ -384,6 +384,7 @@ fn special_or_relic(ship: ShipType) -> Option<Vec<Part>> {
             v.push(line((-0.3, -0.2), (0.1, 0.1)));
             v.push(line((0.1, 0.1), (0.35, -0.15)));
         }
+        ShipType::CygnusRelic => return Some(cygnus()),
         ShipType::TalosianShip => {
             // Talosian: a bulbous dome ringed by smaller cells.
             v.push(circle((0.0, -0.2), 0.55));
@@ -405,6 +406,29 @@ fn freighter() -> Vec<Part> {
         let y = -0.45 + k as f32 * 0.35;
         v.extend(pair(|s| Poly { pts: vec![(s * 0.1, y), (s * 0.42, y), (s * 0.42, y + 0.27), (s * 0.1, y + 0.27)], fill: true }));
     }
+    v
+}
+
+/// The USS Cygnus: a long open lattice of girders like a lit cathedral,
+/// the command tower amidships, the glass observation dome on its forward
+/// boom, outrigger pods and the engine block at the stern. (The incursion's
+/// ship, and the relic.)
+fn cygnus() -> Vec<Part> {
+    let mut v = Vec::new();
+    v.push(line((0.0, -1.0), (0.0, 0.95)));
+    v.push(Poly { pts: vec![(-0.24, -0.7), (0.24, -0.7), (0.24, 0.8), (-0.24, 0.8)], fill: false });
+    for k in 0..5 {
+        let (y0, y1) = (-0.7 + k as f32 * 0.3, -0.4 + k as f32 * 0.3);
+        v.push(line((-0.24, y0), (0.24, y1)));
+        v.push(line((0.24, y0), (-0.24, y1)));
+    }
+    v.push(capsule((0.0, -0.7), (0.0, -0.86), 0.1));
+    v.push(Circle { c: (0.0, -0.9), r: 0.11, fill: false });
+    v.push(circle((0.0, 0.0), 0.2));
+    v.push(Circle { c: (0.0, 0.0), r: 0.31, fill: false });
+    v.extend(pair(|s| line((s * 0.24, 0.35), (s * 0.55, 0.45))));
+    v.extend(pair(|s| capsule((s * 0.58, 0.2), (s * 0.58, 0.72), 0.14)));
+    v.push(Poly { pts: vec![(-0.32, 0.8), (0.32, 0.8), (0.28, 0.98), (-0.28, 0.98)], fill: true });
     v
 }
 
@@ -764,26 +788,7 @@ fn alien(f: Faction, ship: ShipType) -> Vec<Part> {
                 v.push(Circle { c: (0.0, 0.0), r: 0.13, fill: false });
             }
         },
-        Faction::Cygnus => {
-            // The USS Cygnus: a long open lattice of girders like a lit
-            // cathedral, the command tower amidships, the glass observation
-            // dome on its forward boom, outrigger pods and the engine block
-            // at the stern.
-            v.push(line((0.0, -1.0), (0.0, 0.95)));
-            v.push(Poly { pts: vec![(-0.24, -0.7), (0.24, -0.7), (0.24, 0.8), (-0.24, 0.8)], fill: false });
-            for k in 0..5 {
-                let (y0, y1) = (-0.7 + k as f32 * 0.3, -0.4 + k as f32 * 0.3);
-                v.push(line((-0.24, y0), (0.24, y1)));
-                v.push(line((0.24, y0), (-0.24, y1)));
-            }
-            v.push(capsule((0.0, -0.7), (0.0, -0.86), 0.1));
-            v.push(Circle { c: (0.0, -0.9), r: 0.11, fill: false });
-            v.push(circle((0.0, 0.0), 0.2));
-            v.push(Circle { c: (0.0, 0.0), r: 0.31, fill: false });
-            v.extend(pair(|s| line((s * 0.24, 0.35), (s * 0.55, 0.45))));
-            v.extend(pair(|s| capsule((s * 0.58, 0.2), (s * 0.58, 0.72), 0.14)));
-            v.push(Poly { pts: vec![(-0.32, 0.8), (0.32, 0.8), (0.28, 0.98), (-0.28, 0.98)], fill: true });
-        }
+        Faction::Cygnus => return cygnus(),
         // Nanites never fly a ship of their own.
         Faction::Nanites => {
             v.push(Circle { c: (0.0, 0.0), r: 0.3, fill: true });
@@ -823,6 +828,7 @@ pub fn engine_points(team: Team, ship: ShipType, faction: Option<Faction>) -> Ve
         ShipType::VidiianHarvester => return vec![(0.2, 0.9), (-0.2, 0.9)],
         ShipType::KazonRaider | ShipType::HusnockWarship => return vec![(0.3, 0.9), (-0.3, 0.9)],
         ShipType::KelvanShip | ShipType::SulibanCell => return vec![(0.0, 0.95)],
+        ShipType::CygnusRelic => return vec![(0.15, 0.98), (-0.15, 0.98)],
         ShipType::PreserverObelisk | ShipType::TalosianShip | ShipType::Freighter | ShipType::VothCityShip | ShipType::SheliakShip | ShipType::ExcalbianShip => {
             return vec![]
         }
@@ -900,6 +906,7 @@ mod tests {
             (Team::Kli, ShipType::HusnockWarship, None),
             (Team::Ori, ShipType::SulibanCell, None),
             (Team::Fed, ShipType::ExcalbianShip, None),
+            (Team::Kli, ShipType::CygnusRelic, None),
         ]);
         rows.push(vec![
             (Team::Ind, ShipType::TempestCore, Some(Faction::Tempest)),

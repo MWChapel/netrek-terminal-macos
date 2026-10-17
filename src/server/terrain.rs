@@ -422,6 +422,11 @@ pub fn great_pull(d: f64, r: f64) -> f64 {
     10.0 + 230.0 * (1.0 - d / r).max(0.0).powi(3)
 }
 
+/// The Cygnus's anti-gravity field holds it steady against any pull.
+pub fn anti_gravity(ship: ShipType) -> bool {
+    ship == ShipType::CygnusRelic
+}
+
 /// The Black Hole whose gravity well (x, y) is in, if any.
 pub fn in_great_hole(world: &World, x: f64, y: f64) -> Option<&Terrain> {
     world.terrain.iter().find(|t| t.kind == TerrainKind::GreatBlackHole && dist(x, y, t.x, t.y) < t.r)
@@ -542,7 +547,7 @@ pub fn tick(world: &mut World) {
                         doomed.push((j, format!("fell into the {}", t.name)));
                         continue;
                     }
-                    if p.orbiting.is_none() && !p.techs.contains(&Tech::MetaphasicShields) {
+                    if p.orbiting.is_none() && !p.techs.contains(&Tech::MetaphasicShields) && !anti_gravity(p.ship) {
                         let pull = 8.0 + 70.0 * (1.0 - d / t.r).powi(2);
                         p.x += (t.x - p.x) / d * pull;
                         p.y += (t.y - p.y) / d * pull;
@@ -557,7 +562,7 @@ pub fn tick(world: &mut World) {
                         continue;
                     }
                     // Orbiting a planet at the edge of the pull holds you.
-                    if p.orbiting.is_none() && !p.techs.contains(&Tech::MetaphasicShields) {
+                    if p.orbiting.is_none() && !p.techs.contains(&Tech::MetaphasicShields) && !anti_gravity(p.ship) {
                         let pull = great_pull(d, t.r);
                         p.x += (t.x - p.x) / d * pull;
                         p.y += (t.y - p.y) / d * pull;
@@ -656,7 +661,7 @@ pub fn tick(world: &mut World) {
                     p.x -= hx * p.speed as f64 * WARP1 * 0.5;
                     p.y -= hy * p.speed as f64 * WARP1 * 0.5;
                 }
-                TerrainKind::GravitonEddy if d < t.r && d > 1.0 && p.orbiting.is_none() => {
+                TerrainKind::GravitonEddy if d < t.r && d > 1.0 && p.orbiting.is_none() && !anti_gravity(p.ship) => {
                     // Swept around the centre, hardest near the middle.
                     let push = 10.0 + 25.0 * (1.0 - d / t.r);
                     let (rx, ry) = ((p.x - t.x) / d, (p.y - t.y) / d);

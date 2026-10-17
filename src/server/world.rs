@@ -3298,6 +3298,10 @@ impl World {
                 a.y = (a.y + uy * force / ma).clamp(0.0, GWIDTH);
             }
             let b = &mut self.players[ti];
+            // The Cygnus's anti-gravity field holds it steady.
+            if super::terrain::anti_gravity(b.ship) {
+                continue;
+            }
             b.leave_orbit();
             b.x = (b.x - ux * force / mb).clamp(0.0, GWIDTH);
             b.y = (b.y - uy * force / mb).clamp(0.0, GWIDTH);
@@ -4882,6 +4886,32 @@ mod tests {
         let friend = pilot(&mut w, "Friend", Team::Fed, 60_000.0, 90_000.0);
         let seen = w.frame_for(friend).players.iter().find(|p| p.id == ti as u8).cloned().unwrap();
         assert_eq!((seen.x, seen.y), (50_000, 90_000), "friends see the truth");
+    }
+
+    /// The Cygnus relic's anti-gravity field: neither a black hole nor an
+    /// enemy tractor beam can move it.
+    #[test]
+    fn cygnus_relic_holds_steady() {
+        let mut w = World::new();
+        w.features.ranks = true;
+        w.features.terrain = true;
+        let cy = flyer(&mut w, 6, Team::Fed, ShipType::IconianShip, 55_000.0, 50_000.0);
+        w.players[cy].ship = ShipType::CygnusRelic;
+        w.players[cy].speed = 0;
+        w.players[cy].desired_speed = 0;
+        w.terrain.push(super::super::terrain::tests_make(crate::proto::TerrainKind::GreatBlackHole, 50_000.0, 50_000.0, super::super::terrain::GREAT_HOLE_R));
+        super::super::terrain::tick(&mut w);
+        assert_eq!((w.players[cy].x, w.players[cy].y), (55_000.0, 50_000.0), "the Black Hole can't pull it");
+        w.terrain.clear();
+        let rom = pilot(&mut w, "Tal", Team::Rom, 58_000.0, 50_000.0) as usize;
+        w.players[rom].tractor = Some((cy as u8, false));
+        w.update_tractors();
+        assert_eq!((w.players[cy].x, w.players[cy].y), (55_000.0, 50_000.0), "nor a tractor beam");
+        assert!(w.players[rom].x < 58_000.0, "the tractoring ship pulls itself in instead");
+        // An ordinary ship is dragged.
+        w.players[cy].ship = ShipType::Cruiser;
+        w.update_tractors();
+        assert!(w.players[cy].x > 55_000.0);
     }
 
     #[test]

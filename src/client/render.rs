@@ -46,7 +46,7 @@ fn ship_shape(s: ShipType) -> &'static [(f64, f64)] {
         ],
         ShipType::BorgCube => &[(-0.75, -0.75), (0.75, -0.75), (0.75, 0.75), (-0.75, 0.75)],
         // The Cygnus: a long lattice hull with outrigger pods.
-        ShipType::CygnusShip => &[
+        ShipType::CygnusShip | ShipType::CygnusRelic => &[
             (0.0, -1.0), (0.25, -0.7), (0.25, 0.2), (0.65, 0.2), (0.65, 0.75), (0.3, 0.98), (-0.3, 0.98), (-0.65, 0.75), (-0.65, 0.2), (-0.25, 0.2), (-0.25, -0.7),
         ],
         ShipType::Freighter => &[(0.0, -1.0), (0.4, -0.75), (0.45, 0.95), (-0.45, 0.95), (-0.4, -0.75)],
