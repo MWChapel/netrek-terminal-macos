@@ -67,6 +67,8 @@ pub struct Player {
     pub tribbles: bool,
     /// Marked as prey by the Hirogen.
     pub marked: bool,
+    /// Has fired on Moonbase Alpha (the Moon or an Eagle): its Eagles hunt it.
+    pub alpha_foe: bool,
     /// Chang's Bird-of-Prey: its exhaust is visible until this tick.
     pub revealed_until: u32,
     /// Q's champion: only this empire's weapons can hurt it.
@@ -186,6 +188,7 @@ impl Player {
             powerless_until: 0,
             tribbles: false,
             marked: false,
+            alpha_foe: false,
             revealed_until: 0,
             only_hurt_by: None,
             rank: None,
@@ -1353,7 +1356,8 @@ impl World {
     fn orbit(&mut self, i: usize) {
         let id = i as u8;
         let (x, y, speed) = (self.players[i].x, self.players[i].y, self.players[i].speed);
-        if speed > ORBSPEED {
+        // An Eagle is a VTOL transporter: it drops into orbit at any speed.
+        if speed > ORBSPEED && self.players[i].ship != ShipType::Eagle {
             return self.warn(id, "Helmsman: Captain, the maximum safe speed for docking or orbiting is warp 2!");
         }
         let (k, d) = self.nearest_planet(x, y);
@@ -1863,6 +1867,8 @@ impl World {
                     && (!q.hidden || d2 < super::terrain::SENSOR_RANGE.powi(2))
                     && !q.ship.pointless_target()
                     && q.only_hurt_by.map_or(true, |t| t == team)
+                    // Alpha's Eagles mean no harm unless you've fired on Alpha.
+                    && (q.faction != Some(Faction::Moonbase) || self.players[i].alpha_foe)
                     && d2 < reach * reach
             })
             .min_by(|&a, &b| {
@@ -2231,6 +2237,16 @@ impl World {
         // Vader has the Force: a quarter of hits miss him.
         if p.ship == ShipType::TieAdvanced && rand::thread_rng().gen_bool(0.25) {
             return;
+        }
+        // Moonbase Alpha: whoever fires on the Moon or its Eagles has its
+        // Eagles after them. Nothing can hurt the Moon itself.
+        if self.players[i].faction == Some(Faction::Moonbase) {
+            if let Some(k) = killer.filter(|&k| self.players[k as usize].faction.is_none()) {
+                self.players[k as usize].alpha_foe = true;
+            }
+            if self.players[i].ship == ShipType::RogueMoon {
+                return;
+            }
         }
         // The Cygnus hangs inside the Black Hole's gravity well, which bends
         // away any fire from outside it.
@@ -4912,6 +4928,26 @@ mod tests {
         w.players[cy].ship = ShipType::Cruiser;
         w.update_tractors();
         assert!(w.players[cy].x > 55_000.0);
+    }
+
+    /// The Eagle is a VTOL transporter: it drops into orbit at any speed.
+    #[test]
+    fn eagle_relic_orbits_at_speed() {
+        let mut w = World::new();
+        w.features.ranks = true;
+        let k = 5;
+        let (px, py) = (w.planets[k].x, w.planets[k].y);
+        let e = flyer(&mut w, 6, Team::Fed, ShipType::IconianShip, px + 500.0, py);
+        w.players[e].ship = ShipType::Eagle;
+        w.players[e].speed = 8;
+        w.handle(e as u8, ClientMsg::Orbit);
+        assert_eq!(w.players[e].orbiting, Some(k));
+        // A cruiser at the same speed can't.
+        w.players[e].ship = ShipType::Cruiser;
+        w.players[e].orbiting = None;
+        w.players[e].speed = 8;
+        w.handle(e as u8, ClientMsg::Orbit);
+        assert_eq!(w.players[e].orbiting, None);
     }
 
     #[test]

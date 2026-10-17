@@ -149,6 +149,7 @@ In orbit, w fires at anything hostile in range, special weapons first. Off when 
 @ Metrons | Win the duel: 3 kills
 @ Species 10-C | Hold all 3 beacons at once
 @ Dyson sphere | Stay 15,000 from the hatch
+@ The Moon | Stay within 4,000 for 10 s
 ## Outbreaks
 @ Tribbles | Avoid T planets; Klingons cure
 @ Nanites | d, or a friendly repair world

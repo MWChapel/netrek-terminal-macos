@@ -17,12 +17,12 @@ that runs entirely inside a terminal window on macOS.
 - **Trek-style ships:** each empire has its own ship designs (Federation saucers and
   nacelles, Klingon D7s and Birds-of-Prey, Romulan warbirds, Orion raiders).
 - **Robots:** AI pilots fight, bomb, carry armies and capture planets, so you can play solo.
-- **Alien incursions** (optional): thirty-four threats, from Khan, the Borg and the
+- **Alien incursions** (optional): thirty-five threats, from Khan, the Borg and the
   planet killer to V'Ger, Species 8472, the Jem'Hadar, General Chang, Q, Nomad, the
   Metrons' arena, a Dyson sphere and a plague of tribbles, drop into the game, and the
   Kzinti arrive with a Ringworld that stays until they lose it. From a galaxy far, far
-  away, the Galactic Empire brings the Death Star, and the USS Cygnus waits inside the
-  Black Hole.
+  away, the Galactic Empire brings the Death Star, the USS Cygnus waits inside the
+  Black Hole, and the Moon drifts through with Moonbase Alpha.
 - **Extras** (optional, each its own server option): career ranks and service records,
   personal orders from command, treaties between empires, 22 kinds of space terrain (10
   in any one galaxy), supply convoys that buy upgrades for your empire, subsystem damage,
@@ -157,7 +157,7 @@ netrek <COMMAND>
 | `-b, --bind <ADDR>` | `0.0.0.0` | Address to bind; use `127.0.0.1` for local-only |
 | `--bots <N>` | `6` | Robot players kept in the game |
 | `-e, --empires <LIST>` | `fed,rom` | Empires the robots play for: `all`, or a comma list such as `fed,rom,kli` |
-| `--aliens [LIST]` | off | Alien incursions: bare `--aliens` for all thirty-four, or a list such as `khan,borg,vger`. See [Alien incursions](#alien-incursions) |
+| `--aliens [LIST]` | off | Alien incursions: bare `--aliens` for all thirty-five, or a list such as `khan,borg,vger`. See [Alien incursions](#alien-incursions) |
 | `--alien-interval <SECS>` | `150` | Average seconds between incursions |
 | `--ranks [FILE]` | off | Career ranks, service records and a leaderboard, saved to `FILE` (default `~/.netrek/service-records.tsv`). See [Extras](#extras) |
 | `--orders` | off | Personal orders from command, with rewards |
@@ -603,7 +603,8 @@ on two fronts. Robots are marked in the player list.
 ## Alien incursions
 
 Pass `--aliens` to `server` or `solo` and episodes from Star Trek (plus a visitor from a
-galaxy far, far away, and a ghost ship from Disney's *The Black Hole*) drop into the galaxy.
+galaxy far, far away, a ghost ship from Disney's *The Black Hole* and the runaway Moon
+from *Space: 1999*) drop into the galaxy.
 One arrives roughly every `--alien-interval` seconds (150 by default, with some random
 variation), and at most **two** are active at once. The galaxy has 32 player slots, so
 with aliens on the server keeps 8 of them free for incursions (11 with the Kzinti), running fewer robots than
@@ -611,7 +612,7 @@ with aliens on the server keeps 8 of them free for incursions (11 with the Kzint
 is announced to everyone as a magenta **ALERT** message with a klaxon.
 
 ```sh
-netrek server --empires all --bots 12 --aliens            # all thirty-four
+netrek server --empires all --bots 12 --aliens            # all thirty-five
 netrek solo --aliens khan,borg,doomsday --alien-interval 90
 ```
 
@@ -651,6 +652,7 @@ netrek solo --aliens khan,borg,doomsday --alien-interval 90
 | `dyson` | **A Dyson sphere** (*Relics*, TNG): a shell 9,000 across materialises around an out-of-the-way colony (in the episode it encloses a star). Nothing gets through the shell, ships or torpedoes, except by its **hatch**. The planet keeps its owner, but only ships inside can reach it (and repair, refuel or fight over it there). An automated **tractor beam** at the hatch locks onto the nearest ship within 15,000 units every 10 seconds and drags it in, whatever its engines do; the hatch opens to take it and shuts behind it. Heavy fire on the **hatch emitter** (200 damage while it holds you) breaks the beam. The hatch only opens to take a ship, but **a ship in the doorway holds it open**, as the Jenolan did, letting everyone in or out. **Destroy the hatch emitter** (600 shields, 1,200 hull, fast repairs, 5 kills) to jam the doors open for good. It's very tough, so bring friends: **a ship blowing up in the doorway does 6× damage** (Scotty's gambit), about a third of its strength for a cruiser. The **wreck of the USS Jenolan** lies on the shell and can be salvaged. |
 | `empire` | **The Galactic Empire** (*Star Wars*, from a galaxy far, far away): **the Death Star** comes out of hyperspace 25,000 units from the **most populous world in the galaxy** (the empires' planet with the most armies, usually a home world) with **three Star Destroyers** (*Devastator*, *Avenger* and *Tyrant*), **Darth Vader** in his TIE Advanced, and three **TIE fighters**. The Death Star flies to within 9,000 units of its target, stops and **charges its superlaser for 30 seconds** (with alerts when it starts and at 10 seconds to go), then **destroys the planet** with a green beam: no armies, no owner, no repair, fuel or farming, and every ship orbiting it (or within 2,000 units) goes with it. After 20 seconds to recharge it sets course for the next most populous world. Its turbolasers fire at any ship within 6,000 units of its hull, but with stormtrooper accuracy: half of them miss. **It shrugs off almost everything (2% damage).** Its one weakness is a **thermal exhaust port at its stern**: a **torpedo from a scout or destroyer in the trench** (within 3,000 units of the hull and within 45° of dead astern) sets off a **chain reaction** and destroys it outright, for 5 kills. Phasers and bigger ships won't do. An alert goes out when a ship gets into the trench ("Stay on target..."). When the Death Star blows up, the rest of the fleet jumps to hyperspace and the incursion is over. The **Star Destroyers** guard it, going after anyone near it (the trench first), and otherwise bomb colonies and **occupy** them with stormtroopers. They turn slowly, **their turbolasers only bear forward**, and they take **double damage from astern**, where their great engines are. They **launch a TIE fighter** every 15 seconds (up to six). **TIE fighters** are fast and have no shields; they swarm whoever comes near the Death Star. **Vader** chases trench runners too, and otherwise the best pilot about; **the Force** makes a quarter of hits on him miss. |
 | `cygnus` | **The USS Cygnus** (Disney's *The Black Hole*): only comes when **the Black Hole** is in the galaxy (a `--terrain` feature, so it needs `--terrain` too), and then turns up at the same interval as any other incursion. Dr. Hans Reinhardt's ship, lost for twenty years, hangs **inside the Black Hole's gravity well**, about halfway in, held there by its anti-gravity field. It **never moves from its spot**. Its sentry robots' red **laser batteries** hit any ship within 7,000 every 1.2 seconds (18 damage), and its **torpedoes** reach out to 11,000 (the Black Hole bends them too). **Fire from outside the gravity well can't touch it**: the Black Hole bends it away, and the shooter is told so. To destroy it you have to go into the well after it, where the gravity is pulling you toward the eye. 400 shields, 1,200 hull, 4 kills. When the incursion runs out, the Cygnus drifts over the event horizon and is gone. |
+| `moon` | **The Moon** (*Space: 1999*): blasted out of Earth orbit, the Moon **drifts in at one edge of the galaxy** at warp 2 and heads straight across, **leaving off the far side** about four minutes later, carrying Moonbase Alpha. **Nothing can hurt it.** When it arrives, **Nuclear Waste Area 2 is going critical**, with 150 seconds to go (alerts at 60 and 30). **To save the Moon, stay within 4,000 of it for 10 seconds** while Alpha vents the dumps through your ship's systems (it keeps moving, so match its course). The first to manage it **earns 5 kills**. Ships that have fired on Alpha can't help. If no one saves it, the dumps **explode**: every empire ship within 8,000 takes up to 60 damage, and the Moon is hurled on out of the galaxy at warp 6. Alpha launches an **Eagle** every 30 seconds (up to three at once). Eagles patrol round the Moon and **leave you alone unless you've fired on the Moon or an Eagle**: then they come after you. Robots and overwatch hold their fire on Eagles for the same reason. Eagles are worth 1.5 kills. |
 
 **How aliens behave:**
 
@@ -673,7 +675,7 @@ netrek solo --aliens khan,borg,doomsday --alien-interval 90
 - **Ending:** an incursion ends when all its ships are destroyed (or V'Ger is joined, the
   probe answered, Q's trial judged, Nomad talked into destroying itself, Armus starved,
   the Metrons' duel decided, first contact made with Species 10-C, peace made with the
-  Horta, the Dyson sphere's hatch destroyed, the Death Star blown up, the Cygnus destroyed, or the last tribble or nanite cleared), or it withdraws after 4–6 minutes. The Kzinti
+  Horta, the Dyson sphere's hatch destroyed, the Death Star blown up, the Cygnus destroyed, the Moon gone off the far edge, or the last tribble or nanite cleared), or it withdraws after 4–6 minutes. The Kzinti
   are the exception: they stay until they've lost the whole Ringworld. If an empire loses its last planet to aliens, it
   has been wiped out by alien invaders.
 
@@ -714,6 +716,7 @@ netrek solo --aliens khan,borg,doomsday --alien-interval 90
 | Dyson sphere | bronze | `DY` | A vast dark metal ring around a planet, with a hatch (two great doors under an emitter) that glows when open |
 | Galactic Empire | slate blue | `GE` | The Death Star: a vast grey sphere with its superlaser dish facing its target, the equatorial trench, and the exhaust port at its stern. Star Destroyers are long daggers with the bridge tower at the back; TIE fighters are a ball between two hexagonal wings, and Vader's TIE Advanced has bent wings (labelled `Imperial`) |
 | USS Cygnus | pale green | `CY` | A long open lattice of girders lit like a cathedral, with the command tower amidships, the glass observation dome on its forward boom and outrigger pods. On the viewscreen it's covered in twinkling lights, and its lasers are red |
+| Moonbase Alpha | moon-dust grey | `MA` | The Moon: a great grey cratered disc (a mottled sphere on the viewscreen) with the lights of Moonbase Alpha. Eagles are white: a nose cone, an open-frame spine over the passenger pod, four leg pods and four engine bells |
 
 The status line shows **HUNTED** (vector mode: **PREY**) when the Hirogen are after you,
 **TRIBBLES** (**TRIB**) when you're carrying them, and **NANITES** (**NANO**) when you're
@@ -762,6 +765,8 @@ infected.
 | TIE fighter | 12 | – | 40 | laser 15 | 0.3 |
 | TIE Advanced (Vader) | 12 | 80 | 110 | laser 25; a quarter of hits miss | 2.5 |
 | USS Cygnus | 0 | 400 | 1,200 | laser 18 (7,000), torpedo 40; only hurt from inside the Black Hole's gravity well | 4 |
+| The Moon | 2 (6 after the blast) | – | – | none; can't be hurt | – |
+| Eagle transporter | 9 | 90 | 110 | torpedo 30, phaser 85 | 1.5 |
 
 The monsters regenerate quickly. The planet killer only takes 40% of normal weapon
 damage, and a Borg cube's resistance builds as it's hit.
@@ -875,6 +880,10 @@ damage, and a Borg cube's resistance builds as it's hit.
   coordinated attack: a ship that's going down anyway should make its last stand in the
   doorway, since its explosion there does 6× damage, and two or three of those will
   finish it.
+- **The Moon:** don't shoot it or its Eagles: it can't be hurt, and the Eagles will hunt
+  you down. Fly out to meet it, turn onto its course and **stay within 4,000 of it for
+  10 seconds** to save it and earn 5 kills. A fast ship gets there first; if the
+  countdown is nearly out and you can't make it, keep well away from the blast.
 - **USS Cygnus:** don't waste fire on it from outside the Black Hole's gravity well; it
   won't land. Go in fast (a scout or destroyer copes best with the pull), keep your speed
   up so the gravity can't drag you toward the eye, and attack together so its lasers are
@@ -1002,8 +1011,8 @@ table, with what's needed if you don't qualify yet.
 
 **Relic ships** (Commodore and up, key `u`): ships of long-vanished or far-off
 civilizations, found, captured or salvaged. Apart from the USS Cygnus (salvaged from the
-Black Hole), none of them are ships you'll meet as alien incursions. You don't choose
-which: one of fourteen is **drawn at random** each time you
+Black Hole) and the Eagle (from Moonbase Alpha), none of them are ships you'll meet as
+alien incursions. You don't choose which: one of fifteen is **drawn at random** each time you
 launch, and it's drawn in your empire's colours.
 
 | Relic | Speed | Shields | Hull | What makes it special |
@@ -1022,6 +1031,7 @@ launch, and it's drawn in your empire's colours.
 | **Suliban cell ship** (`SU`) | 11 | 70 | 80 | Enhanced reflexes: about 35% of shots and hits against it miss entirely |
 | **Excalbian shapeshifter** | 9 | 110 | 120 | To enemy pilots more than 3,000 away it looks like one of their own cruisers. Up close, the disguise fails |
 | **USS Cygnus** (`CG`) | 8 | 150 | 170 | Reinhardt's anti-gravity field: black holes (the Black Hole included) and graviton eddies can't pull it, and enemy tractor and pressor beams can't move it (a ship tractoring it pulls itself in instead). The event horizon still swallows it if you fly in |
+| **Eagle transporter** (`EA`) | 9 | 90 | 110 | VTOL: drops straight into orbit at any speed, instead of slowing to warp 2 first (carries 6 armies) |
 
 Special and relic ships get your advanced tech like any other hull. Robots never fly
 them. While you fly one, the controls panel names it and says what it does, above your
@@ -1380,7 +1390,7 @@ The tests include:
 
 - **`four_empire_game`:** 16 robots across all four empires. Checks every empire gets
   its share of ships and that the fighting spreads across the galaxy.
-- **`every_incursion_plays_out`:** runs each of the thirty-four alien incursions against a
+- **`every_incursion_plays_out`:** runs each of the thirty-five alien incursions against a
   four-empire robot war and checks it arrives, acts and ends cleanly.
 - **Alien mechanics:** `vger_merge_ends_the_threat`, `crystal_shatters_on_resonance`,
   `whale_probe_drains_and_is_answered`, `bioships_only_fear_plasma`,
@@ -1401,6 +1411,8 @@ The tests include:
   `ringworld_departs_when_the_kzinti_lose_it` and `robots_go_into_a_ring_frenzy`,
   `death_star_destroys_the_most_populous_world`, `death_star_only_dies_down_its_exhaust_port`,
   `star_destroyers_are_weak_astern` and `robots_make_trench_runs`,
+  `moon_drifts_across_and_out_of_the_galaxy`, `staying_beside_the_moon_saves_it`,
+  `unsaved_moon_blows_and_eagles_hunt_its_attackers`, `eagles_leave_innocent_ships_alone`,
   `cygnus_only_comes_with_its_black_hole`, `cygnus_holds_its_spot_and_fires_on_passing_ships`
   and `cygnus_only_hurt_from_inside_the_gravity_well`.
 - **`retaking_alien_planets`:** liberated and resettled planets lose their alien mark.

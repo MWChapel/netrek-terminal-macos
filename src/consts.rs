@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 pub const DEFAULT_PORT: u16 = 2592; // the traditional Netrek port
-pub const PROTOCOL_VERSION: u32 = 23;
+pub const PROTOCOL_VERSION: u32 = 24;
 
 pub const UPS: u64 = 10; // server updates per second, like the original
 pub const GWIDTH: f64 = 100_000.0;
@@ -151,10 +151,12 @@ pub enum Faction {
     GalacticEmpire,
     /// The USS Cygnus, at the edge of the Black Hole (the Disney film).
     Cygnus,
+    /// The Moon and Moonbase Alpha, blasted out of Earth orbit (Space: 1999).
+    Moonbase,
 }
 
 impl Faction {
-    pub const ALL: [Faction; 34] = [
+    pub const ALL: [Faction; 35] = [
         Faction::Khan,
         Faction::Gorn,
         Faction::Tholian,
@@ -189,6 +191,7 @@ impl Faction {
         Faction::Kzinti,
         Faction::GalacticEmpire,
         Faction::Cygnus,
+        Faction::Moonbase,
     ];
 
     /// Name used on the command line.
@@ -228,6 +231,7 @@ impl Faction {
             Faction::Kzinti => "kzinti",
             Faction::GalacticEmpire => "empire",
             Faction::Cygnus => "cygnus",
+            Faction::Moonbase => "moon",
         }
     }
 
@@ -267,6 +271,7 @@ impl Faction {
             Faction::Kzinti => "the Kzinti",
             Faction::GalacticEmpire => "the Galactic Empire",
             Faction::Cygnus => "the USS Cygnus",
+            Faction::Moonbase => "Moonbase Alpha",
         }
     }
 
@@ -307,6 +312,7 @@ impl Faction {
             Faction::Kzinti => "Kzinti",
             Faction::GalacticEmpire => "Imperial",
             Faction::Cygnus => "Cygnus",
+            Faction::Moonbase => "Alpha",
         }
     }
 
@@ -347,6 +353,7 @@ impl Faction {
             Faction::Kzinti => "KZ",
             Faction::GalacticEmpire => "GE",
             Faction::Cygnus => "CY",
+            Faction::Moonbase => "MA",
         }
     }
 
@@ -441,6 +448,11 @@ pub enum ShipType {
     CygnusShip,
     /// The USS Cygnus as a relic ship, flown by players (Commodore and up).
     CygnusRelic,
+    /// The Moon, adrift with Moonbase Alpha on it (Space: 1999).
+    RogueMoon,
+    /// Moonbase Alpha's Eagle transporter: launched from the Moon, and a
+    /// relic ship players can fly.
+    Eagle,
 }
 
 impl ShipType {
@@ -472,7 +484,7 @@ impl ShipType {
     pub const SPECIALS: [ShipType; 4] = [ShipType::Defiant, ShipType::Warbird, ShipType::NeghVar, ShipType::Corsair];
 
     /// Relic ships of alien make, for Commodores and up (one drawn at random).
-    pub const RELICS: [ShipType; 14] = [
+    pub const RELICS: [ShipType; 15] = [
         ShipType::IconianShip,
         ShipType::BreenWarship,
         ShipType::VidiianHarvester,
@@ -487,6 +499,7 @@ impl ShipType {
         ShipType::SulibanCell,
         ShipType::ExcalbianShip,
         ShipType::CygnusRelic,
+        ShipType::Eagle,
     ];
 
     pub fn special_for(team: Team) -> Option<ShipType> {
@@ -552,6 +565,7 @@ impl ShipType {
             ShipType::SulibanCell => "enhanced reflexes: 35% of hits against it miss",
             ShipType::ExcalbianShip => "to distant enemy pilots it looks like one of their own cruisers",
             ShipType::CygnusRelic => "anti-gravity field: black holes, eddies and enemy tractor or pressor beams can't move it",
+            ShipType::Eagle => "VTOL transporter: drops straight into orbit at any speed",
             _ => "",
         }
     }
@@ -585,6 +599,7 @@ impl ShipType {
             ShipType::DeathStar => 2200.0,
             ShipType::StarDestroyer => 650.0,
             ShipType::CygnusShip => 1100.0,
+            ShipType::RogueMoon => 2400.0,
             _ => EXPDIST,
         }
     }
@@ -601,6 +616,7 @@ impl ShipType {
                 | ShipType::ArmusSlick
                 | ShipType::MetronPresence
                 | ShipType::DarkMatterAnomaly
+                | ShipType::RogueMoon
         )
     }
 
@@ -795,7 +811,7 @@ pub struct ShipStats {
     pub tract_str: f64,
 }
 
-pub static SHIPS: [ShipStats; 66] = [
+pub static SHIPS: [ShipStats; 68] = [
     ShipStats {
         name: "Scout", abbr: "SC", max_speed: 12, max_shield: 75.0, max_damage: 75.0,
         max_fuel: 5000.0, max_armies: 2, torp_damage: 25.0, torp_speed: 16.0, torp_fuse: 16,
@@ -1389,6 +1405,24 @@ pub static SHIPS: [ShipStats; 66] = [
         recharge: 15.0, repair: 125.0, warp_cost: 4.0, cloak_cost: 28.0, shield_cost: 3.0,
         turns: 110000.0, acc: 110, dec: 250, wpn_cool: 2.5, egn_cool: 7.0,
         max_etemp: 1200.0, max_wtemp: 1100.0, mass: 3000.0, tract_range: 1.0, tract_str: 3000.0,
+    },
+    ShipStats {
+        name: "the Moon", abbr: "MN", max_speed: 6, max_shield: 0.0, max_damage: 1_000_000.0,
+        max_fuel: 1_000_000.0, max_armies: 0, torp_damage: 0.0, torp_speed: 10.0, torp_fuse: 30,
+        torp_cost: 0.0, phaser_damage: 0.0, phaser_cost: 0.0,
+        plasma_damage: 0.0, plasma_speed: 0.0, plasma_fuse: 0, plasma_cost: 0.0,
+        recharge: 500.0, repair: 0.0, warp_cost: 0.0, cloak_cost: 0.0, shield_cost: 0.0,
+        turns: 40_000.0, acc: 30, dec: 30, wpn_cool: 50.0, egn_cool: 50.0,
+        max_etemp: 100_000.0, max_wtemp: 100_000.0, mass: 10_000_000.0, tract_range: 1.0, tract_str: 1.0,
+    },
+    ShipStats {
+        name: "Eagle transporter", abbr: "EA", max_speed: 9, max_shield: 90.0, max_damage: 110.0,
+        max_fuel: 12000.0, max_armies: 6, torp_damage: 30.0, torp_speed: 13.0, torp_fuse: 35,
+        torp_cost: 7.0 * 30.0, phaser_damage: 85.0, phaser_cost: 7.0 * 85.0,
+        plasma_damage: 0.0, plasma_speed: 0.0, plasma_fuse: 0, plasma_cost: 0.0,
+        recharge: 14.0, repair: 120.0, warp_cost: 4.0, cloak_cost: 24.0, shield_cost: 3.0,
+        turns: 260_000.0, acc: 180, dec: 280, wpn_cool: 2.5, egn_cool: 7.0,
+        max_etemp: 1200.0, max_wtemp: 1100.0, mass: 1700.0, tract_range: 1.0, tract_str: 2600.0,
     },
 ];
 

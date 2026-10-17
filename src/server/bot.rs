@@ -130,6 +130,8 @@ impl Bot {
             // Don't waste fire on Q (or anything else weapons can't hurt), or on a champion only another empire can hurt.
             // (They still close in on V'Ger and the whale probe, which is how those end.)
             .filter(|q| (!q.ship.pointless_target() || matches!(q.ship, ShipType::VgerCloud | ShipType::WhaleProbe)) && q.only_hurt_by.map_or(true, |t| t == team))
+            // Moonbase Alpha's Eagles are only a threat once you've fired on Alpha.
+            .filter(|q| q.faction != Some(Faction::Moonbase) || p.alpha_foe)
             // Only scouts and destroyers can make a trench run on the Death Star.
             .filter(|q| q.ship != ShipType::DeathStar || small)
             .filter(|q| near_ring(q.x, q.y) || dist(x, y, q.x, q.y) < 5000.0)

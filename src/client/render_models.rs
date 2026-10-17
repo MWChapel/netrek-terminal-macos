@@ -139,10 +139,11 @@ fn light(glows: Vec<(V3, f32, [f32; 3], f32)>, lines: Vec<(V3, V3)>, line_col: [
 
 /// The alien's own model, or None to raise it from its drawing as usual.
 pub(super) fn alien_model(ship: ShipType, faction: Option<Faction>, tick: u32, fine: bool) -> Option<Model> {
-    // The Cygnus relic is the incursion's ship in an empire's service.
+    // The Cygnus and Eagle relics are the incursions' ships in an empire's service.
     let f = match faction {
         Some(f) => f,
         None if ship == ShipType::CygnusRelic => Faction::Cygnus,
+        None if ship == ShipType::Eagle => Faction::Moonbase,
         None => return None,
     };
     let seg = if fine { 28 } else { 12 };
@@ -649,6 +650,72 @@ pub(super) fn alien_model(ship: ShipType, faction: Option<Faction>, tick: u32, f
                 m.glows.push(([sd * 0.15, 0.97, 0.0], 0.1, rgb(0xfff0c0), 0.8));
             }
             m.lights = false;
+            m
+        }
+        (Faction::Moonbase, ShipType::RogueMoon) => {
+            // The Moon: a grey ball mottled with dark maria and bright
+            // highlands, with Moonbase Alpha's lights on its face.
+            ball([0.0; 3], 1.0, seg, lv, &mut faces);
+            for face in &mut faces {
+                let c = centroid(&face.pts);
+                let n = (c[0] * 5.1 + c[1] * 3.7).sin() * (c[1] * 4.3 - c[2] * 2.9).cos() + 0.5 * (c[2] * 7.7 + c[0] * 2.3).sin();
+                let g = if n > 0.45 { 0x4a4a4c } else if n < -0.5 { 0xc8c6c0 } else { 0x8c8a86 };
+                face.paint = Some(rgb(g));
+            }
+            // Craters: rings sunk in the surface.
+            for &(lon, lat, r) in &[(0.6f32, 0.5f32, 0.16f32), (2.2, 0.2, 0.22), (3.6, -0.4, 0.14), (4.8, 0.7, 0.12), (1.3, -0.6, 0.18), (5.6, -0.1, 0.1)] {
+                let n = [lat.cos() * lon.cos(), lat.cos() * lon.sin(), lat.sin()];
+                lines.extend(circle_lines(mul(n, (1.0 - r * r).sqrt() * 1.005), n, r, 14));
+            }
+            let mut m = Model::from_mesh((faces, lines));
+            m.hull = Some(rgb(0x8c8a86));
+            m.line_col = Some(rgb(0x4a4a48));
+            let base = norm([0.25, -0.35, 0.9]);
+            m.glows = vec![(mul(base, 1.01), 0.12, rgb(0xfff0c8), 0.8), (mul(base, 1.01), 0.04, rgb(0xffffff), 1.0)];
+            m.lights = false;
+            m
+        }
+        (Faction::Moonbase, _) => {
+            // An Eagle transporter: the command module's cone at the nose,
+            // an open lattice spine over the passenger pod, four landing-leg
+            // pods on struts, and four engine bells at the stern.
+            tube([0.0, -0.72, 0.06], [0.0, -1.0, 0.06], 0.13, 0.03, seg / 2 + 2, (true, false), &mut faces);
+            boxy([0.0, 0.0, -0.07], [0.16, 0.4, 0.09], &mut faces);
+            boxy([0.0, 0.88, 0.06], [0.17, 0.06, 0.09], &mut faces);
+            let rails = [(-0.1, 0.0), (0.1, 0.0), (0.1, 0.14), (-0.1, 0.14)];
+            for &(x, h) in &rails {
+                lines.push(([x, -0.72, h], [x, 0.82, h]));
+            }
+            for k in 0..=6 {
+                let y = -0.72 + k as f32 * 0.257;
+                for c in 0..4 {
+                    let (a, b) = (rails[c], rails[(c + 1) % 4]);
+                    lines.push(([a.0, y, a.1], [b.0, y, b.1]));
+                }
+                if k < 6 {
+                    let yn = y + 0.257;
+                    lines.push(([-0.1, y, 0.14], [0.1, yn, 0.14]));
+                    lines.push(([0.1, y, 0.0], [0.1, yn, 0.14]));
+                    lines.push(([-0.1, y, 0.0], [-0.1, yn, 0.14]));
+                }
+            }
+            for y in [-0.53f32, 0.55] {
+                for sd in [-1.0f32, 1.0] {
+                    boxy([sd * 0.34, y, 0.04], [0.06, 0.12, 0.07], &mut faces);
+                    tube([sd * 0.1, y, 0.07], [sd * 0.28, y, 0.07], 0.018, 0.018, 4, (false, false), &mut faces);
+                    // The landing leg and its foot.
+                    lines.push(([sd * 0.34, y, -0.03], [sd * 0.4, y, -0.22]));
+                    lines.push(([sd * 0.36, y - 0.04, -0.22], [sd * 0.44, y + 0.04, -0.22]));
+                }
+            }
+            for &(x, h) in &[(-0.08f32, 0.1f32), (0.08, 0.1), (-0.08, 0.02), (0.08, 0.02)] {
+                tube([x, 0.94, h], [x, 1.02, h], 0.025, 0.045, seg / 3 + 3, (false, false), &mut faces);
+            }
+            let mut m = Model::from_mesh((faces, lines));
+            // The Moon's own Eagles are white; a relic wears its empire's colours.
+            m.hull = if faction.is_some() { Some(rgb(0xdcdcd4)) } else { None };
+            m.line_col = Some(rgb(0x8a8c88));
+            m.glows = [(-0.08f32, 0.1f32), (0.08, 0.1), (-0.08, 0.02), (0.08, 0.02)].iter().map(|&(x, h)| ([x, 1.03, h], 0.06, rgb(0xffc080), 0.6)).collect();
             m
         }
         (Faction::Tempest, _) => {

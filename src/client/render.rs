@@ -41,11 +41,18 @@ fn ship_shape(s: ShipType) -> &'static [(f64, f64)] {
         | ShipType::DarkMatterAnomaly
         | ShipType::CaretakerArray
         | ShipType::DelphicSphere
-        | ShipType::DeathStar => &[
+        | ShipType::DeathStar
+        | ShipType::RogueMoon => &[
             (0.0, -1.0), (0.7, -0.7), (1.0, 0.0), (0.7, 0.7), (0.0, 1.0), (-0.7, 0.7), (-1.0, 0.0), (-0.7, -0.7),
         ],
         ShipType::BorgCube => &[(-0.75, -0.75), (0.75, -0.75), (0.75, 0.75), (-0.75, 0.75)],
         // The Cygnus: a long lattice hull with outrigger pods.
+        // The Eagle: nose cone, spine and four leg pods.
+        ShipType::Eagle => &[
+            (0.0, -1.0), (0.14, -0.72), (0.14, -0.65), (0.4, -0.65), (0.4, -0.42), (0.14, -0.42), (0.14, 0.42), (0.4, 0.42), (0.4, 0.68),
+            (0.18, 0.68), (0.18, 0.98), (-0.18, 0.98), (-0.18, 0.68), (-0.4, 0.68), (-0.4, 0.42), (-0.14, 0.42), (-0.14, -0.42), (-0.4, -0.42),
+            (-0.4, -0.65), (-0.14, -0.65), (-0.14, -0.72),
+        ],
         ShipType::CygnusShip | ShipType::CygnusRelic => &[
             (0.0, -1.0), (0.25, -0.7), (0.25, 0.2), (0.65, 0.2), (0.65, 0.75), (0.3, 0.98), (-0.3, 0.98), (-0.65, 0.75), (-0.65, 0.2), (-0.25, 0.2), (-0.25, -0.7),
         ],

@@ -100,6 +100,8 @@ pub fn faction_rgb(f: Faction) -> Rgb {
         Faction::GalacticEmpire => rgb(0x8090c0),
         // The Cygnus's thousands of lights, glowing green-white.
         Faction::Cygnus => rgb(0x9cf0b4),
+        // Moonbase Alpha: moon-dust grey, warmed by the base's lights.
+        Faction::Moonbase => rgb(0xe8dcc0),
     }
 }
 

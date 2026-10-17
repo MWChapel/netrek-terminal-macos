@@ -129,6 +129,8 @@ fn duration(kind: Faction) -> u32 {
         Faction::Khan | Faction::Gorn | Faction::Mirror | Faction::Tholian | Faction::GalacticEmpire => 6,
         Faction::Borg | Faction::Vger | Faction::Species8472 | Faction::Tribbles | Faction::Hirogen => 5,
         Faction::TenC | Faction::SphereBuilders | Faction::Dyson | Faction::Cygnus => 5,
+        // The Moon takes its time crossing (and leaves when it's across).
+        Faction::Moonbase => 10,
         _ => 4,
     };
     mins * 60 * UPS as u32
@@ -236,6 +238,15 @@ impl Director {
                 }
                 Faction::Metrons => end_duel(world, &mut e),
                 Faction::Pakleds => recover(world, &mut e),
+                // With the Moon gone, its Eagles go home with it.
+                Faction::Moonbase => {
+                    for &id in &e.ships {
+                        world.remove_player(id);
+                    }
+                    for p in world.players.iter_mut() {
+                        p.alpha_foe = false;
+                    }
+                }
                 // With the Death Star gone, the rest of the fleet jumps to hyperspace.
                 Faction::GalacticEmpire => {
                     for &id in &e.ships {
@@ -673,6 +684,29 @@ impl Director {
                     name
                 )
             }
+            Faction::Moonbase => {
+                // In at one edge, out across the far one.
+                let (a, b) = (rng.gen_range(15_000.0..85_000.0), rng.gen_range(15_000.0..85_000.0));
+                let (from, to) = match rng.gen_range(0..4) {
+                    0 => ((500.0, a), (GWIDTH, b)),
+                    1 => ((GWIDTH - 500.0, a), (0.0, b)),
+                    2 => ((a, 500.0), (b, GWIDTH)),
+                    _ => ((a, GWIDTH - 500.0), (b, 0.0)),
+                };
+                spawn(world, "Moon", ShipType::RogueMoon, from, 0.0);
+                let Some(&m) = ships.first() else { return };
+                let p = &mut world.players[m as usize];
+                p.dir = dir_to(from.0, from.1, to.0, to.1);
+                p.desired_dir = p.dir;
+                p.desired_speed = MOON_SPEED;
+                p.speed = MOON_SPEED;
+                waypoint = to;
+                format!(
+                    "THE MOON has drifted into the galaxy near {}! Blasted out of Earth orbit, it carries Moonbase Alpha and its 311 people across space. Commander Koenig reports that Nuclear Waste Area 2 is going critical: it will blow in {} seconds. Any ship that stays close beside the Moon for 10 seconds can help Alpha vent it. Alpha's Eagles will defend the Moon from anyone who fires on it.",
+                    nearest_planet_name(world, from.0, from.1),
+                    MOON_CRISIS / UPS as u32
+                )
+            }
             Faction::Cygnus => {
                 let Some(hole) = world.terrain.iter().find(|t| t.kind == TerrainKind::GreatBlackHole) else { return };
                 let (hx, hy, hr) = (hole.x, hole.y, hole.r);
@@ -767,6 +801,9 @@ fn beaten(world: &World, e: &Event) -> bool {
     if e.kind == Faction::GalacticEmpire {
         return !e.ships.iter().any(|&s| world.players[s as usize].ship == ShipType::DeathStar);
     }
+    if e.kind == Faction::Moonbase {
+        return !e.ships.iter().any(|&s| world.players[s as usize].ship == ShipType::RogueMoon);
+    }
     if e.kind == Faction::Nanites {
         return !world.players.iter().any(|p| p.nanites);
     }
@@ -810,6 +847,7 @@ fn defeat_text(kind: Faction) -> String {
         Faction::Horta => "The Horta is no longer a threat to the colonies.".into(),
         Faction::SphereBuilders => "The last Delphic sphere is destroyed, and the anomalies around it fade.".into(),
         Faction::Dyson => "The Dyson sphere's hatch emitter is destroyed! Its doors jam open and every ship inside flies free.".into(),
+        Faction::Moonbase => "The Moon drifts out of the galaxy, carrying Moonbase Alpha on into the unknown.".into(),
         Faction::Cygnus => "The USS Cygnus breaks up and tumbles over the event horizon. Reinhardt has gone where no one can follow.".into(),
         Faction::Kzinti => "The Kzinti fleet is destroyed... for now.".into(),
         Faction::GalacticEmpire => "Great shot, that was one in a million! The Death Star explodes in a chain reaction, and what's left of the Imperial fleet jumps to hyperspace.".into(),
@@ -849,6 +887,7 @@ fn withdraw_text(kind: Faction) -> String {
         Faction::Horta => "The Horta burrows deep into the rock and falls silent.".into(),
         Faction::SphereBuilders => "The Sphere Builders withdraw their spheres, and the anomalies fade.".into(),
         Faction::Dyson => "The Dyson sphere's automated systems go dormant. Its hatch swings open and the trapped ships fly free.".into(),
+        Faction::Moonbase => "The Moon drifts out of the galaxy, carrying Moonbase Alpha on into the unknown.".into(),
         Faction::Cygnus => "The USS Cygnus drifts over the event horizon and vanishes into the Black Hole. Reinhardt has gone to see what lies beyond.".into(),
         Faction::Kzinti => "The Kzinti never withdraw.".into(),
         Faction::GalacticEmpire => "The Death Star and its fleet jump to hyperspace. \"This will be a day long remembered.\"".into(),
@@ -1002,6 +1041,10 @@ fn run_event(world: &mut World, e: &mut Event) {
             Faction::Dyson => dyson(world, e, i, tick),
             Faction::Kzinti => {}
             Faction::Cygnus => cygnus(world, e, i, tick),
+            Faction::Moonbase => match world.players[i].ship {
+                ShipType::RogueMoon => moon(world, e, i, tick),
+                _ => eagle(world, e, i, tick),
+            },
             Faction::GalacticEmpire => match world.players[i].ship {
                 ShipType::DeathStar => death_star(world, e, i, tick),
                 ShipType::StarDestroyer => star_destroyer(world, e, i, tick),
@@ -1025,6 +1068,9 @@ fn run_event(world: &mut World, e: &mut Event) {
     }
     if e.kind == Faction::GalacticEmpire {
         launch_ties(world, e, tick);
+    }
+    if e.kind == Faction::Moonbase {
+        launch_eagles(world, e, tick);
     }
     if e.kind == Faction::Tribbles {
         tribbles(world, e, tick);
@@ -3252,6 +3298,122 @@ const TIE_CAP: usize = 6;
 const TIE_LAUNCH: u32 = 15 * UPS as u32;
 
 /// The empires' world with the most armies.
+/// The Moon's drift (warp), how long until Nuclear Waste Area 2 blows,
+/// how close a ship must stay (and for how long) to help vent it, and what
+/// saving the Moon is worth.
+pub const MOON_SPEED: i32 = 2;
+pub const MOON_CRISIS: u32 = 150 * UPS as u32;
+pub const MOON_HELP: f64 = 4000.0;
+pub const MOON_HELP_TICKS: i32 = 10 * UPS as i32;
+pub const MOON_REWARD: f64 = 5.0;
+/// The explosion if no one helps: how far it reaches, and how hard it hits.
+const MOON_BLAST: f64 = 8000.0;
+const MOON_BLAST_DAMAGE: f64 = 60.0;
+/// A new Eagle every so often, up to a few at once.
+const EAGLE_LAUNCH: u32 = 30 * UPS as u32;
+const EAGLE_CAP: usize = 3;
+
+/// Where the Moon's crisis stands (kept in `Event::level`).
+const CRISIS: u8 = 0;
+const SAVED: u8 = 1;
+const BLOWN: u8 = 2;
+
+/// The Moon (*Space: 1999*): it drifts straight across the galaxy and out
+/// the other side. On the way, Nuclear Waste Area 2 goes critical: a ship
+/// that stays close beside it for 10 seconds (without having fired on
+/// Alpha) helps vent it and saves the Moon, for 5 kills. If no one does,
+/// the dumps blow, scorching every ship nearby and hurling the Moon on out
+/// of the galaxy at speed.
+fn moon(world: &mut World, e: &mut Event, i: usize, tick: u32) {
+    let id = i as u8;
+    let (x, y) = (world.players[i].x, world.players[i].y);
+    let (tx, ty) = e.waypoint;
+    let speed = if e.level == BLOWN { 6 } else { MOON_SPEED };
+    steer_to(world, i, tx, ty, speed);
+    // Across: gone.
+    if dist(x, y, tx, ty) < 2500.0 || x <= 0.0 || y <= 0.0 || x >= GWIDTH || y >= GWIDTH {
+        world.remove_player(id);
+        return;
+    }
+    if e.level != CRISIS {
+        return;
+    }
+    let left = (e.started + MOON_CRISIS).saturating_sub(tick);
+    if left == 60 * UPS as u32 || left == 30 * UPS as u32 {
+        announce(world, format!("Moonbase Alpha: Nuclear Waste Area 2 will blow in {} seconds! Any ship that can reach the Moon, help us vent it!", left / UPS as u32));
+    }
+    // Helpers: empire ships close beside it that have never fired on Alpha.
+    let helpers: Vec<usize> = empire_ships_near(world, x, y, MOON_HELP).into_iter().filter(|&j| !world.players[j].alpha_foe).collect();
+    e.progress.retain(|k, _| helpers.contains(&(*k as usize)));
+    for &j in &helpers {
+        let n = e.progress.entry(j as u8).or_insert(0);
+        *n += 1;
+        if *n == 1 {
+            world.warn(j as u8, "Moonbase Alpha: we're venting the waste dumps through your ship's systems. Stay with us for 10 seconds!");
+        }
+    }
+    if let Some((&j, _)) = e.progress.iter().filter(|(_, &n)| n >= MOON_HELP_TICKS).max_by_key(|(_, &n)| n) {
+        let j = j as usize;
+        e.level = SAVED;
+        e.progress.clear();
+        award(world, j, MOON_REWARD, "Saved Moonbase Alpha");
+        let who = world.players[j].label();
+        announce(world, format!("{} helps Moonbase Alpha vent Nuclear Waste Area 2 just in time! The Moon is saved. Commander Koenig sends his thanks (+{} kills).", who, MOON_REWARD));
+        return;
+    }
+    if left == 0 {
+        e.level = BLOWN;
+        announce(world, "NUCLEAR WASTE AREA 2 EXPLODES! The blast tears across the Moon's surface and hurls it on out of the galaxy at speed.");
+        let caught: Vec<usize> = empire_ships_near(world, x, y, MOON_BLAST);
+        for j in caught {
+            let k = 1.0 - dist(x, y, world.players[j].x, world.players[j].y) / MOON_BLAST;
+            world.inflict(j, MOON_BLAST_DAMAGE * (0.4 + 0.6 * k), Some(id), "was caught in the Moon's nuclear explosion".into());
+        }
+    }
+}
+
+/// An Eagle: escorts the Moon, and goes after anyone who fires on Alpha.
+fn eagle(world: &mut World, e: &mut Event, i: usize, tick: u32) {
+    let moon = e.ships.iter().map(|&s| s as usize).find(|&s| world.players[s].ship == ShipType::RogueMoon && world.players[s].alive());
+    let Some(m) = moon else { return };
+    let (mx, my) = (world.players[m].x, world.players[m].y);
+    let foe = world
+        .players
+        .iter()
+        .filter(|q| q.alive() && q.alpha_foe && !q.cloaked && dist(q.x, q.y, mx, my) < 15_000.0)
+        .min_by(|a, b| dist(a.x, a.y, mx, my).total_cmp(&dist(b.x, b.y, mx, my)))
+        .map(|q| q.id as usize);
+    if let Some(t) = foe {
+        fight(world, i, t);
+        return;
+    }
+    // A slow patrol round the Moon.
+    if tick % 5 == 0 {
+        let a = tick as f64 * 0.004 + i as f64;
+        steer_to(world, i, mx + a.cos() * 5000.0, my + a.sin() * 5000.0, 6);
+    }
+}
+
+fn launch_eagles(world: &mut World, e: &mut Event, tick: u32) {
+    if tick < e.next_at {
+        return;
+    }
+    e.next_at = tick + EAGLE_LAUNCH;
+    let alive = |s: ShipType| -> Vec<u8> {
+        e.ships.iter().copied().filter(|&id| world.players[id as usize].alive() && world.players[id as usize].ship == s).collect()
+    };
+    let free = world.players.iter().filter(|p| !p.in_use).count();
+    if alive(ShipType::Eagle).len() >= EAGLE_CAP || free < 3 {
+        return;
+    }
+    let Some(&m) = alive(ShipType::RogueMoon).first() else { return };
+    let (x, y) = (world.players[m as usize].x, world.players[m as usize].y);
+    let n = e.ships.len();
+    if let Some(nid) = world.spawn_alien(&format!("Eagle {}", n), Faction::Moonbase, ShipType::Eagle, x, y, 5.0) {
+        e.ships.push(nid);
+    }
+}
+
 /// How far into the Black Hole's gravity well the Cygnus hangs (a fraction
 /// of its radius), and how far its guns reach.
 pub const CYGNUS_DEPTH: f64 = 0.45;
@@ -3934,7 +4096,7 @@ mod tests {
                     ["Khan", "Gorn", "Tholian", "Fesarius", "Balok", "Terran", "planet killer", "amoeba", "Borg", "V'Ger",
                         "Crystalline", "probe", "8472", "Jem'Hadar", "wormhole", "ribble", "Chang", "Hirogen", "Q", "Ferengi",
                         "warm", "TEMPEST", "Tempest", "NOMAD", "Nomad", "Armus", "anite", "hangeling", "Metron", "Pakled", "10-C",
-                        "Caretaker", "Horta", "Sphere", "DYSON", "Dyson", "Kzin", "Death Star", "Imperial", "CYGNUS", "Cygnus"]
+                        "Caretaker", "Horta", "Sphere", "DYSON", "Dyson", "Kzin", "Death Star", "Imperial", "CYGNUS", "Cygnus", "MOON", "Moon"]
                         .iter()
                         .any(|k| m.contains(k))
                 })
@@ -3988,6 +4150,99 @@ mod tests {
     }
 
     /// Set up a world with one Federation cruiser (slot returned) near (x, y).
+    /// A world with the Moon just arrived, and its event.
+    fn moon_world() -> (World, Director, usize) {
+        let mut w = World::new();
+        let mut d = Director::new(AlienConfig { kinds: vec![Faction::Moonbase], interval: 9999 });
+        d.spawn(&mut w);
+        let m = d.events[0].ships[0] as usize;
+        assert_eq!(w.players[m].ship, ShipType::RogueMoon);
+        (w, d, m)
+    }
+
+    #[test]
+    fn moon_drifts_across_and_out_of_the_galaxy() {
+        let (mut w, mut d, m) = moon_world();
+        let (x0, y0) = (w.players[m].x, w.players[m].y);
+        let edge = |x: f64, y: f64| x.min(y).min(GWIDTH - x).min(GWIDTH - y);
+        assert!(edge(x0, y0) <= 600.0, "it comes in at an edge");
+        // Nothing hurts it.
+        let id = w.add_player("Kirk", false).unwrap();
+        w.join(id, Team::Fed, ShipType::Cruiser).unwrap();
+        w.inflict(m, 500.0, Some(id), "test".into());
+        assert_eq!(w.players[m].damage, 0.0);
+        assert!(w.players[id as usize].alpha_foe, "and shooting at it angers Alpha");
+        w.remove_player(id);
+        let mut gone_at = None;
+        for t in 0..(UPS as u32 * 60 * 8) {
+            d.tick(&mut w);
+            w.tick();
+            w.outbox.clear();
+            if d.events.is_empty() {
+                gone_at = Some(t);
+                break;
+            }
+        }
+        let t = gone_at.expect("the Moon leaves");
+        assert!(t > UPS as u32 * 60 * 2, "it crosses slowly ({} s)", t / UPS as u32);
+        assert!(!w.players.iter().any(|p| p.in_use && p.faction == Some(Faction::Moonbase)), "its Eagles go with it");
+    }
+
+    #[test]
+    fn staying_beside_the_moon_saves_it() {
+        let (mut w, mut d, m) = moon_world();
+        let id = w.add_player("Koenig", false).unwrap();
+        w.join(id, Team::Fed, ShipType::Cruiser).unwrap();
+        let k = id as usize;
+        let kills = w.players[k].kills;
+        for _ in 0..(MOON_HELP_TICKS + 5) {
+            (w.players[k].x, w.players[k].y) = (w.players[m].x + 2500.0, w.players[m].y);
+            w.players[k].speed = 0;
+            d.tick(&mut w);
+            w.tick();
+        }
+        assert_eq!(d.events[0].level, SAVED);
+        assert_eq!(w.players[k].kills, kills + MOON_REWARD);
+        let log: Vec<String> = w.outbox.drain(..).map(|o| o.msg.text).collect();
+        assert!(log.iter().any(|m| m.contains("The Moon is saved")));
+    }
+
+    #[test]
+    fn unsaved_moon_blows_and_eagles_hunt_its_attackers() {
+        let (mut w, mut d, m) = moon_world();
+        // A ship that fired on Alpha can't save it.
+        let id = w.add_player("Tal", false).unwrap();
+        w.join(id, Team::Rom, ShipType::Cruiser).unwrap();
+        let k = id as usize;
+        w.players[k].alpha_foe = true;
+        let mut eagle_fought = false;
+        for _ in 0..(MOON_CRISIS + 10) {
+            (w.players[k].x, w.players[k].y) = (w.players[m].x + 3000.0, w.players[m].y);
+            (w.players[k].speed, w.players[k].shields_up) = (0, true);
+            w.players[k].damage = 0.0;
+            d.tick(&mut w);
+            w.tick();
+            eagle_fought |= w.torps.iter().any(|t| w.players[t.owner as usize].ship == ShipType::Eagle);
+        }
+        assert_eq!(d.events[0].level, BLOWN, "no one saved it");
+        assert!(eagle_fought, "the Eagles went after the ship that fired on Alpha");
+        assert!(d.events[0].ships.iter().any(|&s| w.players[s as usize].ship == ShipType::Eagle), "Eagles were launched");
+        assert_eq!(w.players[m].desired_speed, 6, "the blast hurls the Moon on");
+    }
+
+    #[test]
+    fn eagles_leave_innocent_ships_alone() {
+        let (mut w, mut d, m) = moon_world();
+        let id = w.add_player("Sulu", false).unwrap();
+        w.join(id, Team::Fed, ShipType::Cruiser).unwrap();
+        for _ in 0..(UPS as u32 * 40) {
+            (w.players[id as usize].x, w.players[id as usize].y) = (w.players[m].x + 6000.0, w.players[m].y);
+            d.tick(&mut w);
+            w.tick();
+            assert!(!w.torps.iter().any(|t| w.players[t.owner as usize].ship == ShipType::Eagle));
+        }
+    }
+
     /// A world with the Black Hole at the centre and the Cygnus in it.
     fn cygnus_world() -> (World, Director, usize) {
         let mut w = World::new();

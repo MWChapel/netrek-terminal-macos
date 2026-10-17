@@ -385,6 +385,7 @@ fn special_or_relic(ship: ShipType) -> Option<Vec<Part>> {
             v.push(line((0.1, 0.1), (0.35, -0.15)));
         }
         ShipType::CygnusRelic => return Some(cygnus()),
+        ShipType::Eagle => return Some(eagle()),
         ShipType::TalosianShip => {
             // Talosian: a bulbous dome ringed by smaller cells.
             v.push(circle((0.0, -0.2), 0.55));
@@ -429,6 +430,40 @@ fn cygnus() -> Vec<Part> {
     v.extend(pair(|s| line((s * 0.24, 0.35), (s * 0.55, 0.45))));
     v.extend(pair(|s| capsule((s * 0.58, 0.2), (s * 0.58, 0.72), 0.14)));
     v.push(Poly { pts: vec![(-0.32, 0.8), (0.32, 0.8), (0.28, 0.98), (-0.28, 0.98)], fill: true });
+    v
+}
+
+/// Moonbase Alpha's Eagle transporter, from above: the command module's nose
+/// cone, the open-frame spine over the passenger pod, four landing-leg pods
+/// on struts and the engines at the stern. (The Moon's, and the relic.)
+fn eagle() -> Vec<Part> {
+    let mut v = Vec::new();
+    v.push(Poly { pts: vec![(0.0, -1.0), (0.14, -0.72), (-0.14, -0.72)], fill: true });
+    v.push(Poly { pts: vec![(-0.17, -0.38), (0.17, -0.38), (0.17, 0.4), (-0.17, 0.4)], fill: true });
+    v.push(Poly { pts: vec![(-0.1, -0.72), (0.1, -0.72), (0.1, 0.84), (-0.1, 0.84)], fill: false });
+    for k in 0..6 {
+        let (y0, y1) = (-0.72 + k as f32 * 0.26, -0.46 + k as f32 * 0.26);
+        v.push(line((-0.1, y0), (0.1, y1)));
+    }
+    for y in [-0.53f32, 0.55] {
+        v.extend(pair(|s| line((s * 0.1, y), (s * 0.28, y))));
+        v.extend(pair(|s| Poly { pts: vec![(s * 0.28, y - 0.12), (s * 0.4, y - 0.12), (s * 0.4, y + 0.12), (s * 0.28, y + 0.12)], fill: true }));
+    }
+    v.push(Poly { pts: vec![(-0.18, 0.84), (0.18, 0.84), (0.18, 0.95), (-0.18, 0.95)], fill: true });
+    v.extend(pair(|s| Circle { c: (s * 0.08, 0.97), r: 0.05, fill: false }));
+    v
+}
+
+/// The Moon, adrift: grey and cratered, with Moonbase Alpha's lights.
+fn rogue_moon() -> Vec<Part> {
+    let mut v = vec![circle((0.0, 0.0), 1.0)];
+    for &(x, y, r) in &[(-0.35, -0.3, 0.22), (0.3, -0.45, 0.12), (0.45, 0.25, 0.18), (-0.2, 0.45, 0.14), (0.05, 0.05, 0.08), (-0.6, 0.1, 0.09), (0.6, -0.1, 0.07)] {
+        v.push(Circle { c: (x, y), r, fill: false });
+    }
+    // Moonbase Alpha.
+    v.push(line((0.12, -0.2), (0.32, -0.2)));
+    v.push(line((0.22, -0.3), (0.22, -0.1)));
+    v.push(Circle { c: (0.22, -0.2), r: 0.04, fill: true });
     v
 }
 
@@ -789,6 +824,7 @@ fn alien(f: Faction, ship: ShipType) -> Vec<Part> {
             }
         },
         Faction::Cygnus => return cygnus(),
+        Faction::Moonbase => return if ship == ShipType::RogueMoon { rogue_moon() } else { eagle() },
         // Nanites never fly a ship of their own.
         Faction::Nanites => {
             v.push(Circle { c: (0.0, 0.0), r: 0.3, fill: true });
@@ -809,6 +845,7 @@ pub fn engine_points(team: Team, ship: ShipType, faction: Option<Faction>) -> Ve
         Some(Faction::Hirogen) => return vec![(0.3, 0.95), (-0.3, 0.95)],
         Some(Faction::Ferengi) => return vec![(0.0, 0.3)],
         Some(Faction::Kzinti) => return vec![(0.35, 0.9), (-0.35, 0.9)],
+        Some(Faction::Moonbase) if ship == ShipType::Eagle => return vec![(0.08, 0.98), (-0.08, 0.98)],
         Some(Faction::GalacticEmpire) => {
             return match ship {
                 ShipType::StarDestroyer => vec![(0.3, 1.0), (-0.3, 1.0), (0.0, 1.0)],
@@ -829,6 +866,7 @@ pub fn engine_points(team: Team, ship: ShipType, faction: Option<Faction>) -> Ve
         ShipType::KazonRaider | ShipType::HusnockWarship => return vec![(0.3, 0.9), (-0.3, 0.9)],
         ShipType::KelvanShip | ShipType::SulibanCell => return vec![(0.0, 0.95)],
         ShipType::CygnusRelic => return vec![(0.15, 0.98), (-0.15, 0.98)],
+        ShipType::Eagle => return vec![(0.08, 0.98), (-0.08, 0.98)],
         ShipType::PreserverObelisk | ShipType::TalosianShip | ShipType::Freighter | ShipType::VothCityShip | ShipType::SheliakShip | ShipType::ExcalbianShip => {
             return vec![]
         }
@@ -907,6 +945,7 @@ mod tests {
             (Team::Ori, ShipType::SulibanCell, None),
             (Team::Fed, ShipType::ExcalbianShip, None),
             (Team::Kli, ShipType::CygnusRelic, None),
+            (Team::Ori, ShipType::Eagle, None),
         ]);
         rows.push(vec![
             (Team::Ind, ShipType::TempestCore, Some(Faction::Tempest)),
@@ -941,6 +980,8 @@ mod tests {
             (Team::Ind, ShipType::TieFighter, Some(Faction::GalacticEmpire)),
             (Team::Ind, ShipType::TieAdvanced, Some(Faction::GalacticEmpire)),
             (Team::Ind, ShipType::CygnusShip, Some(Faction::Cygnus)),
+            (Team::Ind, ShipType::RogueMoon, Some(Faction::Moonbase)),
+            (Team::Ind, ShipType::Eagle, Some(Faction::Moonbase)),
         ]);
         for (row, ships) in rows.iter().enumerate() {
             for (col, &(team, ship, faction)) in ships.iter().enumerate() {
