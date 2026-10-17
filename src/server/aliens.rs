@@ -147,6 +147,7 @@ impl Director {
             return;
         }
         world.zones.clear();
+        world.moon_crisis = None;
         // A galaxy reset sends everyone home, aliens included.
         if world.reset_timer > 0 {
             for e in self.events.drain(..) {
@@ -3338,6 +3339,7 @@ fn moon(world: &mut World, e: &mut Event, i: usize, tick: u32) {
     if e.level != CRISIS {
         return;
     }
+    world.moon_crisis = Some(id);
     let left = (e.started + MOON_CRISIS).saturating_sub(tick);
     if left == 60 * UPS as u32 || left == 30 * UPS as u32 {
         announce(world, format!("Moonbase Alpha: Nuclear Waste Area 2 will blow in {} seconds! Any ship that can reach the Moon, help us vent it!", left / UPS as u32));
@@ -4228,6 +4230,43 @@ mod tests {
         assert!(eagle_fought, "the Eagles went after the ship that fired on Alpha");
         assert!(d.events[0].ships.iter().any(|&s| w.players[s as usize].ship == ShipType::Eagle), "Eagles were launched");
         assert_eq!(w.players[m].desired_speed, 6, "the blast hurls the Moon on");
+    }
+
+    #[test]
+    fn robots_save_the_moon() {
+        let mut saved = 0;
+        for _ in 0..6 {
+            let mut w = World::new();
+            let mut bots = Vec::new();
+            for t in Team::PLAYABLE {
+                for _ in 0..2 {
+                    bots.push(bot::spawn(&mut w, t).unwrap());
+                }
+            }
+            // Let them launch and spread out first.
+            for _ in 0..50 {
+                for b in bots.iter_mut() {
+                    b.think(&mut w);
+                }
+                w.tick();
+            }
+            let mut d = Director::new(AlienConfig { kinds: vec![Faction::Moonbase], interval: 9999 });
+            d.spawn(&mut w);
+            for _ in 0..(MOON_CRISIS + 10) {
+                d.tick(&mut w);
+                for b in bots.iter_mut() {
+                    b.think(&mut w);
+                }
+                w.tick();
+                w.outbox.clear();
+                w.warnings.clear();
+            }
+            if d.events.first().map_or(false, |e| e.level == SAVED) {
+                saved += 1;
+            }
+        }
+        println!("robots saved the Moon {} times in 6", saved);
+        assert!(saved >= 5, "robots saved the Moon {} times in 6", saved);
     }
 
     #[test]

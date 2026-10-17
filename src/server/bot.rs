@@ -19,6 +19,8 @@ enum Goal {
     Pickup(usize),
     Invade(usize),
     Patrol(usize),
+    /// Fly alongside the Moon to help Alpha vent its waste dumps.
+    SaveMoon(u8),
 }
 
 pub struct Bot {
@@ -206,10 +208,27 @@ impl Bot {
                 })
                 .unwrap_or(team.home_planet()),
         };
+        // The Moon in crisis: each empire sends its nearest ship (that hasn't
+        // fired on Alpha) to help, unless an enemy is right on top of it.
+        let rescuer = world.moon_crisis.filter(|_| !p.alpha_foe).filter(|&m| {
+            let moon = &world.players[m as usize];
+            world
+                .players
+                .iter()
+                .filter(|q| q.alive() && q.team == team && q.faction.is_none() && !q.alpha_foe)
+                .min_by(|a, b| dist(a.x, a.y, moon.x, moon.y).total_cmp(&dist(b.x, b.y, moon.x, moon.y)))
+                .map_or(false, |q| q.id == self.id)
+        });
         self.goal = if (hurt > 0.6 || low_fuel || crippled || (prev == Goal::Retreat && (hurt > 0.1 || p.fuel / s.max_fuel < 0.9)))
             && p.armies == 0
         {
             Goal::Retreat
+        } else if let Some(m) = rescuer.filter(|&m| {
+            // Once alongside, stay on task; on the way, see off anyone close.
+            let moon = &world.players[m as usize];
+            dist(x, y, moon.x, moon.y) < super::aliens::MOON_HELP || !matches!(enemy, Some((.., d)) if d < 5000.0)
+        }) {
+            Goal::SaveMoon(m)
         } else if matches!(enemy, Some((.., d)) if d < fight_range) && p.armies == 0 {
             Goal::Fight
         } else if p.armies > 0 && (p.armies >= p.max_armies_now() || !matches!(prev, Goal::Pickup(_))) {
@@ -375,6 +394,25 @@ impl Bot {
                 let plasma_odds = if vs_bioship { 0.35 } else { 0.05 };
                 if s.plasma_damage > 0.0 && p.kills >= 2.0 && d < 9000.0 && rng.gen_bool(plasma_odds) {
                     cmds.push(ClientMsg::Plasma(aim as u8));
+                }
+            }
+            Goal::SaveMoon(m) => {
+                // Meet it where it's going, then fly alongside, matching its
+                // course and speed, close enough to help.
+                let moon = &world.players[m as usize];
+                let (vx, vy) = dir_vec(moon.dir);
+                let mv = moon.speed as f64 * WARP1;
+                let d = dist(x, y, moon.x, moon.y);
+                let near = super::aliens::MOON_HELP * 0.6;
+                if d > near {
+                    let aim = lead(x, y, moon.x, moon.y, vx * mv, vy * mv, s.max_speed as f64 * WARP1);
+                    cmds.push(ClientMsg::Course(aim as u8));
+                    cmds.push(ClientMsg::Speed(if d > 8000.0 { s.max_speed } else { (moon.speed + 3).min(s.max_speed) } as u8));
+                } else {
+                    // Alongside: its course, nudged in if drifting out.
+                    let drift = if d > near * 0.8 { dir_diff(moon.dir, dir_to(x, y, moon.x, moon.y)).clamp(-24.0, 24.0) } else { 0.0 };
+                    cmds.push(ClientMsg::Course((moon.dir + drift).rem_euclid(256.0) as u8));
+                    cmds.push(ClientMsg::Speed(moon.speed.max(1) as u8));
                 }
             }
             Goal::Retreat => {

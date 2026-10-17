@@ -591,6 +591,9 @@ pub struct World {
     pub builds: Vec<Build>,
     /// Patches of space marked out by alien incursions (redrawn every tick).
     pub zones: Vec<ZoneInfo>,
+    /// The Moon, while its waste dumps are going critical and it can still
+    /// be saved (robots go to help).
+    pub moon_crisis: Option<u8>,
     /// Chat sent this tick (Nomad listens for it), cleared by `tick`.
     pub chatter: Vec<(u8, String)>,
     /// The Kzinti's Ringworld: once it arrives, it's here for good.
@@ -626,6 +629,7 @@ impl World {
             prizes: Vec::new(),
             builds: Vec::new(),
             zones: Vec::new(),
+            moon_crisis: None,
             chatter: Vec::new(),
             ring: None,
         };
