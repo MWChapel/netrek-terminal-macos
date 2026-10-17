@@ -394,6 +394,8 @@ pub enum ZoneKind {
     DysonHatch,
     /// ...and open.
     DysonHatchOpen,
+    /// The lightning field round Mingo City, on the planet Mongo.
+    LightningField,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

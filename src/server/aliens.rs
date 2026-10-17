@@ -126,7 +126,7 @@ fn announce(world: &mut World, text: impl Into<String>) {
 
 fn duration(kind: Faction) -> u32 {
     let mins = match kind {
-        Faction::Khan | Faction::Gorn | Faction::Mirror | Faction::Tholian | Faction::GalacticEmpire => 6,
+        Faction::Khan | Faction::Gorn | Faction::Mirror | Faction::Tholian | Faction::GalacticEmpire | Faction::Ming => 6,
         Faction::Borg | Faction::Vger | Faction::Species8472 | Faction::Tribbles | Faction::Hirogen => 5,
         Faction::TenC | Faction::SphereBuilders | Faction::Dyson | Faction::Cygnus => 5,
         // The Moon takes its time crossing (and leaves when it's across).
@@ -148,6 +148,7 @@ impl Director {
         }
         world.zones.clear();
         world.moon_crisis = None;
+        world.ajax_adrift = None;
         // A galaxy reset sends everyone home, aliens included.
         if world.reset_timer > 0 {
             for e in self.events.drain(..) {
@@ -239,6 +240,13 @@ impl Director {
                 }
                 Faction::Metrons => end_duel(world, &mut e),
                 Faction::Pakleds => recover(world, &mut e),
+                // With Ming dead (or bored), Mongo and his armada go back
+                // through the wormhole.
+                Faction::Ming => {
+                    for &id in &e.ships {
+                        world.remove_player(id);
+                    }
+                }
                 // With the Moon gone, its Eagles go home with it.
                 Faction::Moonbase => {
                     for &id in &e.ships {
@@ -306,6 +314,8 @@ impl Director {
             Faction::Gorn | Faction::Mirror => 4,
             // The Death Star and its three Star Destroyers; TIE fighters as fit.
             Faction::GalacticEmpire => 4,
+            // Mongo, War Rocket Ajax and three rockets.
+            Faction::Ming => 5,
             Faction::JemHadar => 5,
             // As many as fit (up to eight).
             Faction::Swarm => 4,
@@ -685,6 +695,34 @@ impl Director {
                     name
                 )
             }
+            Faction::Ming => {
+                // "Klytus, I'm bored. What plaything can you offer me today?"
+                // Mongo comes through a wormhole close to an empire's home world.
+                let homes: Vec<Team> = Team::PLAYABLE.into_iter().filter(|t| world.planets[t.home_planet()].owner == *t).collect();
+                let Some(&team) = homes.choose(&mut rng) else { return };
+                let k = team.home_planet();
+                let (hx, hy, name) = (world.planets[k].x, world.planets[k].y, world.planets[k].name);
+                let clear = |x: f64, y: f64| world.planets.iter().all(|pl| dist(x, y, pl.x, pl.y) > MONGO_FIELD + 1000.0);
+                let spots: Vec<(f64, f64)> = (0..36)
+                    .map(|n| {
+                        let a = n as f64 / 36.0 * TAU;
+                        ((hx + a.cos() * MONGO_DIST).clamp(5000.0, GWIDTH - 5000.0), (hy + a.sin() * MONGO_DIST).clamp(5000.0, GWIDTH - 5000.0))
+                    })
+                    .collect();
+                let at = spots.iter().copied().filter(|&(x, y)| clear(x, y)).collect::<Vec<_>>().choose(&mut rng).copied().unwrap_or(spots[0]);
+                spawn(world, "Mongo", ShipType::Mongo, at, 0.0);
+                spawn(world, "Ajax", ShipType::WarRocketAjax, near(at.0, at.1, 4000.0), 25.0);
+                for _ in 0..3 {
+                    spawn(world, "Rocket", ShipType::MingRocket, near(at.0, at.1, 4000.0), -5.0);
+                }
+                let Some(&m) = ships.first() else { return };
+                goals.insert(m, k);
+                waypoint = (hx, hy);
+                format!(
+                    "A WORMHOLE tears open beside {}, and the planet MONGO comes through! Ming the Merciless has chosen a new plaything: he will rain hot hail, earthquakes and hurricanes on {} until it is dust. Mingo City's lightning field turns aside all fire, and his rockets and War Rocket Ajax guard it. Ajax can't be destroyed, only disabled: then tow it or push it into Mingo City and Ming's palace will fall.",
+                    name, name
+                )
+            }
             Faction::Moonbase => {
                 // In at one edge, out across the far one.
                 let (a, b) = (rng.gen_range(15_000.0..85_000.0), rng.gen_range(15_000.0..85_000.0));
@@ -805,6 +843,9 @@ fn beaten(world: &World, e: &Event) -> bool {
     if e.kind == Faction::Moonbase {
         return !e.ships.iter().any(|&s| world.players[s as usize].ship == ShipType::RogueMoon);
     }
+    if e.kind == Faction::Ming {
+        return !e.ships.iter().any(|&s| world.players[s as usize].ship == ShipType::Mongo);
+    }
     if e.kind == Faction::Nanites {
         return !world.players.iter().any(|p| p.nanites);
     }
@@ -849,6 +890,7 @@ fn defeat_text(kind: Faction) -> String {
         Faction::SphereBuilders => "The last Delphic sphere is destroyed, and the anomalies around it fade.".into(),
         Faction::Dyson => "The Dyson sphere's hatch emitter is destroyed! Its doors jam open and every ship inside flies free.".into(),
         Faction::Moonbase => "The Moon drifts out of the galaxy, carrying Moonbase Alpha on into the unknown.".into(),
+        Faction::Ming => "Ming the Merciless is dead, and his empire falls! Mongo sinks back through its wormhole.".into(),
         Faction::Cygnus => "The USS Cygnus breaks up and tumbles over the event horizon. Reinhardt has gone where no one can follow.".into(),
         Faction::Kzinti => "The Kzinti fleet is destroyed... for now.".into(),
         Faction::GalacticEmpire => "Great shot, that was one in a million! The Death Star explodes in a chain reaction, and what's left of the Imperial fleet jumps to hyperspace.".into(),
@@ -889,6 +931,7 @@ fn withdraw_text(kind: Faction) -> String {
         Faction::SphereBuilders => "The Sphere Builders withdraw their spheres, and the anomalies fade.".into(),
         Faction::Dyson => "The Dyson sphere's automated systems go dormant. Its hatch swings open and the trapped ships fly free.".into(),
         Faction::Moonbase => "The Moon drifts out of the galaxy, carrying Moonbase Alpha on into the unknown.".into(),
+        Faction::Ming => "Ming tires of his plaything. Mongo and its armada slip back through the wormhole.".into(),
         Faction::Cygnus => "The USS Cygnus drifts over the event horizon and vanishes into the Black Hole. Reinhardt has gone to see what lies beyond.".into(),
         Faction::Kzinti => "The Kzinti never withdraw.".into(),
         Faction::GalacticEmpire => "The Death Star and its fleet jump to hyperspace. \"This will be a day long remembered.\"".into(),
@@ -1042,6 +1085,11 @@ fn run_event(world: &mut World, e: &mut Event) {
             Faction::Dyson => dyson(world, e, i, tick),
             Faction::Kzinti => {}
             Faction::Cygnus => cygnus(world, e, i, tick),
+            Faction::Ming => match world.players[i].ship {
+                ShipType::Mongo => mongo(world, e, i, tick),
+                ShipType::WarRocketAjax => ajax(world, e, i, tick),
+                _ => ming_rocket(world, e, i, tick),
+            },
             Faction::Moonbase => match world.players[i].ship {
                 ShipType::RogueMoon => moon(world, e, i, tick),
                 _ => eagle(world, e, i, tick),
@@ -1072,6 +1120,9 @@ fn run_event(world: &mut World, e: &mut Event) {
     }
     if e.kind == Faction::Moonbase {
         launch_eagles(world, e, tick);
+    }
+    if e.kind == Faction::Ming {
+        ming_armada(world, e, tick);
     }
     if e.kind == Faction::Tribbles {
         tribbles(world, e, tick);
@@ -3299,6 +3350,159 @@ const TIE_CAP: usize = 6;
 const TIE_LAUNCH: u32 = 15 * UPS as u32;
 
 /// The empires' world with the most armies.
+/// How far from the home world Mongo comes through, and the reach of
+/// Mingo City's lightning field.
+const MONGO_DIST: f64 = 11_000.0;
+pub const MONGO_FIELD: f64 = 3500.0;
+/// Ming's "plaything": how often he strikes it, and how hard.
+const MING_PLAY: u32 = 30 * UPS as u32;
+/// Each disaster kills a quarter of the world's armies (at least this many).
+const MING_ARMIES: i32 = 3;
+const MING_STORM: f64 = 15.0;
+/// A rocket launches from Mongo every so often, up to a few.
+const ROCKET_LAUNCH: u32 = 25 * UPS as u32;
+const ROCKET_CAP: usize = 5;
+/// Ajax is disabled at this much of its hull, and drifts for this long;
+/// how close to Mingo City it must be brought to crash; what that's worth.
+pub const AJAX_DOWN: f64 = 0.8;
+pub const AJAX_ADRIFT: u32 = 45 * UPS as u32;
+pub const AJAX_CRASH: f64 = 2200.0 + 1200.0;
+pub const AJAX_REWARD: f64 = 8.0;
+/// How long until a lost Ajax is replaced.
+const AJAX_RELAUNCH: u32 = 60 * UPS as u32;
+
+fn mongo_id(world: &World, e: &Event) -> Option<usize> {
+    e.ships.iter().map(|&s| s as usize).find(|&s| world.players[s].ship == ShipType::Mongo && world.players[s].alive())
+}
+
+/// Mongo (*Flash Gordon*): it sits where it came through, its lightning
+/// field scorching ships that come too close, while Ming plays with the
+/// nearby home world: hot hail, earthquakes and hurricanes every half
+/// minute, killing armies and battering the ships in orbit.
+fn mongo(world: &mut World, e: &mut Event, i: usize, tick: u32) {
+    let id = i as u8;
+    let (x, y) = (world.players[i].x, world.players[i].y);
+    world.zones.push(ZoneInfo { kind: ZoneKind::LightningField, x: x as i32, y: y as i32, r: MONGO_FIELD as i32 });
+    if tick % 20 == 0 {
+        for j in empire_ships_near(world, x, y, MONGO_FIELD) {
+            world.hit_kind = super::world::HitKind::Phaser;
+            world.phasers.push(PhaserShot {
+                info: PhaserInfo { owner: id, x1: x as i32, y1: y as i32, x2: world.players[j].x as i32, y2: world.players[j].y as i32, hit: true },
+                ticks: 4,
+            });
+            world.inflict(j, 12.0, Some(id), "was struck down by Mingo City's lightning field".into());
+        }
+    }
+    let Some(&k) = e.goals.get(&id) else { return };
+    if (tick - e.started) % MING_PLAY != MING_PLAY - 1 {
+        return;
+    }
+    let pl = &mut world.planets[k];
+    let (name, owner) = (pl.name, pl.owner);
+    let lost = (pl.armies / 4).max(MING_ARMIES).min(pl.armies - 1).max(0);
+    pl.armies -= lost;
+    let what = ["HOT HAIL", "EARTHQUAKES", "HURRICANES"][e.level as usize % 3];
+    e.level = e.level.wrapping_add(1);
+    let orbiting: Vec<usize> = (0..MAXPLAYER).filter(|&j| world.players[j].alive() && world.players[j].orbiting == Some(k)).collect();
+    for j in orbiting {
+        world.inflict(j, MING_STORM, Some(id), format!("was battered by Ming's {}", what.to_lowercase()));
+    }
+    let text = format!("Ming the Merciless sends {} down on {} ({}): {} armies lost.", what, name, owner.name(), lost);
+    if e.level == 1 {
+        announce(world, format!("{} \"Pathetic earthlings. Who can save you now?\"", text));
+    } else {
+        world.god(text);
+    }
+}
+
+/// War Rocket Ajax: guards Mongo and goes after anyone near it. Disabled,
+/// it drifts helpless; bring it within reach of Mingo City and it crashes
+/// into Ming's palace, and Ming is dead.
+fn ajax(world: &mut World, e: &mut Event, i: usize, tick: u32) {
+    let Some(m) = mongo_id(world, e) else { return };
+    let (mx, my) = (world.players[m].x, world.players[m].y);
+    let (x, y) = (world.players[i].x, world.players[i].y);
+    if tick < world.players[i].powerless_until {
+        world.players[i].desired_speed = 0;
+        world.ajax_adrift = Some((i as u8, m as u8));
+        if dist(x, y, mx, my) < AJAX_CRASH {
+            // Whoever brought it in: a ship with its tractor or pressor on it,
+            // or else the nearest empire ship.
+            let by = (0..MAXPLAYER)
+                .filter(|&j| world.players[j].alive() && world.players[j].faction.is_none())
+                .find(|&j| world.players[j].tractor.map_or(false, |(t, _)| t as usize == i))
+                .or_else(|| empire_ships_near(world, x, y, 10_000.0).into_iter().min_by(|&a, &b| {
+                    let (pa, pb) = (&world.players[a], &world.players[b]);
+                    dist(x, y, pa.x, pa.y).total_cmp(&dist(x, y, pb.x, pb.y))
+                }));
+            let who = by.map(|j| world.players[j].label()).unwrap_or_else(|| "Someone".into());
+            if let Some(j) = by {
+                award(world, j, AJAX_REWARD, "Crashed War Rocket Ajax into Mingo City");
+            }
+            announce(world, format!("FLASH! {} sends War Rocket Ajax crashing through the lightning field into Mingo City! Ming's palace falls, and Ming the Merciless is impaled on Ajax's prow!", who));
+            world.remove_player(i as u8);
+            world.remove_player(m as u8);
+        }
+        return;
+    }
+    // Back on line: patched up enough to fight again.
+    let p = &mut world.players[i];
+    if p.powerless_until > 0 {
+        p.powerless_until = 0;
+        p.damage = p.damage.min(p.stats().max_damage * 0.5);
+    }
+    if let Some((j, _)) = nearest_enemy(world, i, 12_000.0, None).filter(|&(j, _)| dist(world.players[j].x, world.players[j].y, mx, my) < 14_000.0) {
+        fight(world, i, j);
+    } else if tick % 5 == 0 {
+        let a = tick as f64 * 0.003;
+        steer_to(world, i, mx + a.cos() * 6000.0, my + a.sin() * 6000.0, 6);
+    }
+}
+
+/// Ming's rocket fighters: they swarm anyone near Mongo or over Ming's
+/// plaything, and otherwise circle above it.
+fn ming_rocket(world: &mut World, e: &mut Event, i: usize, tick: u32) {
+    let (hx, hy) = e.waypoint;
+    let near_home = |w: &World, j: usize| dist(w.players[j].x, w.players[j].y, hx, hy) < 12_000.0;
+    let mongo = mongo_id(world, e).map(|m| (world.players[m].x, world.players[m].y));
+    let near_mongo = |w: &World, j: usize| mongo.map_or(false, |(mx, my)| dist(w.players[j].x, w.players[j].y, mx, my) < 12_000.0);
+    if let Some((j, _)) = nearest_enemy(world, i, 15_000.0, None).filter(|&(j, _)| near_home(world, j) || near_mongo(world, j)) {
+        fight(world, i, j);
+    } else if tick % 5 == 0 {
+        let a = tick as f64 * 0.006 + i as f64;
+        steer_to(world, i, hx + a.cos() * 4000.0, hy + a.sin() * 4000.0, 8);
+    }
+}
+
+/// Mongo launches rockets, and a new Ajax if the old one is lost.
+fn ming_armada(world: &mut World, e: &mut Event, tick: u32) {
+    let Some(m) = mongo_id(world, e) else { return };
+    let (x, y) = (world.players[m].x, world.players[m].y);
+    let alive = |w: &World, e: &Event, s: ShipType| e.ships.iter().filter(|&&id| w.players[id as usize].alive() && w.players[id as usize].ship == s).count();
+    let free = world.players.iter().filter(|p| !p.in_use).count();
+    // A lost Ajax is replaced a minute later (`dwell`: when that's due).
+    if alive(world, e, ShipType::WarRocketAjax) == 0 {
+        if e.dwell == 0 {
+            e.dwell = (tick + AJAX_RELAUNCH) as i32;
+        } else if tick >= e.dwell as u32 && free >= 2 {
+            if let Some(nid) = world.spawn_alien("Ajax", Faction::Ming, ShipType::WarRocketAjax, x, y + 2500.0, 25.0) {
+                e.ships.push(nid);
+                e.dwell = 0;
+            }
+        }
+    }
+    if tick < e.next_at {
+        return;
+    }
+    e.next_at = tick + ROCKET_LAUNCH;
+    if alive(world, e, ShipType::MingRocket) >= ROCKET_CAP || free < 3 {
+        return;
+    }
+    if let Some(nid) = world.spawn_alien("Rocket", Faction::Ming, ShipType::MingRocket, x, y, -5.0) {
+        e.ships.push(nid);
+    }
+}
+
 /// The Moon's drift (warp), how long until Nuclear Waste Area 2 blows,
 /// how close a ship must stay (and for how long) to help vent it, and what
 /// saving the Moon is worth.
@@ -4098,7 +4302,7 @@ mod tests {
                     ["Khan", "Gorn", "Tholian", "Fesarius", "Balok", "Terran", "planet killer", "amoeba", "Borg", "V'Ger",
                         "Crystalline", "probe", "8472", "Jem'Hadar", "wormhole", "ribble", "Chang", "Hirogen", "Q", "Ferengi",
                         "warm", "TEMPEST", "Tempest", "NOMAD", "Nomad", "Armus", "anite", "hangeling", "Metron", "Pakled", "10-C",
-                        "Caretaker", "Horta", "Sphere", "DYSON", "Dyson", "Kzin", "Death Star", "Imperial", "CYGNUS", "Cygnus", "MOON", "Moon"]
+                        "Caretaker", "Horta", "Sphere", "DYSON", "Dyson", "Kzin", "Death Star", "Imperial", "CYGNUS", "Cygnus", "MOON", "Moon", "MONGO", "Ming"]
                         .iter()
                         .any(|k| m.contains(k))
                 })
@@ -4152,6 +4356,109 @@ mod tests {
     }
 
     /// Set up a world with one Federation cruiser (slot returned) near (x, y).
+    /// A world with Mongo just come through, and its event: (Mongo, Ajax).
+    fn ming_world() -> (World, Director, usize, usize) {
+        let mut w = World::new();
+        let mut d = Director::new(AlienConfig { kinds: vec![Faction::Ming], interval: 9999 });
+        d.spawn(&mut w);
+        let find = |w: &World, d: &Director, s: ShipType| d.events[0].ships.iter().map(|&i| i as usize).find(|&i| w.players[i].ship == s).unwrap();
+        let (m, a) = (find(&w, &d, ShipType::Mongo), find(&w, &d, ShipType::WarRocketAjax));
+        (w, d, m, a)
+    }
+
+    #[test]
+    fn ming_comes_through_near_a_home_world_and_plays_with_it() {
+        let (mut w, mut d, m, _) = ming_world();
+        let k = d.events[0].goals[&(m as u8)];
+        let home = &w.planets[k];
+        assert!(home.flags & PL_HOME != 0, "it's a home world");
+        assert!(dist(w.players[m].x, w.players[m].y, home.x, home.y) < MONGO_DIST + 500.0);
+        let mut before = 0;
+        for t in 0..(MING_PLAY + 5) {
+            if t == MING_PLAY - 2 {
+                before = w.planets[k].armies;
+            }
+            d.tick(&mut w);
+            w.tick();
+        }
+        assert!(w.planets[k].armies <= before - MING_ARMIES, "Ming's disasters kill armies");
+        assert!(w.zones.iter().any(|z| z.kind == ZoneKind::LightningField));
+        assert!(w.players[m].x > 0.0 && d.events[0].ships.len() >= 5, "and the armada grows");
+    }
+
+    #[test]
+    fn mongo_and_ajax_cant_be_destroyed() {
+        let (mut w, _d, m, a) = ming_world();
+        let id = w.add_player("Flash", false).unwrap();
+        w.join(id, Team::Fed, ShipType::Cruiser).unwrap();
+        w.inflict(m, 5000.0, Some(id), "test".into());
+        assert_eq!(w.players[m].damage, 0.0, "the lightning field turns fire aside");
+        w.inflict(a, 5000.0, Some(id), "test".into());
+        assert!(w.players[a].alive(), "Ajax can't be destroyed");
+        assert!(w.players[a].powerless_until > w.tick, "only disabled");
+    }
+
+    #[test]
+    fn crashing_ajax_into_mingo_city_kills_ming() {
+        let (mut w, mut d, m, a) = ming_world();
+        let id = w.add_player("Flash", false).unwrap();
+        w.join(id, Team::Fed, ShipType::Cruiser).unwrap();
+        let k = id as usize;
+        w.inflict(a, 5000.0, Some(id), "test".into());
+        // Push it in with a pressor from behind.
+        let (mx, my) = (w.players[m].x, w.players[m].y);
+        (w.players[a].x, w.players[a].y) = (mx + 6000.0, my);
+        (w.players[k].x, w.players[k].y) = (mx + 8000.0, my);
+        let kills = w.players[k].kills;
+        w.handle(id, ClientMsg::Tractor { target: Some(a as u8), pressor: true });
+        for _ in 0..300 {
+            d.tick(&mut w);
+            w.tick();
+            if d.events.is_empty() {
+                break;
+            }
+            w.players[k].x = w.players[a].x + 2000.0;
+            w.players[k].y = w.players[a].y;
+            w.players[k].damage = 0.0;
+        }
+        assert!(d.events.is_empty(), "Ming is dead");
+        assert_eq!(w.players[k].kills, kills + AJAX_REWARD);
+        assert!(!w.players.iter().any(|p| p.in_use && p.faction == Some(Faction::Ming)), "Mongo and the armada are gone");
+    }
+
+    #[test]
+    fn robots_crash_ajax() {
+        let mut done = 0;
+        for _ in 0..4 {
+            let (mut w, mut d, _m, a) = ming_world();
+            let mut bots = Vec::new();
+            for t in Team::PLAYABLE {
+                for _ in 0..2 {
+                    bots.push(bot::spawn(&mut w, t).unwrap());
+                }
+            }
+            for _ in 0..(UPS as u32 * 90) {
+                d.tick(&mut w);
+                // Keep Ajax disabled: the test is whether they push it in.
+                if w.players[a].alive() && w.tick >= w.players[a].powerless_until {
+                    w.inflict(a, 5000.0, None, "test".into());
+                }
+                for b in bots.iter_mut() {
+                    b.think(&mut w);
+                }
+                w.tick();
+                w.outbox.clear();
+                w.warnings.clear();
+                if d.events.is_empty() {
+                    done += 1;
+                    break;
+                }
+            }
+        }
+        println!("robots crashed Ajax {} times in 4", done);
+        assert!(done >= 3, "robots crashed Ajax {} times in 4", done);
+    }
+
     /// A world with the Moon just arrived, and its event.
     fn moon_world() -> (World, Director, usize) {
         let mut w = World::new();

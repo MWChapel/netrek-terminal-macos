@@ -144,6 +144,7 @@ pub(super) fn alien_model(ship: ShipType, faction: Option<Faction>, tick: u32, f
         Some(f) => f,
         None if ship == ShipType::CygnusRelic => Faction::Cygnus,
         None if ship == ShipType::Eagle => Faction::Moonbase,
+        None if ship == ShipType::WarRocketAjax => Faction::Ming,
         None => return None,
     };
     let seg = if fine { 28 } else { 12 };
@@ -650,6 +651,65 @@ pub(super) fn alien_model(ship: ShipType, faction: Option<Faction>, tick: u32, f
                 m.glows.push(([sd * 0.15, 0.97, 0.0], 0.1, rgb(0xfff0c0), 0.8));
             }
             m.lights = false;
+            m
+        }
+        (Faction::Ming, ShipType::Mongo) => {
+            // Mongo: a world banded in Ming's reds and golds, with the
+            // spires of Mingo City rising from its face.
+            ball([0.0; 3], 1.0, seg, lv, &mut faces);
+            for face in &mut faces {
+                let c = centroid(&face.pts);
+                let band = (c[2] * 6.0 + (c[0] * 3.0 + c[1] * 2.0).sin() * 0.8).sin();
+                let g = if band > 0.5 { 0xc03020 } else if band > -0.2 { 0xd88a30 } else if band > -0.7 { 0x8a2a20 } else { 0xe8c060 };
+                face.paint = Some(rgb(g));
+            }
+            let city = norm([0.0, -0.35, 0.94]);
+            let (u, v) = basis(city);
+            for &(du, dv, h) in &[(0.0f32, 0.0f32, 0.32f32), (0.07, 0.03, 0.2), (-0.06, 0.05, 0.22), (0.03, -0.07, 0.17)] {
+                let base = add(mul(city, 0.99), add(mul(u, du), mul(v, dv)));
+                tube(base, add(base, mul(city, h)), 0.035, 0.004, 6, (false, false), &mut faces);
+            }
+            let mut m = Model::from_mesh((faces, lines));
+            m.hull = Some(rgb(0xc03020));
+            m.glows = vec![(mul(city, 1.12), 0.2, rgb(0xffd060), 0.6), (mul(city, 1.3), 0.05, rgb(0xffffff), 0.9)];
+            m.lights = false;
+            m
+        }
+        (Faction::Ming, _) => {
+            // One of Ming's rockets: a pointed fuselage banded in gold and
+            // swept fins at the tail (Ajax, his flagship, has flanged wings
+            // too), with that sparkling exhaust.
+            let ajax = ship == ShipType::WarRocketAjax;
+            tube([0.0, -0.6, 0.0], [0.0, 0.75, 0.0], 0.17, 0.15, seg / 2 + 2, (false, false), &mut faces);
+            tube([0.0, -0.6, 0.0], [0.0, -1.0, 0.0], 0.17, 0.0, seg / 2 + 2, (false, false), &mut faces);
+            tube([0.0, 0.75, 0.0], [0.0, 0.92, 0.0], 0.15, 0.08, seg / 2 + 2, (false, true), &mut faces);
+            let n0 = faces.len();
+            for (fx, fh) in [(1.0f32, 0.0f32), (-1.0, 0.0), (0.0, 1.0)] {
+                let out = |r: f32, y: f32| [fx * r, y, fh * r];
+                let fin = vec![out(0.15, 0.3), out(0.7, 0.85), out(0.6, 1.0), out(0.15, 0.8)];
+                let n = if fh > 0.0 { [1.0, 0.0, 0.0] } else { [0.0, 0.0, 1.0] };
+                plate(&fin, n, 0.015, &mut faces);
+            }
+            if ajax {
+                for sd in [-1.0f32, 1.0] {
+                    plate(&[[sd * 0.16, -0.35, 0.0], [sd * 0.55, 0.05, 0.0], [sd * 0.55, 0.3, 0.0], [sd * 0.16, 0.2, 0.0]], [0.0, 0.0, 1.0], 0.02, &mut faces);
+                }
+            }
+            for face in &mut faces[n0..] {
+                face.paint = Some(rgb(0xe8b030));
+            }
+            for y in [-0.5f32, 0.0, 0.5] {
+                lines.extend(circle_lines([0.0, y, 0.0], [0.0, 1.0, 0.0], 0.172, seg));
+            }
+            let mut m = Model::from_mesh((faces, lines));
+            // Ming's own are red and gold; the relic wears its empire's colours.
+            m.hull = if faction.is_some() { Some(rgb(if ajax { 0x8a1a14 } else { 0xb82818 })) } else { None };
+            m.line_col = Some(rgb(0xf0c040));
+            let flicker = 0.6 + 0.4 * (t * 1.7).sin().abs();
+            m.glows = vec![([0.0, 1.0, 0.0], 0.14, rgb(0xffa040), 0.8 * flicker), ([0.0, 1.12, 0.0], 0.06, rgb(0xffffc0), flicker)];
+            if ajax {
+                m.glows.push(([0.0, -0.25, 0.19], 0.06, rgb(0xffd060), 0.8));
+            }
             m
         }
         (Faction::Moonbase, ShipType::RogueMoon) => {

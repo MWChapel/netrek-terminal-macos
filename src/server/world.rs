@@ -594,6 +594,9 @@ pub struct World {
     /// The Moon, while its waste dumps are going critical and it can still
     /// be saved (robots go to help).
     pub moon_crisis: Option<u8>,
+    /// Ming's War Rocket Ajax, disabled and adrift, and Mongo: (Ajax, Mongo).
+    /// Robots go to push it into Mingo City.
+    pub ajax_adrift: Option<(u8, u8)>,
     /// Chat sent this tick (Nomad listens for it), cleared by `tick`.
     pub chatter: Vec<(u8, String)>,
     /// The Kzinti's Ringworld: once it arrives, it's here for good.
@@ -630,6 +633,7 @@ impl World {
             builds: Vec::new(),
             zones: Vec::new(),
             moon_crisis: None,
+            ajax_adrift: None,
             chatter: Vec::new(),
             ring: None,
         };
@@ -1285,7 +1289,8 @@ impl World {
                 let dmg = phaser_damage * (1.0 - dist / range);
                 let (tx, ty) = (self.players[j].x, self.players[j].y);
                 let label = self.players[i].tag();
-                self.hit_kind = if self.players[i].faction == Some(Faction::JemHadar) {
+                // Jem'Hadar polaron beams and Ajax's ray cannons ignore shields.
+                self.hit_kind = if self.players[i].faction == Some(Faction::JemHadar) || self.players[i].ship == ShipType::WarRocketAjax {
                     HitKind::Polaron
                 } else if overcharge {
                     HitKind::Overcharge
@@ -2242,6 +2247,13 @@ impl World {
         if p.ship == ShipType::TieAdvanced && rand::thread_rng().gen_bool(0.25) {
             return;
         }
+        // Mingo City's lightning field turns all fire aside from Mongo.
+        if self.players[i].ship == ShipType::Mongo {
+            if let Some(k) = killer.filter(|&k| self.players[k as usize].faction.is_none()) {
+                self.warn(k, "Mingo City's lightning field turns your fire aside. Crash War Rocket Ajax into it!");
+            }
+            return;
+        }
         // Moonbase Alpha: whoever fires on the Moon or its Eagles has its
         // Eagles after them. Nothing can hurt the Moon itself.
         if self.players[i].faction == Some(Faction::Moonbase) {
@@ -2378,6 +2390,17 @@ impl World {
             }
         }
         let p = &mut self.players[i];
+        // Ming's War Rocket Ajax can't be destroyed, only disabled: then it
+        // drifts helpless, to be towed or pushed into Mingo City.
+        if p.ship == ShipType::WarRocketAjax && p.faction == Some(Faction::Ming) && p.damage >= p.stats().max_damage * super::aliens::AJAX_DOWN {
+            p.damage = p.damage.min(p.stats().max_damage * 0.99);
+            if tick >= p.powerless_until {
+                p.powerless_until = tick + super::aliens::AJAX_ADRIFT;
+                (p.speed, p.desired_speed) = (0, 0);
+                self.alert("War Rocket Ajax is disabled and adrift! Tow it or push it into Mingo City to bring down Ming's palace!");
+            }
+            return;
+        }
         if p.damage >= p.stats().max_damage {
             self.kill(i, killer, how);
         }
@@ -4952,6 +4975,22 @@ mod tests {
         w.players[e].speed = 8;
         w.handle(e as u8, ClientMsg::Orbit);
         assert_eq!(w.players[e].orbiting, None);
+    }
+
+    /// War Rocket Ajax's ray cannons go straight through shields.
+    #[test]
+    fn ajax_relic_rays_ignore_shields() {
+        let mut w = World::new();
+        w.features.ranks = true;
+        let a = flyer(&mut w, 6, Team::Fed, ShipType::IconianShip, 50_000.0, 50_000.0);
+        w.players[a].ship = ShipType::WarRocketAjax;
+        w.players[a].fuel = 10_000.0;
+        let r = pilot(&mut w, "Tal", Team::Rom, 50_000.0, 49_000.0) as usize;
+        w.players[r].shields_up = true;
+        let shield = w.players[r].shield;
+        w.handle(a as u8, ClientMsg::Phaser(0));
+        assert!(w.players[r].damage > 0.0, "straight to the hull");
+        assert_eq!(w.players[r].shield, shield, "shields untouched");
     }
 
     #[test]

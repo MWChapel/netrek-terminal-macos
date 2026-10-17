@@ -1100,6 +1100,32 @@ pub(super) fn draw_zone_piece(c: &mut Canvas, cam: &Cam, f: &Frame, piece: ZoneP
                     glow3(c, cam, hi, 300.0, if lit { WHITE } else { BEACON }, 0.9);
                     label(c, tr, cam, x, y, 2200.0, "hyperfield beacon", BEACON, fs);
                 }
+                ZoneKind::LightningField => {
+                    // A dome of crackling red lightning over Mingo City.
+                    let frame = (tick / 2.0) as u64;
+                    for k in 0..14u64 {
+                        if rnd(frame, k + 77) < 0.3 {
+                            continue;
+                        }
+                        // Each bolt leaps over the dome between two points on its rim.
+                        let lon = rnd(frame, k) * TAU;
+                        let span = 0.6 + rnd(frame, k + 30) * 1.4;
+                        let peak = 0.3 + rnd(frame, k + 50) * 0.7;
+                        let pts: Vec<V3> = bolt(0.0, 1.0, 16, k, frame)
+                            .into_iter()
+                            .enumerate()
+                            .map(|(n, (t, d))| {
+                                let jag = (rnd(frame ^ 0x55, k * 40 + n as u64) - 0.5) * 0.25;
+                                let l = lon + span * t + jag;
+                                let lat = (PI * t).sin() * peak * PI / 2.0;
+                                cam.at(x + l.cos() * lat.cos() * r * d, y + l.sin() * lat.cos() * r * d, lat.sin() * r * d)
+                            })
+                            .collect();
+                        poly3(c, cam, &pts, false, 4.0, LIGHTNING, 0.2, false);
+                        poly3(c, cam, &pts, false, 1.3, mix(LIGHTNING, LIGHTNING_HOT, 0.5), 0.85, false);
+                    }
+                    ring3(c, cam, x, y, r, 0.0, 1.5, LIGHTNING, 0.5, false);
+                }
                 ZoneKind::Displacement => {
                     // The wave: a rippling wall of light racing outward.
                     for (k, h) in [(1.0f32, 0.0f32), (0.8, 0.0)] {
@@ -1417,9 +1443,10 @@ mod tests {
             (vec![z(ZoneKind::Arena, 5000)], cx, cy + 14_000, 0),
             (vec![z(ZoneKind::BeaconLit, 2500)], cx, cy + 9000, 0),
             (vec![z(ZoneKind::Displacement, 6000)], cx, cy + 14_000, 0),
+            (vec![z(ZoneKind::LightningField, 3500)], cx, cy + 11_000, 0),
         ];
         let (pw, ph) = (480, 220);
-        let mut c = Canvas::new(pw * 2 + 6, (ph + 6) * 4, [30.0, 30.0, 30.0]);
+        let mut c = Canvas::new(pw * 2 + 6, (ph + 6) * ((views.len() as i32 + 1) / 2), [30.0, 30.0, 30.0]);
         for (k, (zones, x, y, dir)) in views.into_iter().enumerate() {
             f.zones = zones;
             f.players = vec![PlayerInfo {

@@ -386,6 +386,7 @@ fn special_or_relic(ship: ShipType) -> Option<Vec<Part>> {
         }
         ShipType::CygnusRelic => return Some(cygnus()),
         ShipType::Eagle => return Some(eagle()),
+        ShipType::WarRocketAjax => return Some(ming_rocket(true)),
         ShipType::TalosianShip => {
             // Talosian: a bulbous dome ringed by smaller cells.
             v.push(circle((0.0, -0.2), 0.55));
@@ -464,6 +465,38 @@ fn rogue_moon() -> Vec<Part> {
     v.push(line((0.12, -0.2), (0.32, -0.2)));
     v.push(line((0.22, -0.3), (0.22, -0.1)));
     v.push(Circle { c: (0.22, -0.2), r: 0.04, fill: true });
+    v
+}
+
+/// One of Ming's rockets (*Flash Gordon*): a pointed fuselage banded in
+/// gold, swept fins at the tail. War Rocket Ajax is bigger, with flanged
+/// wings and Ming's emblem. (Ajax is also a relic.)
+fn ming_rocket(ajax: bool) -> Vec<Part> {
+    let mut v = Vec::new();
+    if ajax {
+        v.extend(pair(|s| Poly { pts: vec![(s * 0.16, -0.35), (s * 0.55, 0.05), (s * 0.55, 0.3), (s * 0.16, 0.2)], fill: true }));
+    }
+    v.extend(pair(|s| Poly { pts: vec![(s * 0.15, 0.3), (s * 0.7, 0.85), (s * 0.6, 1.0), (s * 0.15, 0.8)], fill: true }));
+    v.push(sym(&[(0.0, -1.0), (0.12, -0.75), (0.18, -0.5), (0.18, 0.75), (0.12, 0.92), (0.0, 0.92)]));
+    for y in [-0.5f32, 0.0, 0.5] {
+        v.push(line((-0.18, y), (0.18, y)));
+    }
+    v.push(line((0.0, 0.35), (0.0, 1.0)));
+    if ajax {
+        v.push(Circle { c: (0.0, -0.25), r: 0.1, fill: false });
+    }
+    v
+}
+
+/// Mongo: a banded world, with Mingo City's spires on its face.
+fn mongo() -> Vec<Part> {
+    let mut v = vec![circle((0.0, 0.0), 1.0)];
+    for &(y, k) in &[(-0.55f32, 0.9f32), (-0.2, 1.0), (0.25, 0.95), (0.6, 0.85)] {
+        let w = (1.0 - y * y).sqrt() * k;
+        v.push(line((-w, y), (w, y)));
+    }
+    v.push(Poly { pts: vec![(-0.12, -0.05), (0.0, -0.4), (0.12, -0.05)], fill: false });
+    v.push(Circle { c: (0.0, -0.05), r: 0.18, fill: false });
     v
 }
 
@@ -824,6 +857,13 @@ fn alien(f: Faction, ship: ShipType) -> Vec<Part> {
             }
         },
         Faction::Cygnus => return cygnus(),
+        Faction::Ming => {
+            return match ship {
+                ShipType::Mongo => mongo(),
+                ShipType::WarRocketAjax => ming_rocket(true),
+                _ => ming_rocket(false),
+            }
+        }
         Faction::Moonbase => return if ship == ShipType::RogueMoon { rogue_moon() } else { eagle() },
         // Nanites never fly a ship of their own.
         Faction::Nanites => {
@@ -845,6 +885,7 @@ pub fn engine_points(team: Team, ship: ShipType, faction: Option<Faction>) -> Ve
         Some(Faction::Hirogen) => return vec![(0.3, 0.95), (-0.3, 0.95)],
         Some(Faction::Ferengi) => return vec![(0.0, 0.3)],
         Some(Faction::Kzinti) => return vec![(0.35, 0.9), (-0.35, 0.9)],
+        Some(Faction::Ming) if ship != ShipType::Mongo => return vec![(0.0, 0.98)],
         Some(Faction::Moonbase) if ship == ShipType::Eagle => return vec![(0.08, 0.98), (-0.08, 0.98)],
         Some(Faction::GalacticEmpire) => {
             return match ship {
@@ -867,6 +908,7 @@ pub fn engine_points(team: Team, ship: ShipType, faction: Option<Faction>) -> Ve
         ShipType::KelvanShip | ShipType::SulibanCell => return vec![(0.0, 0.95)],
         ShipType::CygnusRelic => return vec![(0.15, 0.98), (-0.15, 0.98)],
         ShipType::Eagle => return vec![(0.08, 0.98), (-0.08, 0.98)],
+        ShipType::WarRocketAjax => return vec![(0.0, 0.98)],
         ShipType::PreserverObelisk | ShipType::TalosianShip | ShipType::Freighter | ShipType::VothCityShip | ShipType::SheliakShip | ShipType::ExcalbianShip => {
             return vec![]
         }
@@ -897,7 +939,7 @@ mod tests {
     #[test]
     fn gallery() {
         let (cell, r) = (120.0f32, 44.0f32);
-        let mut c = Canvas::new(8 * cell as i32, 13 * cell as i32, [0.0, 0.0, 0.0]);
+        let mut c = Canvas::new(8 * cell as i32, 14 * cell as i32, [0.0, 0.0, 0.0]);
         let mut rows: Vec<Vec<(Team, ShipType, Option<Faction>)>> = Team::PLAYABLE
             .iter()
             .map(|&t| ShipType::ALL.iter().map(|&s| (t, s, None)).collect())
@@ -946,6 +988,12 @@ mod tests {
             (Team::Fed, ShipType::ExcalbianShip, None),
             (Team::Kli, ShipType::CygnusRelic, None),
             (Team::Ori, ShipType::Eagle, None),
+        ]);
+        rows.push(vec![
+            (Team::Fed, ShipType::WarRocketAjax, None),
+            (Team::Ind, ShipType::Mongo, Some(Faction::Ming)),
+            (Team::Ind, ShipType::WarRocketAjax, Some(Faction::Ming)),
+            (Team::Ind, ShipType::MingRocket, Some(Faction::Ming)),
         ]);
         rows.push(vec![
             (Team::Ind, ShipType::TempestCore, Some(Faction::Tempest)),

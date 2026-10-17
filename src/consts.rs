@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 pub const DEFAULT_PORT: u16 = 2592; // the traditional Netrek port
-pub const PROTOCOL_VERSION: u32 = 24;
+pub const PROTOCOL_VERSION: u32 = 25;
 
 pub const UPS: u64 = 10; // server updates per second, like the original
 pub const GWIDTH: f64 = 100_000.0;
@@ -153,10 +153,12 @@ pub enum Faction {
     Cygnus,
     /// The Moon and Moonbase Alpha, blasted out of Earth orbit (Space: 1999).
     Moonbase,
+    /// Ming the Merciless and the planet Mongo (Flash Gordon).
+    Ming,
 }
 
 impl Faction {
-    pub const ALL: [Faction; 35] = [
+    pub const ALL: [Faction; 36] = [
         Faction::Khan,
         Faction::Gorn,
         Faction::Tholian,
@@ -192,6 +194,7 @@ impl Faction {
         Faction::GalacticEmpire,
         Faction::Cygnus,
         Faction::Moonbase,
+        Faction::Ming,
     ];
 
     /// Name used on the command line.
@@ -232,6 +235,7 @@ impl Faction {
             Faction::GalacticEmpire => "empire",
             Faction::Cygnus => "cygnus",
             Faction::Moonbase => "moon",
+            Faction::Ming => "mongo",
         }
     }
 
@@ -272,6 +276,7 @@ impl Faction {
             Faction::GalacticEmpire => "the Galactic Empire",
             Faction::Cygnus => "the USS Cygnus",
             Faction::Moonbase => "Moonbase Alpha",
+            Faction::Ming => "Ming the Merciless",
         }
     }
 
@@ -313,6 +318,7 @@ impl Faction {
             Faction::GalacticEmpire => "Imperial",
             Faction::Cygnus => "Cygnus",
             Faction::Moonbase => "Alpha",
+            Faction::Ming => "Ming",
         }
     }
 
@@ -354,6 +360,7 @@ impl Faction {
             Faction::GalacticEmpire => "GE",
             Faction::Cygnus => "CY",
             Faction::Moonbase => "MA",
+            Faction::Ming => "MG",
         }
     }
 
@@ -453,6 +460,12 @@ pub enum ShipType {
     /// Moonbase Alpha's Eagle transporter: launched from the Moon, and a
     /// relic ship players can fly.
     Eagle,
+    /// The planet Mongo, with Ming's palace in Mingo City.
+    Mongo,
+    /// Ming's flagship (and a relic ship players can fly).
+    WarRocketAjax,
+    /// Ming's imperial rocket fighters.
+    MingRocket,
 }
 
 impl ShipType {
@@ -484,7 +497,7 @@ impl ShipType {
     pub const SPECIALS: [ShipType; 4] = [ShipType::Defiant, ShipType::Warbird, ShipType::NeghVar, ShipType::Corsair];
 
     /// Relic ships of alien make, for Commodores and up (one drawn at random).
-    pub const RELICS: [ShipType; 15] = [
+    pub const RELICS: [ShipType; 16] = [
         ShipType::IconianShip,
         ShipType::BreenWarship,
         ShipType::VidiianHarvester,
@@ -500,6 +513,7 @@ impl ShipType {
         ShipType::ExcalbianShip,
         ShipType::CygnusRelic,
         ShipType::Eagle,
+        ShipType::WarRocketAjax,
     ];
 
     pub fn special_for(team: Team) -> Option<ShipType> {
@@ -566,6 +580,7 @@ impl ShipType {
             ShipType::ExcalbianShip => "to distant enemy pilots it looks like one of their own cruisers",
             ShipType::CygnusRelic => "anti-gravity field: black holes, eddies and enemy tractor or pressor beams can't move it",
             ShipType::Eagle => "VTOL transporter: drops straight into orbit at any speed",
+            ShipType::WarRocketAjax => "Ming's ray cannons: its phasers go straight through shields",
             _ => "",
         }
     }
@@ -600,6 +615,7 @@ impl ShipType {
             ShipType::StarDestroyer => 650.0,
             ShipType::CygnusShip => 1100.0,
             ShipType::RogueMoon => 2400.0,
+            ShipType::Mongo => 2200.0,
             _ => EXPDIST,
         }
     }
@@ -617,6 +633,7 @@ impl ShipType {
                 | ShipType::MetronPresence
                 | ShipType::DarkMatterAnomaly
                 | ShipType::RogueMoon
+                | ShipType::Mongo
         )
     }
 
@@ -627,7 +644,8 @@ impl ShipType {
             ShipType::Scout | ShipType::SwarmShip | ShipType::ChangelingShip => 2,
             ShipType::Destroyer | ShipType::FerengiMarauder | ShipType::HirogenHunter | ShipType::JemHadarFighter | ShipType::TholianVessel | ShipType::KzintiStriker => 3,
             ShipType::Assault | ShipType::Augment | ShipType::GornRaider => 5,
-            ShipType::Battleship | ShipType::KzintiDreadnought | ShipType::StarDestroyer => 6,
+            ShipType::Battleship | ShipType::KzintiDreadnought | ShipType::StarDestroyer | ShipType::WarRocketAjax => 6,
+            ShipType::MingRocket => 2,
             // Reinhardt, Maximilian and a crew of humanoid robots.
             ShipType::CygnusShip => 10,
             _ => 4,
@@ -811,7 +829,7 @@ pub struct ShipStats {
     pub tract_str: f64,
 }
 
-pub static SHIPS: [ShipStats; 68] = [
+pub static SHIPS: [ShipStats; 71] = [
     ShipStats {
         name: "Scout", abbr: "SC", max_speed: 12, max_shield: 75.0, max_damage: 75.0,
         max_fuel: 5000.0, max_armies: 2, torp_damage: 25.0, torp_speed: 16.0, torp_fuse: 16,
@@ -1423,6 +1441,33 @@ pub static SHIPS: [ShipStats; 68] = [
         recharge: 14.0, repair: 120.0, warp_cost: 4.0, cloak_cost: 24.0, shield_cost: 3.0,
         turns: 260_000.0, acc: 180, dec: 280, wpn_cool: 2.5, egn_cool: 7.0,
         max_etemp: 1200.0, max_wtemp: 1100.0, mass: 1700.0, tract_range: 1.0, tract_str: 2600.0,
+    },
+    ShipStats {
+        name: "Mongo", abbr: "MO", max_speed: 0, max_shield: 0.0, max_damage: 1_000_000.0,
+        max_fuel: 1_000_000.0, max_armies: 0, torp_damage: 0.0, torp_speed: 10.0, torp_fuse: 30,
+        torp_cost: 0.0, phaser_damage: 0.0, phaser_cost: 0.0,
+        plasma_damage: 0.0, plasma_speed: 0.0, plasma_fuse: 0, plasma_cost: 0.0,
+        recharge: 500.0, repair: 0.0, warp_cost: 0.0, cloak_cost: 0.0, shield_cost: 0.0,
+        turns: 0.0, acc: 0, dec: 1000, wpn_cool: 50.0, egn_cool: 50.0,
+        max_etemp: 100_000.0, max_wtemp: 100_000.0, mass: 10_000_000.0, tract_range: 1.0, tract_str: 1.0,
+    },
+    ShipStats {
+        name: "War Rocket Ajax", abbr: "AJ", max_speed: 9, max_shield: 140.0, max_damage: 150.0,
+        max_fuel: 13000.0, max_armies: 6, torp_damage: 40.0, torp_speed: 13.0, torp_fuse: 40,
+        torp_cost: 7.0 * 40.0, phaser_damage: 65.0, phaser_cost: 7.0 * 65.0,
+        plasma_damage: 0.0, plasma_speed: 0.0, plasma_fuse: 0, plasma_cost: 0.0,
+        recharge: 14.0, repair: 110.0, warp_cost: 4.0, cloak_cost: 26.0, shield_cost: 3.0,
+        turns: 150_000.0, acc: 160, dec: 250, wpn_cool: 2.5, egn_cool: 7.0,
+        max_etemp: 1200.0, max_wtemp: 1100.0, mass: 1200.0, tract_range: 1.0, tract_str: 3000.0,
+    },
+    ShipStats {
+        name: "Imperial rocket", abbr: "RK", max_speed: 11, max_shield: 30.0, max_damage: 45.0,
+        max_fuel: 1_000_000.0, max_armies: 0, torp_damage: 20.0, torp_speed: 16.0, torp_fuse: 16,
+        torp_cost: 0.0, phaser_damage: 0.0, phaser_cost: 0.0,
+        plasma_damage: 0.0, plasma_speed: 0.0, plasma_fuse: 0, plasma_cost: 0.0,
+        recharge: 500.0, repair: 0.0, warp_cost: 0.0, cloak_cost: 0.0, shield_cost: 0.0,
+        turns: 450_000.0, acc: 300, dec: 300, wpn_cool: 50.0, egn_cool: 50.0,
+        max_etemp: 100_000.0, max_wtemp: 100_000.0, mass: 700.0, tract_range: 1.0, tract_str: 1.0,
     },
 ];
 

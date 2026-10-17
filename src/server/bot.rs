@@ -21,6 +21,9 @@ enum Goal {
     Patrol(usize),
     /// Fly alongside the Moon to help Alpha vent its waste dumps.
     SaveMoon(u8),
+    /// Push Ming's disabled War Rocket Ajax (the first) into Mingo City on
+    /// Mongo (the second).
+    CrashAjax(u8, u8),
 }
 
 pub struct Bot {
@@ -219,10 +222,27 @@ impl Bot {
                 .min_by(|a, b| dist(a.x, a.y, moon.x, moon.y).total_cmp(&dist(b.x, b.y, moon.x, moon.y)))
                 .map_or(false, |q| q.id == self.id)
         });
+        // Ajax adrift: each empire's nearest ship goes to push it into
+        // Mingo City and finish Ming.
+        let pusher = world.ajax_adrift.filter(|&(a, _)| {
+            let ajax = &world.players[a as usize];
+            dist(x, y, ajax.x, ajax.y) < 25_000.0
+                && world
+                    .players
+                    .iter()
+                    .filter(|q| q.alive() && q.team == team && q.faction.is_none())
+                    .min_by(|a, b| dist(a.x, a.y, ajax.x, ajax.y).total_cmp(&dist(b.x, b.y, ajax.x, ajax.y)))
+                    .map_or(false, |q| q.id == self.id)
+        });
         self.goal = if (hurt > 0.6 || low_fuel || crippled || (prev == Goal::Retreat && (hurt > 0.1 || p.fuel / s.max_fuel < 0.9)))
             && p.armies == 0
         {
             Goal::Retreat
+        } else if let Some((a, m)) = pusher.filter(|&(a, _)| {
+            let ajax = &world.players[a as usize];
+            dist(x, y, ajax.x, ajax.y) < 8000.0 || !matches!(enemy, Some((.., d)) if d < 4000.0)
+        }) {
+            Goal::CrashAjax(a, m)
         } else if let Some(m) = rescuer.filter(|&m| {
             // Once alongside, stay on task; on the way, see off anyone close.
             let moon = &world.players[m as usize];
@@ -304,6 +324,11 @@ impl Bot {
                 None => Goal::Patrol(patrol),
             }
         };
+
+        // Done with Ajax: let go of it.
+        if matches!(prev, Goal::CrashAjax(..)) && !matches!(self.goal, Goal::CrashAjax(..)) && p.tractor.is_some() {
+            cmds.push(ClientMsg::Tractor { target: None, pressor: false });
+        }
 
         // Shields.
         let hostile_planet = world
@@ -394,6 +419,28 @@ impl Bot {
                 let plasma_odds = if vs_bioship { 0.35 } else { 0.05 };
                 if s.plasma_damage > 0.0 && p.kills >= 2.0 && d < 9000.0 && rng.gen_bool(plasma_odds) {
                     cmds.push(ClientMsg::Plasma(aim as u8));
+                }
+            }
+            Goal::CrashAjax(a, m) => {
+                // Get behind it (on the far side from Mongo) and push it in
+                // with a pressor beam, following it as it goes.
+                let (ajax, mongo) = (&world.players[a as usize], &world.players[m as usize]);
+                let d0 = dist(ajax.x, ajax.y, mongo.x, mongo.y).max(1.0);
+                let (ux, uy) = ((ajax.x - mongo.x) / d0, (ajax.y - mongo.y) / d0);
+                let (bx, by) = (ajax.x + ux * 2500.0, ajax.y + uy * 2500.0);
+                let d = dist(x, y, bx, by);
+                if d > 1200.0 {
+                    cmds.push(ClientMsg::Course(dir_to(x, y, bx, by) as u8));
+                    cmds.push(ClientMsg::Speed(if d > 5000.0 { s.max_speed } else { 3 } as u8));
+                    if p.tractor.is_some() {
+                        cmds.push(ClientMsg::Tractor { target: None, pressor: false });
+                    }
+                } else {
+                    cmds.push(ClientMsg::Course(dir_to(x, y, ajax.x, ajax.y) as u8));
+                    cmds.push(ClientMsg::Speed(2));
+                    if p.tractor != Some((a, true)) {
+                        cmds.push(ClientMsg::Tractor { target: Some(a), pressor: true });
+                    }
                 }
             }
             Goal::SaveMoon(m) => {

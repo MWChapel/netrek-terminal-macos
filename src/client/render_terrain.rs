@@ -599,6 +599,22 @@ pub(super) const ARENA: Rgb = rgb(0xf4f0ff);
 pub(super) const BEACON: Rgb = rgb(0x9060ff);
 pub(super) const DISPLACE: Rgb = rgb(0x80e0ff);
 pub(super) const DYSON: Rgb = rgb(0xd0a860);
+/// Mingo City's lightning field: red bolts, gold-white at the core.
+pub(super) const LIGHTNING: Rgb = rgb(0xff4030);
+pub(super) const LIGHTNING_HOT: Rgb = rgb(0xffe080);
+
+/// A crackling bolt of lightning round a circle, from angle `a0` to `a1`:
+/// points (angle, radius as a fraction of the circle's), jittering every
+/// frame.
+pub(super) fn bolt(a0: f32, a1: f32, n: usize, seed: u64, frame: u64) -> Vec<(f32, f32)> {
+    (0..=n)
+        .map(|k| {
+            let t = k as f32 / n as f32;
+            let jit = if k == 0 || k == n { 0.0 } else { (rnd(seed ^ frame, k as u64) - 0.5) * 0.12 };
+            (a0 + (a1 - a0) * t, 1.0 + jit)
+        })
+        .collect()
+}
 
 /// The edge of Armus's slick: a wobbling blob, `n` points round.
 pub(super) fn slick_edge(z: &ZoneInfo, tick: f32, n: usize) -> Vec<(f64, f64)> {
@@ -644,6 +660,24 @@ pub fn draw_zones_vec(px: &mut Canvas, f: &Frame, to: &dyn Fn(f64, f64) -> (f32,
                 px.glow(x, y, r * 1.2, BEACON, 0.35);
                 px.ring(x, y, r, 2.0, mix(BEACON, WHITE, 0.4), 1.0);
                 px.disc(x, y, (r * 0.15).max(2.0), WHITE, 1.0);
+            }
+            ZoneKind::LightningField => {
+                // A crackling ring of red lightning round Mingo City.
+                let frame = (tick / 2.0) as u64;
+                px.glow(x, y, r * 1.1, LIGHTNING, if detail { 0.12 } else { 0.18 });
+                let arcs = if detail { 10 } else { 5 };
+                for k in 0..arcs {
+                    if rnd(frame, k as u64 + 77) < 0.25 {
+                        continue;
+                    }
+                    let a0 = k as f32 / arcs as f32 * TAU + rnd(frame, k as u64) * 0.3;
+                    let pts: Vec<(f32, f32)> = bolt(a0, a0 + TAU / arcs as f32 * 0.9, if detail { 10 } else { 4 }, k as u64, frame)
+                        .into_iter()
+                        .map(|(a, d)| (x + a.cos() * d * r, y + a.sin() * d * r))
+                        .collect();
+                    px.polyline(&pts, false, 3.0, LIGHTNING, 0.25, 0.0);
+                    px.polyline(&pts, false, 1.1, mix(LIGHTNING, LIGHTNING_HOT, 0.5), 0.9, 0.0);
+                }
             }
             ZoneKind::Displacement => {
                 px.ring(x, y, r, 3.0, DISPLACE, 0.6);
@@ -742,6 +776,7 @@ pub fn draw_zones_braille(b: &mut Braille, f: &Frame, to_dot: &dyn Fn(f64, f64) 
                 b.disc(x, y, (r * 0.2).max(1.0), Color::White, 2);
             }
             ZoneKind::Displacement => b.arc(x, y, r, Color::Cyan, 1, 2),
+            ZoneKind::LightningField => b.arc(x, y, r, if f.tick / 2 % 2 == 0 { Color::Red } else { Color::Yellow }, 1, 2),
             ZoneKind::DysonShell => {
                 b.circle(x, y, r, Color::DarkYellow, 1);
                 b.arc(x, y, r + 1.0, Color::DarkYellow, 1, 3);

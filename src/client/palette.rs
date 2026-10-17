@@ -102,6 +102,8 @@ pub fn faction_rgb(f: Faction) -> Rgb {
         Faction::Cygnus => rgb(0x9cf0b4),
         // Moonbase Alpha: moon-dust grey, warmed by the base's lights.
         Faction::Moonbase => rgb(0xe8dcc0),
+        // Ming's imperial red and gold.
+        Faction::Ming => rgb(0xf0a020),
     }
 }
 

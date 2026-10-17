@@ -140,6 +140,7 @@ In orbit, w fires at anything hostile in range, special weapons first. Off when 
 @ Death Star | Scout/DD torp from dead astern
 @ Star Destroyers | Attack from behind: 2x
 @ Cygnus | Only hurt from inside the well
+@ Ming | Disable Ajax, pressor it into Mongo
 ## Don't shoot
 @ V'Ger | Park at the core 10 s
 @ Whale probe | Bring it 2 armies

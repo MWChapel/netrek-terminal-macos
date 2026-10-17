@@ -42,11 +42,16 @@ fn ship_shape(s: ShipType) -> &'static [(f64, f64)] {
         | ShipType::CaretakerArray
         | ShipType::DelphicSphere
         | ShipType::DeathStar
-        | ShipType::RogueMoon => &[
+        | ShipType::RogueMoon
+        | ShipType::Mongo => &[
             (0.0, -1.0), (0.7, -0.7), (1.0, 0.0), (0.7, 0.7), (0.0, 1.0), (-0.7, 0.7), (-1.0, 0.0), (-0.7, -0.7),
         ],
         ShipType::BorgCube => &[(-0.75, -0.75), (0.75, -0.75), (0.75, 0.75), (-0.75, 0.75)],
         // The Cygnus: a long lattice hull with outrigger pods.
+        // Ming's rockets: a pointed fuselage with swept fins.
+        ShipType::WarRocketAjax | ShipType::MingRocket => &[
+            (0.0, -1.0), (0.18, -0.6), (0.18, 0.3), (0.7, 0.85), (0.6, 1.0), (0.15, 0.8), (-0.15, 0.8), (-0.6, 1.0), (-0.7, 0.85), (-0.18, 0.3), (-0.18, -0.6),
+        ],
         // The Eagle: nose cone, spine and four leg pods.
         ShipType::Eagle => &[
             (0.0, -1.0), (0.14, -0.72), (0.14, -0.65), (0.4, -0.65), (0.4, -0.42), (0.14, -0.42), (0.14, 0.42), (0.4, 0.42), (0.4, 0.68),
