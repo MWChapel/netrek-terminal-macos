@@ -69,6 +69,9 @@ struct Event {
     /// Krenim: the planets erased from history, as they were: (planet,
     /// owner, armies, flags).
     erased: Vec<(usize, Team, i32, u8)>,
+    /// The Kobayashi Maru: souls still aboard, and souls beamed off.
+    souls: u32,
+    saved: u32,
 }
 
 /// Something climbing the Tempest's web.
@@ -158,7 +161,7 @@ fn duration(kind: Faction) -> u32 {
         // The Moon takes its time crossing (and leaves when it's across).
         Faction::Moonbase => 10,
         Faction::Narada | Faction::Malon => 6,
-        Faction::Krenim | Faction::Vaal | Faction::Landru | Faction::Bluegill | Faction::Scimitar => 5,
+        Faction::Krenim | Faction::Vaal | Faction::Landru | Faction::Bluegill | Faction::Scimitar | Faction::Maru => 5,
         _ => 4,
     };
     mins * 60 * UPS as u32
@@ -214,6 +217,10 @@ impl Director {
             if world.tick.saturating_sub(e.started) >= self.robot_delay {
                 world.robots_ready.push(e.kind);
                 post_duties(world, e);
+            } else if e.kind == Faction::Maru {
+                let mut d = Vec::new();
+                answer_distress(world, e, &mut d);
+                world.duties.extend(d);
             }
         }
         world.assign_duties();
@@ -264,6 +271,19 @@ impl Director {
             }
             match e.kind {
                 Faction::Narada | Faction::Bluegill => {
+                    for &id in &e.ships {
+                        world.remove_player(id);
+                    }
+                }
+                // Saved: whoever reprogrammed the scenario gets the credit for
+                // the souls still aboard, towed home.
+                Faction::Maru => {
+                    if let (true, Some(k), n) = (won, e.prey, e.souls) {
+                        if n > 0 && world.players[k as usize].in_use {
+                            award(world, k as usize, n as f64 * MARU_SOUL_CREDIT, &format!("Saved {} souls aboard the Kobayashi Maru", n));
+                            announce(world, format!("All {} souls still aboard the Kobayashi Maru are saved.", n));
+                        }
+                    }
                     for &id in &e.ships {
                         world.remove_player(id);
                     }
@@ -403,6 +423,8 @@ impl Director {
             Faction::Narada => 2,
             // The mother creature and three infected ships.
             Faction::Bluegill => 4,
+            // The Maru, and room for the trap.
+            Faction::Maru => 1 + MARU_FIRST,
             _ => 1,
         };
         if free < need {
@@ -435,6 +457,7 @@ impl Director {
         let mut corners = Vec::new();
         let mut goals = HashMap::new();
         let mut next_at = world.tick + 3 * UPS as u32;
+        let mut souls = 0;
         let mut spawn = |world: &mut World, name: &str, ship: ShipType, (x, y): (f64, f64), bounty: f64| {
             if let Some(id) = world.spawn_alien(name, kind, ship, x, y, bounty) {
                 ships.push(id);
@@ -976,6 +999,16 @@ impl Director {
                 spawn(world, "Calamarain", ShipType::Calamarain, (x, y), 25.0);
                 "The CALAMARAIN have entered the galaxy: a living cloud of ionized gas. They are hunting the most decorated captain in the sector, and they strip the shields and then the hull of any ship they envelop. Torpedoes pass straight through them; phasers burn.".to_string()
             }
+            Faction::Maru => {
+                let Some((at, place)) = maru_spot(world) else { return };
+                spawn(world, "Kobayashi Maru", ShipType::KobayashiMaru, at, 0.0);
+                souls = MARU_SOULS;
+                waypoint = at;
+                format!(
+                    "DISTRESS CALL: \"This is the Kobayashi Maru... we've struck a gravitic mine and lost all power. Our hull is penetrated and we have sustained many casualties...\" The neutronic fuel carrier is adrift {} with {} souls aboard. To rescue them, come within 1,500, slow to warp 2 and drop your shields to beam them aboard, then land them on one of your own worlds.",
+                    place, MARU_SOULS
+                )
+            }
             Faction::Nagilum => {
                 let Some(at) = open_spot(world, 6000.0) else { return };
                 spawn(world, "Nagilum", ShipType::Nagilum, at, 0.0);
@@ -1039,6 +1072,8 @@ impl Director {
             inside,
             cooldown: world.tick + 3 * UPS as u32,
             erased: Vec::new(),
+            souls,
+            saved: 0,
         });
     }
 }
@@ -1069,6 +1104,10 @@ fn beaten(world: &World, e: &Event) -> bool {
     if e.kind == Faction::Nanites {
         return !world.players.iter().any(|p| p.nanites);
     }
+    // Only the reprogrammed scenario can be won: every Klingon destroyed.
+    if e.kind == Faction::Maru {
+        return e.prey.is_some() && !e.ships.iter().any(|&s| world.players[s as usize].ship == ShipType::Ktinga);
+    }
     if departed(e) {
         return false;
     }
@@ -1093,6 +1132,7 @@ fn departed(e: &Event) -> bool {
         Faction::Narada => e.level >= NARADA_WORLDS,
         Faction::Malon | Faction::Dreadnought => e.level == 1,
         Faction::Nagilum => e.dwell == 1,
+        Faction::Maru => e.level == GONE,
         _ => false,
     }
 }
@@ -1103,6 +1143,7 @@ fn departure_text(kind: Faction) -> String {
         Faction::Malon => "The Malon freighter crosses out of the galaxy, leaving its poison behind.".into(),
         Faction::Dreadnought => "The Dreadnought's mission is complete.".into(),
         Faction::Nagilum => "Nagilum has learned what it wanted to know about death. The hole in space closes.".into(),
+        Faction::Maru => "The K't'ingas cloak and slip back across the Neutral Zone. The Kobayashi Maru is gone.".into(),
         k => withdraw_text(k),
     }
 }
@@ -1155,6 +1196,7 @@ fn defeat_text(kind: Faction) -> String {
         Faction::Scimitar => "The Scimitar is destroyed. Shinzon's thalaron weapon will never fire again.".into(),
         Faction::Calamarain => "The Calamarain disperse, their cloud burned away.".into(),
         Faction::Nagilum => "Nagilum withdraws.".into(),
+        Faction::Maru => "The last K't'inga is destroyed, and the Kobayashi Maru is taken in tow. \"I don't like to lose.\"".into(),
     }
 }
 
@@ -1206,6 +1248,7 @@ fn withdraw_text(kind: Faction) -> String {
         Faction::Scimitar => "The Scimitar cloaks and is gone.".into(),
         Faction::Calamarain => "The Calamarain lose interest and drift away.".into(),
         Faction::Nagilum => "The hole in space closes. Nagilum is gone.".into(),
+        Faction::Maru => "The Klingons cloak and withdraw across the Neutral Zone, and the Kobayashi Maru's distress call falls silent.".into(),
     }
 }
 
@@ -1439,6 +1482,9 @@ fn post_duties(world: &mut World, e: &Event) {
         Faction::Scimitar => d.extend(ships.iter().filter(|s| e.progress.contains_key(s)).map(|&s| Duty::each(attack(s, Weapon::Any, 0.0), 0))),
         Faction::Calamarain => d.extend(ships.iter().map(|&s| Duty::each(attack(s, Weapon::Phasers, 0.0), 2))),
         Faction::Malon => d.extend(ships.iter().map(|&s| Duty::each(attack(s, Weapon::Any, 0.0), 2))),
+        // Beam off the survivors. (Kirk's solution is for humans to find:
+        // robots take the test as it was meant to be taken.)
+        Faction::Maru => answer_distress(world, e, &mut d),
         _ => {}
     }
     // And whatever else has to be destroyed, wherever it is, a couple of
@@ -1447,7 +1493,7 @@ fn post_duties(world: &mut World, e: &Event) {
         s.pointless_target()
             || matches!(
                 s,
-                ShipType::TempestCore | ShipType::CygnusShip | ShipType::KrenimTimeship | ShipType::Vaal | ShipType::Landru | ShipType::Mongo | ShipType::RogueMoon | ShipType::Eagle
+                ShipType::TempestCore | ShipType::CygnusShip | ShipType::KrenimTimeship | ShipType::Vaal | ShipType::Landru | ShipType::Mongo | ShipType::RogueMoon | ShipType::Eagle | ShipType::KobayashiMaru
             )
             || (s == ShipType::WarRocketAjax && world.ajax_adrift.is_some())
     };
@@ -1459,6 +1505,15 @@ fn post_duties(world: &mut World, e: &Event) {
         }
     }
     world.duties.extend(d);
+}
+
+/// A distress call is answered at once: the nearest robot of each empire
+/// goes to beam the Maru's survivors aboard.
+fn answer_distress(world: &World, e: &Event, d: &mut Vec<super::world::Duty>) {
+    use super::world::{Duty, Task};
+    for &s in e.ships.iter().filter(|&&s| world.players[s as usize].alive() && world.players[s as usize].ship == ShipType::KobayashiMaru) {
+        d.push(Duty::each(Task::Rescue { target: s }, 1));
+    }
 }
 
 /// Nearest empire ship within `range`, preferring team `prefer` if one is in range.
@@ -1632,7 +1687,14 @@ fn run_event(world: &mut World, e: &mut Event) {
             Faction::Scimitar => scimitar(world, e, i, tick),
             Faction::Calamarain => calamarain(world, e, i, tick),
             Faction::Nagilum => nagilum(world, e, i, tick),
+            Faction::Maru => match world.players[i].ship {
+                ShipType::KobayashiMaru => maru(world, e, i, tick),
+                _ => ktinga(world, e, i, tick),
+            },
         }
+    }
+    if e.kind == Faction::Maru {
+        maru_after(e, tick);
     }
     match e.kind {
         Faction::Nanites => nanites(world, e),
@@ -5422,6 +5484,261 @@ fn nagilum(world: &mut World, e: &mut Event, i: usize, tick: u32) {
     }
 }
 
+/// The Kobayashi Maru: the souls aboard, and how far from it the
+/// Klingons spring their trap.
+pub const MARU_SOULS: u32 = 381;
+pub const MARU_TRAP: f64 = 8000.0;
+/// Transporter range, how many are beamed across a second, and how many
+/// fit in the room one army takes.
+pub const MARU_BEAM: f64 = 1500.0;
+const MARU_BEAM_RATE: u32 = 20;
+pub const SOULS_PER_ARMY: u32 = 15;
+/// Kills for each survivor landed safely, and for Kirk's solution.
+pub const MARU_SOUL_CREDIT: f64 = 0.01;
+const MARU_KIRK_REWARD: f64 = 3.0;
+/// How long after the trap is sprung the Klingons destroy the Maru; how
+/// often another battlecruiser decloaks (and how many at most); how long
+/// they stay once it's gone.
+pub const MARU_DOOM: u32 = 75 * UPS as u32;
+const MARU_WAVE: u32 = 25 * UPS as u32;
+const MARU_FIRST: usize = 3;
+const MARU_CAP: usize = 6;
+const MARU_LINGER: u32 = 30 * UPS as u32;
+/// How long a K't'inga takes to come about and open fire once it decloaks.
+const MARU_COME_ABOUT: u32 = 8 * UPS as u32;
+/// How far from the Maru the Klingons will fight.
+const MARU_GUARD: f64 = 10_000.0;
+/// How close a captain must be for the scenario to hear them.
+pub const MARU_EARSHOT: f64 = 15_000.0;
+/// What the Kobayashi Maru's state comes to (`Event::level`).
+const DISTRESS: u8 = 0;
+const TRAPPED: u8 = 1;
+const LOST: u8 = 2;
+const GONE: u8 = 3;
+
+/// Whether a captain is saying what Kirk said.
+fn no_win(text: &str) -> bool {
+    let t = text.to_lowercase().replace(['-', '\''], " ");
+    t.contains("no win scenario") || t.contains("no win situation")
+}
+
+fn ktingas(world: &World, e: &Event) -> Vec<usize> {
+    e.ships.iter().map(|&s| s as usize).filter(|&s| world.players[s].ship == ShipType::Ktinga && world.players[s].alive()).collect()
+}
+
+/// A K't'inga drops its cloak somewhere round the Maru.
+fn decloak(world: &mut World, e: &mut Event) -> bool {
+    let (mx, my) = e.waypoint;
+    let a = rand::thread_rng().gen_range(0.0..TAU);
+    let at = (mx + a.cos() * 5500.0, my + a.sin() * 5500.0);
+    let Some(id) = world.spawn_alien("K't'inga", Faction::Maru, ShipType::Ktinga, at.0, at.1, 8.0) else { return false };
+    let p = &mut world.players[id as usize];
+    p.dir = dir_to(at.0, at.1, mx, my);
+    p.desired_dir = p.dir;
+    // Reprogrammed: no shields.
+    if e.prey.is_some() {
+        (p.shields_up, p.shield) = (false, 0.0);
+    }
+    e.ships.push(id);
+    e.progress.insert(id, world.tick as i32);
+    true
+}
+
+/// The Kobayashi Maru (*Star Trek II*), adrift and calling for help. The
+/// first ship to come close springs the trap: Klingon battlecruisers
+/// decloak all round it, more keep coming, and after a while they destroy
+/// it. Ships beside it with their shields down beam its survivors aboard.
+/// Unless a captain refuses to believe in the no-win scenario...
+fn maru(world: &mut World, e: &mut Event, i: usize, tick: u32) {
+    let (x, y) = (world.players[i].x, world.players[i].y);
+    match e.level {
+        DISTRESS => {
+            let near = empire_ships_near(world, x, y, MARU_TRAP);
+            if let Some(&j) = near.first() {
+                let who = world.players[j].label();
+                for _ in 0..MARU_FIRST {
+                    decloak(world, e);
+                }
+                e.level = TRAPPED;
+                e.dwell = (tick + MARU_DOOM) as i32;
+                e.next_at = tick + MARU_WAVE;
+                announce(
+                    world,
+                    format!(
+                        "IT'S A TRAP! As {} closes on the Kobayashi Maru, three Klingon K't'inga battlecruisers DECLOAK around it, and more are coming. They will destroy the Maru in {} seconds. Get its survivors off while you can. This is the no-win scenario... unless, like Kirk, you don't believe in it.",
+                        who,
+                        MARU_DOOM / UPS as u32
+                    ),
+                );
+            } else if (tick - e.started) % (45 * UPS as u32) == 45 * UPS as u32 - 1 {
+                world.god(format!("Kobayashi Maru: \"...hull penetrated... life support failing... {} souls aboard... please help...\"", e.souls));
+            }
+        }
+        TRAPPED if e.prey.is_none() => {
+            // "I don't believe in the no-win scenario."
+            let talker = world
+                .chatter
+                .iter()
+                .find(|(from, text, _)| {
+                    let q = &world.players[*from as usize];
+                    q.alive() && q.faction.is_none() && dist(x, y, q.x, q.y) < MARU_EARSHOT && no_win(text)
+                })
+                .map(|c| c.0);
+            if let Some(k) = talker {
+                e.prey = Some(k);
+                for s in ktingas(world, e) {
+                    let p = &mut world.players[s];
+                    (p.shields_up, p.shield) = (false, 0.0);
+                }
+                award(world, k as usize, MARU_KIRK_REWARD, "Commendation for original thinking");
+                let who = world.players[k as usize].label();
+                announce(world, format!("{} doesn't believe in the no-win scenario, and has quietly reprogrammed it. The Klingon battlecruisers' SHIELDS ARE DOWN, and no more are coming! Destroy them and the Kobayashi Maru is saved.", who));
+                return;
+            }
+            let alive = ktingas(world, e).len();
+            // The Klingons keep coming: that's the point.
+            if alive == 0 {
+                e.next_at = e.next_at.min(tick + 3 * UPS as u32);
+            }
+            if tick >= e.next_at {
+                e.next_at = tick + MARU_WAVE;
+                if alive < MARU_CAP && decloak(world, e) {
+                    world.alert("Another K't'inga battlecruiser decloaks beside the Kobayashi Maru!");
+                }
+            }
+            if tick >= e.dwell as u32 {
+                let ks = ktingas(world, e);
+                if ks.is_empty() {
+                    return;
+                }
+                for k in ks {
+                    beam(world, k, i, 0.0, "");
+                }
+                announce(
+                    world,
+                    format!(
+                        "The Klingons open fire on the Kobayashi Maru. It breaks up with {} souls still aboard; {} were beamed off in time. \"How we deal with death is at least as important as how we deal with life.\"",
+                        e.souls, e.saved
+                    ),
+                );
+                e.souls = 0;
+                e.level = LOST;
+                e.next_at = tick + MARU_LINGER;
+                world.kill(i, None, "was destroyed by Klingon battlecruisers".into());
+                return;
+            }
+        }
+        _ => {}
+    }
+    if tick % UPS as u32 == 0 {
+        rescue(world, e, i, tick);
+    }
+}
+
+/// Ships beside the Maru with their shields down and their transporters
+/// working beam its survivors aboard, as many as their holds have room for.
+fn rescue(world: &mut World, e: &mut Event, i: usize, tick: u32) {
+    let (x, y) = (world.players[i].x, world.players[i].y);
+    for j in empire_ships_near(world, x, y, MARU_BEAM) {
+        if e.souls == 0 {
+            break;
+        }
+        let q = &world.players[j];
+        let room = q.survivor_room();
+        let nag = tick % (5 * UPS as u32) == 0;
+        if room == 0 {
+            if nag {
+                world.warn(j as u8, "Your hold is full: land the survivors on one of your worlds");
+            }
+            continue;
+        }
+        if q.shields_up || q.speed > 2 || q.cloaked || q.no_transport || q.sys_out(System::Transporters) {
+            if nag {
+                world.warn(j as u8, "Drop your shields and slow to warp 2 to beam the Maru's survivors aboard");
+            }
+            continue;
+        }
+        let rate = ((MARU_BEAM_RATE as f64 * q.sys(System::Transporters)).ceil() as u32).max(1);
+        let n = rate.min(room).min(e.souls);
+        let q = &mut world.players[j];
+        q.survivors += n;
+        let aboard = q.survivors;
+        e.souls -= n;
+        e.saved += n;
+        world.warn(j as u8, format!("Beamed {} survivors aboard ({} aboard, {} left on the Maru)", n, aboard, e.souls));
+    }
+    if e.souls == 0 && world.players[i].alive() {
+        announce(world, format!("All {} souls are off the Kobayashi Maru! Land them on your own worlds. The Klingons destroy the empty hulk.", e.saved));
+        e.level = LOST;
+        e.next_at = tick + MARU_LINGER;
+        world.kill(i, None, "was destroyed by Klingon battlecruisers".into());
+    }
+}
+
+/// A K't'inga: it fights whoever comes near the Maru, and otherwise circles
+/// it. They don't leave the Neutral Zone, so a ship that gets clear with
+/// survivors aboard has got away.
+fn ktinga(world: &mut World, e: &mut Event, i: usize, tick: u32) {
+    if e.prey.is_some() {
+        let p = &mut world.players[i];
+        (p.shields_up, p.shield) = (false, 0.0);
+    }
+    if tick % 2 != 0 {
+        return;
+    }
+    let (mx, my) = e.waypoint;
+    // "They're coming about!"
+    let fresh = e.progress.get(&(i as u8)).map_or(false, |&at| tick < at as u32 + MARU_COME_ABOUT);
+    let near = nearest_enemy(world, i, 20_000.0, None).filter(|&(j, _)| dist(world.players[j].x, world.players[j].y, mx, my) < MARU_GUARD);
+    if let Some((t, _)) = near.filter(|_| !fresh) {
+        fight(world, i, t);
+    } else if tick % 10 == 0 {
+        let a = tick as f64 * 0.004 + i as f64;
+        steer_to(world, i, mx + a.cos() * 5000.0, my + a.sin() * 5000.0, 5);
+    }
+}
+
+/// The Maru gone: unless the scenario has been reprogrammed, the Klingons
+/// slip back under cloak a little later.
+fn maru_after(e: &mut Event, tick: u32) {
+    if e.level == LOST && e.prey.is_none() && tick >= e.next_at {
+        e.level = GONE;
+    }
+}
+
+/// Where the Maru drifts: in a Neutral Zone (the one on the Klingon border
+/// if there is one), or failing that on the Klingon border itself; well
+/// clear of any planet. Returns the spot and where that is ("in ...").
+fn maru_spot(world: &World) -> Option<((f64, f64), String)> {
+    let mut rng = rand::thread_rng();
+    let clear = |(x, y): (f64, f64)| world.planets.iter().all(|pl| dist(x, y, pl.x, pl.y) > MARU_TRAP * 0.7);
+    let klingon = |t: &&Terrain| t.sides.map_or(false, |(a, b)| a == Team::Kli || b == Team::Kli);
+    let mut zones: Vec<&Terrain> = world.terrain.iter().filter(|t| t.kind == TerrainKind::NeutralZone).collect();
+    zones.sort_by_key(|t| !klingon(t));
+    if let Some(t) = zones.first() {
+        for _ in 0..60 {
+            let f = rng.gen_range(0.2..0.8);
+            let at = (t.x + (t.x2 - t.x) * f, t.y + (t.y2 - t.y) * f);
+            if clear(at) {
+                return Some((at, format!("in {} (Gamma Hydra, sector 10)", t.name)));
+            }
+        }
+    }
+    let other = *[Team::Rom, Team::Ori].choose(&mut rng)?;
+    let (pa, pb) = (&world.planets[Team::Kli.home_planet()], &world.planets[other.home_planet()]);
+    let (mx, my) = ((pa.x + pb.x) / 2.0, (pa.y + pb.y) / 2.0);
+    let d = dist(pa.x, pa.y, pb.x, pb.y).max(1.0);
+    let (ux, uy) = ((pb.y - pa.y) / d, -(pb.x - pa.x) / d);
+    for _ in 0..60 {
+        let s = rng.gen_range(-18_000.0..18_000.0);
+        let at = ((mx + ux * s).clamp(8000.0, GWIDTH - 8000.0), (my + uy * s).clamp(8000.0, GWIDTH - 8000.0));
+        if clear(at) {
+            return Some((at, format!("on the Klingon-{} border (Gamma Hydra, sector 10)", other.name())));
+        }
+    }
+    open_spot(world, MARU_TRAP * 0.7).map(|at| (at, format!("in Gamma Hydra, sector 10, near {}", nearest_planet_name(world, at.0, at.1))))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -5467,7 +5784,7 @@ mod tests {
                         "warm", "TEMPEST", "Tempest", "NOMAD", "Nomad", "Armus", "anite", "hangeling", "Metron", "Pakled", "10-C",
                         "Caretaker", "Horta", "Sphere", "DYSON", "Dyson", "Kzin", "Death Star", "Imperial", "CYGNUS", "Cygnus", "MOON", "Moon", "MONGO", "Ming",
                         "NARADA", "Narada", "TIMESHIP", "Krenim", "Malon", "VAAL", "Vaal", "LANDRU", "Landru", "CONSPIRACY", "bluegill", "DREADNOUGHT", "Dreadnought",
-                        "SCIMITAR", "Scimitar", "CALAMARAIN", "Calamarain", "NAGILUM", "Nagilum"]
+                        "SCIMITAR", "Scimitar", "CALAMARAIN", "Calamarain", "NAGILUM", "Nagilum", "Kobayashi", "K't'inga"]
                         .iter()
                         .any(|k| m.contains(k))
                 })
@@ -5623,6 +5940,167 @@ mod tests {
         }
         println!("robots crashed Ajax {} times in 4", done);
         assert!(done >= 3, "robots crashed Ajax {} times in 4", done);
+    }
+
+    /// A world with the Kobayashi Maru calling for help: (world, director, the Maru).
+    fn maru_world() -> (World, Director, usize) {
+        let mut w = World::new();
+        let mut d = Director::new(AlienConfig { kinds: vec![Faction::Maru], interval: 9999 });
+        d.spawn(&mut w);
+        let m = d.events[0].ships[0] as usize;
+        (w, d, m)
+    }
+
+    /// A Federation cruiser this far east of the Maru.
+    fn maru_rescuer(w: &mut World, m: usize, dx: f64) -> usize {
+        let id = w.add_player("Kirk", false).unwrap();
+        w.join(id, Team::Fed, ShipType::Cruiser).unwrap();
+        let (x, y) = (w.players[m].x, w.players[m].y);
+        let p = &mut w.players[id as usize];
+        (p.x, p.y) = (x + dx, y);
+        id as usize
+    }
+
+    /// Run the incursion, keeping ship `k` where it is and out of harm's
+    /// way (the Klingons are busy shooting at it).
+    fn maru_run(w: &mut World, d: &mut Director, k: usize, ticks: u32) {
+        let (x, y) = (w.players[k].x, w.players[k].y);
+        for _ in 0..ticks {
+            d.tick(w);
+            w.tick();
+            let p = &mut w.players[k];
+            (p.x, p.y, p.damage, p.speed) = (x, y, 0.0, 0);
+            p.phased_until = w.tick + 2;
+            w.outbox.clear();
+            w.warnings.clear();
+        }
+    }
+
+    fn ktinga_count(w: &World, d: &Director) -> usize {
+        d.events.first().map_or(0, |e| ktingas(w, e).len())
+    }
+
+    #[test]
+    fn maru_drifts_clear_of_planets_until_someone_springs_the_trap() {
+        let (mut w, mut d, m) = maru_world();
+        let (x, y) = (w.players[m].x, w.players[m].y);
+        assert!(w.planets.iter().all(|pl| dist(x, y, pl.x, pl.y) > MARU_TRAP * 0.7));
+        for _ in 0..50 {
+            d.tick(&mut w);
+            w.tick();
+        }
+        assert_eq!(ktinga_count(&w, &d), 0, "nobody's come yet");
+        let k = maru_rescuer(&mut w, m, MARU_TRAP - 1000.0);
+        maru_run(&mut w, &mut d, k, 2);
+        assert_eq!(ktinga_count(&w, &d), MARU_FIRST, "three battlecruisers decloak");
+        assert_eq!(d.events[0].level, TRAPPED);
+        w.inflict(m, 500.0, Some(k as u8), "test".into());
+        assert_eq!(w.players[m].damage, 0.0, "empire fire is held off the Maru");
+    }
+
+    #[test]
+    fn survivors_are_beamed_aboard_with_shields_down_and_landed_at_home() {
+        let (mut w, mut d, m) = maru_world();
+        let k = maru_rescuer(&mut w, m, 1000.0);
+        maru_run(&mut w, &mut d, k, 3 * UPS as u32);
+        assert_eq!(w.players[k].survivors, 0, "not through our shields");
+        w.handle(k as u8, ClientMsg::Shields);
+        assert!(!w.players[k].shields_up);
+        maru_run(&mut w, &mut d, k, 3 * UPS as u32);
+        let aboard = w.players[k].survivors;
+        assert!(aboard >= 2 * MARU_BEAM_RATE && aboard <= 4 * MARU_BEAM_RATE, "{} aboard", aboard);
+        assert_eq!(d.events[0].souls + aboard, MARU_SOULS);
+        maru_run(&mut w, &mut d, k, 20 * UPS as u32);
+        let hold = ShipType::Cruiser.stats().max_armies * SOULS_PER_ARMY;
+        assert_eq!(w.players[k].survivors, hold, "as many as the hold takes");
+        // Home: in orbit of one of our worlds, they're landed.
+        let home = Team::Fed.home_planet();
+        let kills = w.players[k].kills;
+        let p = &mut w.players[k];
+        (p.x, p.y, p.orbiting) = (w.planets[home].x, w.planets[home].y + ORBDIST, Some(home));
+        w.tick();
+        assert_eq!(w.players[k].survivors, 0);
+        assert!((w.players[k].kills - kills - hold as f64 * MARU_SOUL_CREDIT).abs() < 1e-6);
+    }
+
+    #[test]
+    fn no_win_the_klingons_keep_coming_and_destroy_the_maru() {
+        let (mut w, mut d, m) = maru_world();
+        let k = maru_rescuer(&mut w, m, MARU_TRAP - 1000.0);
+        maru_run(&mut w, &mut d, k, 2);
+        // Out of the way, to watch.
+        w.players[k].x += 40_000.0 * if w.players[k].x > GWIDTH / 2.0 { -1.0 } else { 1.0 };
+        let mut most = 0;
+        for _ in 0..MARU_DOOM {
+            maru_run(&mut w, &mut d, k, 1);
+            most = most.max(ktinga_count(&w, &d));
+        }
+        assert!(most > MARU_FIRST, "more of them decloak ({} at most)", most);
+        maru_run(&mut w, &mut d, k, 5);
+        assert!(!w.players[m].alive(), "the Maru is destroyed");
+        maru_run(&mut w, &mut d, k, MARU_LINGER + 10);
+        assert!(d.events.is_empty());
+        assert_eq!(d.log.last(), Some(&(Faction::Maru, Ending::Departed)));
+        assert!(!w.players.iter().any(|p| p.in_use && p.faction == Some(Faction::Maru)), "the Klingons have cloaked and gone");
+    }
+
+    #[test]
+    fn kirk_reprograms_the_no_win_scenario() {
+        let (mut w, mut d, m) = maru_world();
+        let k = maru_rescuer(&mut w, m, MARU_TRAP - 1000.0);
+        maru_run(&mut w, &mut d, k, 2);
+        let kills = w.players[k].kills;
+        say(&mut w, k as u8, "I don't believe in the no-win scenario.");
+        maru_run(&mut w, &mut d, k, 2);
+        assert_eq!(d.events[0].prey, Some(k as u8));
+        assert!((w.players[k].kills - kills - MARU_KIRK_REWARD).abs() < 1e-6);
+        w.players[k].x += 40_000.0 * if w.players[k].x > GWIDTH / 2.0 { -1.0 } else { 1.0 };
+        maru_run(&mut w, &mut d, k, MARU_DOOM + 10);
+        assert!(w.players[m].alive(), "the Klingons hold their fire on the Maru");
+        let ks = ktingas(&w, &d.events[0]);
+        assert_eq!(ks.len(), MARU_FIRST, "and no more decloak");
+        for &s in &ks {
+            assert!(!w.players[s].shields_up, "shields down");
+            w.inflict(s, ShipType::Ktinga.stats().max_damage, Some(k as u8), "test".into());
+        }
+        let kills = w.players[k].kills;
+        maru_run(&mut w, &mut d, k, 20);
+        assert!(d.events.is_empty());
+        assert_eq!(d.log.last(), Some(&(Faction::Maru, Ending::Beaten)));
+        assert!(w.players[k].kills >= kills + MARU_SOULS as f64 * MARU_SOUL_CREDIT - 1e-6, "the souls aboard are saved");
+        assert!(!w.players[m].in_use, "towed away");
+    }
+
+    /// It's meant to be lost, mostly: robots get some survivors home now and then.
+    #[test]
+    fn robots_rescue_maru_survivors() {
+        let mut rescued = 0;
+        for _ in 0..8 {
+            let (mut w, mut d, _) = maru_world();
+            let mut bots = Vec::new();
+            for t in Team::PLAYABLE {
+                for _ in 0..2 {
+                    bots.push(bot::spawn(&mut w, t).unwrap());
+                }
+            }
+            let mut landed = false;
+            for _ in 0..(UPS as u32 * 240) {
+                d.tick(&mut w);
+                for b in bots.iter_mut() {
+                    b.think(&mut w);
+                }
+                w.tick();
+                landed |= w.outbox.iter().any(|o| o.msg.text.contains("survivors of the Kobayashi Maru safely"));
+                w.outbox.clear();
+                w.warnings.clear();
+                if landed {
+                    break;
+                }
+            }
+            rescued += landed as usize;
+        }
+        println!("robots landed survivors {} times in 8", rescued);
+        assert!(rescued >= 2, "robots landed survivors {} times in 8", rescued);
     }
 
     /// A world with the Moon just arrived, and its event.
@@ -6715,6 +7193,8 @@ mod tests {
             inside: Vec::new(),
             cooldown: 0,
             erased: Vec::new(),
+            souls: 0,
+            saved: 0,
         }
     }
 

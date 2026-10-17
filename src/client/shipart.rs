@@ -596,6 +596,20 @@ fn mongo() -> Vec<Part> {
     v
 }
 
+/// The Kobayashi Maru, a neutronic fuel carrier: the bridge forward on a
+/// long spine, three pairs of fuel tanks (one holed by the mine) and the
+/// engine block aft.
+fn kobayashi_maru() -> Vec<Part> {
+    let mut v = vec![sym(&[(0.0, -1.0), (0.22, -0.92), (0.26, -0.7), (0.0, -0.62)]), capsule((0.0, -0.65), (0.0, 0.85), 0.14)];
+    for k in 0..3 {
+        let y = -0.45 + k as f32 * 0.4;
+        v.extend(pair(|s| capsule((s * 0.32, y), (s * 0.32, y + 0.28), 0.26)));
+    }
+    v.push(sym(&[(0.0, 0.75), (0.3, 0.8), (0.3, 1.0), (0.0, 1.0)]));
+    v.push(Hole { pts: vec![(0.22, -0.05), (0.42, 0.02), (0.36, 0.14), (0.24, 0.1)] });
+    v
+}
+
 /// Alien vessels and monsters.
 fn alien(f: Faction, ship: ShipType) -> Vec<Part> {
     let mut v = Vec::new();
@@ -1070,6 +1084,7 @@ fn alien(f: Faction, ship: ShipType) -> Vec<Part> {
             }
         }
         Faction::Moonbase => return if ship == ShipType::RogueMoon { rogue_moon() } else { eagle() },
+        Faction::Maru => return if ship == ShipType::KobayashiMaru { kobayashi_maru() } else { klingon(ShipType::Cruiser) },
         // Nanites never fly a ship of their own.
         Faction::Nanites => {
             v.push(Circle { c: (0.0, 0.0), r: 0.3, fill: true });
@@ -1090,6 +1105,7 @@ pub fn engine_points(team: Team, ship: ShipType, faction: Option<Faction>) -> Ve
         Some(Faction::Hirogen) => return vec![(0.3, 0.95), (-0.3, 0.95)],
         Some(Faction::Ferengi) => return vec![(0.0, 0.3)],
         Some(Faction::Kzinti) => return vec![(0.35, 0.9), (-0.35, 0.9)],
+        Some(Faction::Maru) if ship == ShipType::Ktinga => return engine_points(Team::Kli, ShipType::Cruiser, None),
         Some(Faction::Ming) if ship != ShipType::Mongo => return vec![(0.0, 0.98)],
         Some(Faction::Moonbase) if ship == ShipType::Eagle => return vec![(0.08, 0.98), (-0.08, 0.98)],
         Some(Faction::GalacticEmpire) => {
@@ -1266,6 +1282,8 @@ mod tests {
             (Team::Ind, ShipType::Scimitar, Some(Faction::Scimitar)),
             (Team::Ind, ShipType::Calamarain, Some(Faction::Calamarain)),
             (Team::Ind, ShipType::Nagilum, Some(Faction::Nagilum)),
+            (Team::Ind, ShipType::KobayashiMaru, Some(Faction::Maru)),
+            (Team::Ind, ShipType::Ktinga, Some(Faction::Maru)),
         ]);
         let cols = rows.iter().map(|r| r.len()).max().unwrap_or(1);
         let mut c = Canvas::new(cols as i32 * cell as i32, rows.len() as i32 * cell as i32, [0.0, 0.0, 0.0]);

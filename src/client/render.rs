@@ -134,6 +134,10 @@ fn ship_shape(s: ShipType) -> &'static [(f64, f64)] {
         ShipType::Scimitar => &[
             (0.0, -1.0), (0.25, -0.45), (1.0, 0.35), (0.85, 0.75), (0.2, 0.5), (0.0, 0.9), (-0.2, 0.5), (-0.85, 0.75), (-1.0, 0.35), (-0.25, -0.45),
         ],
+        // The Maru: a long spine between pairs of fuel tanks.
+        ShipType::KobayashiMaru => &[(0.0, -1.0), (0.25, -0.8), (0.55, -0.4), (0.55, 0.75), (0.3, 1.0), (-0.3, 1.0), (-0.55, 0.75), (-0.55, -0.4), (-0.25, -0.8)],
+        // A K't'inga: command bulb on a long neck, wings with nacelles.
+        ShipType::Ktinga => &[(0.0, -1.0), (0.12, -0.6), (0.12, 0.0), (0.9, 0.3), (0.9, 0.95), (0.4, 0.6), (0.0, 0.8), (-0.4, 0.6), (-0.9, 0.95), (-0.9, 0.3), (-0.12, 0.0), (-0.12, -0.6)],
         ShipType::Augment | ShipType::GornRaider => &[
             (0.0, -1.0), (0.6, -0.55), (0.25, 0.0), (0.8, 0.95), (0.3, 0.6), (-0.3, 0.6), (-0.8, 0.95), (-0.25, 0.0), (-0.6, -0.55),
         ],
@@ -929,6 +933,7 @@ impl App {
             (pf::BOARDING, "BOARDING"),
             (pf::BOARDED, "BOARDED!"),
             (pf::TOWING, "TOWING PRIZE"),
+            (pf::SURVIVORS, "SURVIVORS"),
         ] {
             if me.flags & flag != 0 {
                 line += "  ";

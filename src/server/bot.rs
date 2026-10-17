@@ -272,6 +272,9 @@ impl Bot {
             self.duty_goal(world, i, task)
         } else if prev == Goal::Retreat && (hurt > 0.1 || p.fuel / s.max_fuel < 0.9) && p.armies == 0 {
             Goal::Retreat
+        } else if let Some(k) = self.pick_planet(world, x, y, |_, pl| pl.owner == team).filter(|_| p.survivors > 0) {
+            // Survivors of the Kobayashi Maru aboard: land them on our nearest world.
+            Goal::Patrol(k)
         } else if let Some((a, m)) = pusher.filter(|&(a, _)| {
             let ajax = &world.players[a as usize];
             dist(x, y, ajax.x, ajax.y) < 8000.0 || !matches!(enemy, Some((.., d)) if d < 4000.0)
@@ -369,7 +372,15 @@ impl Bot {
             .planets
             .iter()
             .any(|pl| world.hostile(pl.owner, team) && pl.armies > 0 && dist(x, y, pl.x, pl.y) < PFIREDIST * 2.0);
-        let danger = threats > 0 || hostile_planet || matches!(enemy, Some((.., d)) if d < 9000.0);
+        // Beside the Kobayashi Maru, shields come down to beam its survivors aboard.
+        let beaming = match self.goal {
+            Goal::Duty(Task::Rescue { target }) => {
+                let m = &world.players[target as usize];
+                dist(x, y, m.x, m.y) < super::aliens::MARU_BEAM * 0.8
+            }
+            _ => false,
+        };
+        let danger = !beaming && (threats > 0 || hostile_planet || matches!(enemy, Some((.., d)) if d < 9000.0));
         if danger != p.shields_up && p.fuel > 300.0 && !(self.goal == Goal::Retreat && p.orbiting.is_some()) && !(danger && p.sys_out(System::Shields)) {
             cmds.push(ClientMsg::Shields);
         }
@@ -734,6 +745,16 @@ impl Bot {
                 }
             }
             Task::Zap => cmds.push(ClientMsg::DetEnemy),
+            Task::Rescue { target } => {
+                // Alongside, dead slow (the shields come down in `think`).
+                let q = &world.players[target as usize];
+                let d = dist(x, y, q.x, q.y);
+                if d > super::aliens::MARU_BEAM * 0.5 {
+                    self.go_toward(cmds, x, y, q.x, q.y, d, s.max_speed);
+                } else {
+                    steer(cmds, dir_to(x, y, q.x, q.y), 0);
+                }
+            }
             Task::Take { .. } | Task::Bomb { .. } | Task::Avoid { .. } | Task::Spare { .. } | Task::Shun { .. } => {}
         }
     }

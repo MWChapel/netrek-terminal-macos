@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 pub const DEFAULT_PORT: u16 = 2592; // the traditional Netrek port
-pub const PROTOCOL_VERSION: u32 = 26;
+pub const PROTOCOL_VERSION: u32 = 27;
 
 pub const UPS: u64 = 10; // server updates per second, like the original
 pub const GWIDTH: f64 = 100_000.0;
@@ -175,10 +175,13 @@ pub enum Faction {
     Calamarain,
     /// Nagilum ("Where Silence Has Lease").
     Nagilum,
+    /// The Kobayashi Maru and the Klingons waiting for whoever answers its
+    /// distress call (Star Trek II: The Wrath of Khan).
+    Maru,
 }
 
 impl Faction {
-    pub const ALL: [Faction; 46] = [
+    pub const ALL: [Faction; 47] = [
         Faction::Khan,
         Faction::Gorn,
         Faction::Tholian,
@@ -225,6 +228,7 @@ impl Faction {
         Faction::Scimitar,
         Faction::Calamarain,
         Faction::Nagilum,
+        Faction::Maru,
     ];
 
     /// Name used on the command line.
@@ -276,6 +280,7 @@ impl Faction {
             Faction::Scimitar => "scimitar",
             Faction::Calamarain => "calamarain",
             Faction::Nagilum => "nagilum",
+            Faction::Maru => "maru",
         }
     }
 
@@ -327,6 +332,7 @@ impl Faction {
             Faction::Scimitar => "the Scimitar",
             Faction::Calamarain => "the Calamarain",
             Faction::Nagilum => "Nagilum",
+            Faction::Maru => "the Kobayashi Maru",
         }
     }
 
@@ -379,6 +385,7 @@ impl Faction {
             Faction::Scimitar => "Reman",
             Faction::Calamarain => "Calamarain",
             Faction::Nagilum => "Nagilum",
+            Faction::Maru => "Klingon",
         }
     }
 
@@ -431,6 +438,7 @@ impl Faction {
             Faction::Scimitar => "RE",
             Faction::Calamarain => "CM",
             Faction::Nagilum => "NG",
+            Faction::Maru => "KM",
         }
     }
 
@@ -580,6 +588,10 @@ pub enum ShipType {
     Calamarain,
     /// Nagilum: a hole in space with a mind behind it.
     Nagilum,
+    /// The Kobayashi Maru, a neutronic fuel carrier adrift in the Neutral Zone.
+    KobayashiMaru,
+    /// A Klingon K't'inga battlecruiser, lying in wait for it under cloak.
+    Ktinga,
 }
 
 impl ShipType {
@@ -758,6 +770,7 @@ impl ShipType {
             ShipType::DreadnoughtMissile => 800.0,
             ShipType::Scimitar => 900.0,
             ShipType::Calamarain | ShipType::Nagilum => 1500.0,
+            ShipType::KobayashiMaru => 700.0,
             _ => EXPDIST,
         }
     }
@@ -779,6 +792,7 @@ impl ShipType {
                 | ShipType::Vaal
                 | ShipType::Landru
                 | ShipType::Nagilum
+                | ShipType::KobayashiMaru
         )
     }
 
@@ -789,7 +803,7 @@ impl ShipType {
             ShipType::Scout | ShipType::SwarmShip | ShipType::ChangelingShip => 2,
             ShipType::Destroyer | ShipType::FerengiMarauder | ShipType::HirogenHunter | ShipType::JemHadarFighter | ShipType::TholianVessel | ShipType::KzintiStriker => 3,
             ShipType::Assault | ShipType::Augment | ShipType::GornRaider => 5,
-            ShipType::Battleship | ShipType::KzintiDreadnought | ShipType::StarDestroyer | ShipType::WarRocketAjax => 6,
+            ShipType::Battleship | ShipType::KzintiDreadnought | ShipType::StarDestroyer | ShipType::WarRocketAjax | ShipType::Ktinga => 6,
             ShipType::MingRocket => 2,
             // Reinhardt, Maximilian and a crew of humanoid robots.
             ShipType::CygnusShip => 10,
@@ -818,7 +832,8 @@ impl ShipType {
             | ShipType::KzintiDreadnought
             | ShipType::KzintiCruiser
             | ShipType::KzintiStriker
-            | ShipType::StarDestroyer => true,
+            | ShipType::StarDestroyer
+            | ShipType::Ktinga => true,
             // The Pralor unit has no crew to overpower.
             ShipType::PralorUnit => false,
             // Special and relic ships are flown by players.
@@ -981,7 +996,7 @@ pub struct ShipStats {
     pub tract_str: f64,
 }
 
-pub static SHIPS: [ShipStats; 92] = [
+pub static SHIPS: [ShipStats; 94] = [
     ShipStats {
         name: "Scout", abbr: "SC", max_speed: 12, max_shield: 75.0, max_damage: 75.0,
         max_fuel: 5000.0, max_armies: 2, torp_damage: 25.0, torp_speed: 16.0, torp_fuse: 16,
@@ -1809,6 +1824,24 @@ pub static SHIPS: [ShipStats; 92] = [
         recharge: 500.0, repair: 0.0, warp_cost: 0.0, cloak_cost: 0.0, shield_cost: 0.0,
         turns: 20000.0, acc: 50, dec: 150, wpn_cool: 50.0, egn_cool: 50.0,
         max_etemp: 100_000.0, max_wtemp: 100_000.0, mass: 10_000_000.0, tract_range: 1.0, tract_str: 1.0,
+    },
+    ShipStats {
+        name: "Kobayashi Maru", abbr: "KM", max_speed: 0, max_shield: 0.0, max_damage: 1_000_000.0,
+        max_fuel: 1_000_000.0, max_armies: 0, torp_damage: 0.0, torp_speed: 10.0, torp_fuse: 30,
+        torp_cost: 0.0, phaser_damage: 0.0, phaser_cost: 0.0,
+        plasma_damage: 0.0, plasma_speed: 0.0, plasma_fuse: 0, plasma_cost: 0.0,
+        recharge: 500.0, repair: 0.0, warp_cost: 0.0, cloak_cost: 0.0, shield_cost: 0.0,
+        turns: 0.0, acc: 0, dec: 1000, wpn_cool: 50.0, egn_cool: 50.0,
+        max_etemp: 100_000.0, max_wtemp: 100_000.0, mass: 10_000_000.0, tract_range: 1.0, tract_str: 1.0,
+    },
+    ShipStats {
+        name: "K't'inga battlecruiser", abbr: "KT", max_speed: 7, max_shield: 120.0, max_damage: 130.0,
+        max_fuel: 1_000_000.0, max_armies: 0, torp_damage: 30.0, torp_speed: 12.0, torp_fuse: 40,
+        torp_cost: 0.0, phaser_damage: 65.0, phaser_cost: 0.0,
+        plasma_damage: 0.0, plasma_speed: 0.0, plasma_fuse: 0, plasma_cost: 0.0,
+        recharge: 500.0, repair: 60.0, warp_cost: 0.0, cloak_cost: 0.0, shield_cost: 0.0,
+        turns: 170_000.0, acc: 150, dec: 200, wpn_cool: 2.0, egn_cool: 6.0,
+        max_etemp: 100_000.0, max_wtemp: 1000.0, mass: 2000.0, tract_range: 1.0, tract_str: 1.0,
     },
 ];
 

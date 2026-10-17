@@ -3,7 +3,7 @@
 //! puffs you can fly into, fields are marked out on the galaxy's plane,
 //! stars and planetoids are lit spheres, and wrecks are solid models.
 
-use super::palette::{mix, rgb, scale, Rgb};
+use super::palette::{mix, planet_rgb, rgb, scale, Rgb};
 use super::render_terrain::*;
 use super::render_view::{draw_mesh, Cam, Pose, V3, EYE, NEAR};
 use super::shipart::Part;
@@ -899,6 +899,23 @@ fn ring_angle(k: usize) -> f32 {
     k as f32 / RING_SEGS as f32 * TAU
 }
 
+/// Which section of the ring (if any) a piece of the band at angle `a`
+/// belongs to: the nearest one, within half the spacing between them.
+fn section_at(ring: &crate::proto::RingInfo, a: f32) -> Option<usize> {
+    let n = ring.sections.len();
+    let gap = |s: &crate::proto::RingSectionInfo| {
+        let sa = ((s.y - ring.y) as f32).atan2((s.x - ring.x) as f32);
+        ((a - sa + PI).rem_euclid(TAU) - PI).abs()
+    };
+    let (k, d) = ring.sections.iter().enumerate().map(|(k, s)| (k, gap(s))).min_by(|a, b| a.1.total_cmp(&b.1))?;
+    (d < PI / n.max(1) as f32 * 0.85).then_some(k)
+}
+
+/// Where a section planet sits in the camera view: on the band, up by its rim.
+pub(super) fn section_alt() -> f32 {
+    RING_HI
+}
+
 /// The angle of shadow square `j` (they turn slowly, as on the tactical).
 fn square_angle(tick: u32, j: usize) -> f32 {
     tick as f32 * 0.002 + j as f32 * TAU / 5.0
@@ -1027,9 +1044,14 @@ pub(super) fn draw_ring_piece(c: &mut Canvas, cam: &Cam, f: &Frame, piece: RingP
                     poly3(c, cam, &[at(a0, RING_LO), at(a0, RING_HI)], false, 1.0, scale(RING_LIT, 0.6), 0.6 * haze, false);
                 }
             }
-            // The rim walls along both edges.
+            // The rim walls along both edges, in the colour of whoever holds
+            // this section (each section is a planet: it has no globe of its own).
+            let rim = section_at(ring, am)
+                .and_then(|s| f.planets.get(crate::consts::PLANETS.len() + s))
+                .filter(|info| info.known)
+                .map_or(RING_LIT, |info| mix(RING_LIT, planet_rgb(info), 0.75));
             for h in [RING_LO, RING_HI] {
-                poly3(c, cam, &[at(a0, h), at(a1, h)], false, 1.5, RING_LIT, 0.85 * haze, false);
+                poly3(c, cam, &[at(a0, h), at(a1, h)], false, if rim == RING_LIT { 1.5 } else { 2.5 }, rim, 0.85 * haze, false);
             }
         }
     }
@@ -1506,8 +1528,13 @@ mod tests {
             })
             .collect();
         let base = f.planets[0].clone();
-        for _ in 0..10 {
-            f.planets.push(base.clone());
+        // Sections held by each empire, the Kzinti, and nobody yet.
+        let owners = [Team::Fed, Team::Rom, Team::Kli, Team::Ori, Team::Ind];
+        for k in 0..10 {
+            let mut pl = base.clone();
+            (pl.known, pl.owner, pl.armies) = (true, owners[k % owners.len()], 12);
+            pl.alien = (k == 3).then_some(crate::consts::Faction::Kzinti);
+            f.planets.push(pl);
         }
         f.ring = Some(RingInfo { x: cx, y: cy, r, sections, kzin: 3 });
         let views = [(cx, cy + 22_000, 0u8), (cx - 2000, cy + 4000, 0), (cx + 15_000, cy + 6000, 210), (cx, cy, 64)];

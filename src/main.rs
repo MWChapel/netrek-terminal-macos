@@ -34,7 +34,7 @@ enum Cmd {
         /// probe, 8472, jemhadar, tribbles, chang, hirogen, q, ferengi, swarm, tempest,
         /// nomad, armus, nanites, changeling, metrons, pakled, 10c, caretaker, horta, spheres,
         /// dyson, kzinti, empire, cygnus, moon, mongo, narada, krenim, malon, vaal, landru,
-        /// bluegill, dreadnought, scimitar, calamarain, nagilum)
+        /// bluegill, dreadnought, scimitar, calamarain, nagilum, maru)
         #[arg(long, num_args = 0..=1, default_missing_value = "all", value_parser = parse_aliens)]
         aliens: Option<Aliens>,
         /// Average seconds between alien incursions
@@ -79,7 +79,7 @@ enum Cmd {
         /// probe, 8472, jemhadar, tribbles, chang, hirogen, q, ferengi, swarm, tempest,
         /// nomad, armus, nanites, changeling, metrons, pakled, 10c, caretaker, horta, spheres,
         /// dyson, kzinti, empire, cygnus, moon, mongo, narada, krenim, malon, vaal, landru,
-        /// bluegill, dreadnought, scimitar, calamarain, nagilum)
+        /// bluegill, dreadnought, scimitar, calamarain, nagilum, maru)
         #[arg(long, num_args = 0..=1, default_missing_value = "all", value_parser = parse_aliens)]
         aliens: Option<Aliens>,
         /// Average seconds between alien incursions

@@ -225,14 +225,21 @@ pub(super) fn viewscreen(tr: &TextRenderer, f: Option<&Frame>, slot: u8, watch: 
             Thing::Planet(k) => {
                 let def = &defs[k];
                 let info = &f.planets[k];
-                // Ringworld sections sit on the ring, which may be tipped toward us.
-                let alt = if k >= PLANETS.len() { ring_lift(def.x as f32, def.y as f32) } else { 0.0 };
+                // Ringworld sections are stretches of the ring itself (which may
+                // be tipped toward us): no globe, just the name over the band.
+                let section = k >= PLANETS.len();
+                let alt = if section { ring_lift(def.x as f32, def.y as f32) + super::render_view_terrain::section_alt() } else { 0.0 };
                 let (sx, sy) = cam.screen3(cam.at(def.x as f32, def.y as f32, alt));
                 let r = (PLANET_R / z * cam.focal).max(1.5);
                 if !on_screen(sx, sy, r + 40.0) {
                     continue;
                 }
                 let col = if info.known { planet_rgb(info) } else { GREY };
+                if section {
+                    let label = if info.known && r > 4.0 { format!("{} {}", def.name, info.armies) } else { def.name.to_string() };
+                    c.text_centered(tr, sx, sy - fs * 0.6, &label, fs, scale(col, 0.4 + 0.6 * fade(PLANET_RANGE)));
+                    continue;
+                }
                 draw_planet(&mut c, sx, sy, r, col, fade(PLANET_RANGE));
                 if r > 2.5 {
                     let label = if info.known && r > 10.0 { format!("{} {}", def.name, info.armies) } else { def.name.to_string() };
@@ -1070,7 +1077,7 @@ mod tests {
             (S::DysonHatch, F::Dyson), (S::KzintiDreadnought, F::Kzinti), (S::KzintiCruiser, F::Kzinti), (S::KzintiStriker, F::Kzinti),
             (S::DeathStar, F::GalacticEmpire), (S::StarDestroyer, F::GalacticEmpire), (S::TieFighter, F::GalacticEmpire), (S::TieAdvanced, F::GalacticEmpire), (S::CygnusShip, F::Cygnus), (S::RogueMoon, F::Moonbase), (S::Eagle, F::Moonbase), (S::Mongo, F::Ming), (S::WarRocketAjax, F::Ming), (S::MingRocket, F::Ming),
             (S::Narada, F::Narada), (S::NaradaDrill, F::Narada), (S::KrenimTimeship, F::Krenim), (S::MalonFreighter, F::Malon), (S::Vaal, F::Vaal), (S::Landru, F::Landru),
-            (S::BluegillMother, F::Bluegill), (S::DreadnoughtMissile, F::Dreadnought), (S::Scimitar, F::Scimitar), (S::Calamarain, F::Calamarain), (S::Nagilum, F::Nagilum),
+            (S::BluegillMother, F::Bluegill), (S::DreadnoughtMissile, F::Dreadnought), (S::Scimitar, F::Scimitar), (S::Calamarain, F::Calamarain), (S::Nagilum, F::Nagilum), (S::KobayashiMaru, F::Maru), (S::Ktinga, F::Maru),
             (S::TempestCore, F::Tempest), (S::Flipper, F::Tempest), (S::Tanker, F::Tempest), (S::Pulsar, F::Tempest), (S::Fuseball, F::Tempest),
         ];
         let (pw, ph, cols) = (240, 160, 7);

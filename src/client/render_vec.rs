@@ -578,7 +578,12 @@ impl App {
                 };
                 px.ring(x, y, sr * 1.45, 1.0, scol, 0.9);
             }
-            let tag = p.faction.map_or(slot_char(p.id).to_string(), |f| f.tag().to_string());
+            let tag = match p.faction {
+                // The Maru flies with the Klingons' faction, but isn't one of them.
+                Some(_) if p.ship == ShipType::KobayashiMaru => "Kobayashi Maru".to_string(),
+                Some(f) => f.tag().to_string(),
+                None => slot_char(p.id).to_string(),
+            };
             if ship_size_units(p.ship) > 0.0 {
                 // Monsters: name centred above them.
                 px.text_centered(tr, x, y - sr * if p.ship == ShipType::VgerCloud { 0.25 } else { 1.05 } - 3.0, &tag, fs, col);
@@ -697,7 +702,7 @@ impl App {
         let label_col = rgb(0xa0a8b8);
 
         // Row 1: status lamps, lit when active.
-        let lamps: [(&str, bool, Rgb); 15] = [
+        let lamps: [(&str, bool, Rgb); 16] = [
             ("SHLD", me.flags & pf::SHIELD != 0, rgb(0x40a0ff)),
             ("TRAP", me.flags & pf::TRAPPED != 0, red),
             ("ZAP", me.flags & pf::ZAPPER != 0, yellow),
@@ -718,6 +723,8 @@ impl App {
             } else {
                 ("TRIB", me.flags & pf::TRIBBLES != 0, faction_rgb(Faction::Tribbles))
             },
+            // Survivors of the Kobayashi Maru aboard.
+            ("SURV", me.flags & pf::SURVIVORS != 0, rgb(0x60e0ff)),
         ];
         let lfs = fs * 0.78;
         let mut x = pad;

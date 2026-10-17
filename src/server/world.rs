@@ -69,6 +69,8 @@ pub struct Player {
     pub marked: bool,
     /// Has fired on Moonbase Alpha (the Moon or an Eagle): its Eagles hunt it.
     pub alpha_foe: bool,
+    /// Survivors of the Kobayashi Maru aboard, to be landed on one of our worlds.
+    pub survivors: u32,
     /// Chang's Bird-of-Prey: its exhaust is visible until this tick.
     pub revealed_until: u32,
     /// Q's champion: only this empire's weapons can hurt it.
@@ -231,6 +233,7 @@ impl Player {
             tribbles: false,
             marked: false,
             alpha_foe: false,
+            survivors: 0,
             revealed_until: 0,
             only_hurt_by: None,
             rank: None,
@@ -328,6 +331,13 @@ impl Player {
             _ => 2.0,
         };
         ((self.kills * per_kill) as u32).min(s.max_armies)
+    }
+
+    /// Room aboard for the Kobayashi Maru's survivors: the hold, less the
+    /// armies (and survivors) already in it.
+    pub fn survivor_room(&self) -> u32 {
+        let hold = self.stats().max_armies.saturating_sub(self.armies) * super::aliens::SOULS_PER_ARMY;
+        hold.saturating_sub(self.survivors)
     }
 
     pub fn leave_orbit_pub(&mut self) {
@@ -639,7 +649,7 @@ impl Duty {
         let pl = |k: usize| (world.planets[k].x, world.planets[k].y);
         Some(match self.task {
             Task::Attack { station: Some(st), .. } => st,
-            Task::Attack { target, .. } | Task::Speak { target, .. } | Task::Meet { target, .. } | Task::Gambit { target } => at(target),
+            Task::Attack { target, .. } | Task::Speak { target, .. } | Task::Meet { target, .. } | Task::Gambit { target } | Task::Rescue { target } => at(target),
             Task::Hold { follow: Some(f), .. } => at(f),
             Task::Hold { x, y, .. } | Task::Deliver { x, y, .. } => (x, y),
             Task::Take { planet } | Task::Bomb { planet } | Task::Orbit { planet, .. } => pl(planet),
@@ -680,6 +690,8 @@ pub enum Task {
     Spare { target: u8 },
     /// Don't orbit this planet.
     Shun { planet: usize },
+    /// Beam aboard the survivors of this wreck (the Kobayashi Maru).
+    Rescue { target: u8 },
 }
 
 /// Which weapons an attack calls for.
@@ -1109,6 +1121,7 @@ impl World {
         p.just_exploded = false;
         p.tribbles = false;
         p.marked = false;
+        p.survivors = 0;
         p.jump_at = None;
         p.phased_until = 0;
         p.adapt = 1.0;
@@ -2755,6 +2768,14 @@ impl World {
             }
             return;
         }
+        // The Kobayashi Maru is a wreck full of survivors: empire fire is
+        // held off it (only the Klingons can finish it).
+        if self.players[i].ship == ShipType::KobayashiMaru {
+            if let Some(k) = killer.filter(|&k| self.players[k as usize].faction.is_none()) {
+                self.warn(k, "Hold your fire! That's the Kobayashi Maru: drop your shields and beam its survivors aboard");
+            }
+            return;
+        }
         // Moonbase Alpha: whoever fires on the Moon or its Eagles has its
         // Eagles after them. Nothing can hurt the Moon itself.
         if self.players[i].faction == Some(Faction::Moonbase) {
@@ -3232,6 +3253,19 @@ impl World {
         self.warn(id, format!("{} knocked out! (/fix {})", sy.name(), sy.abbr().to_ascii_lowercase()));
     }
 
+    /// Land the Kobayashi Maru's survivors on one of our worlds: a kill for
+    /// every hundred brought home.
+    fn land_survivors(&mut self, i: usize, k: usize) {
+        let p = &mut self.players[i];
+        let souls = std::mem::take(&mut p.survivors);
+        let credit = souls as f64 * super::aliens::MARU_SOUL_CREDIT;
+        p.kills += credit;
+        p.total_kills += credit;
+        let who = p.label();
+        self.events.push(GameEvent::Honour { player: i as u8, text: format!("Rescued {} survivors of the Kobayashi Maru", souls) });
+        self.god(format!("{} lands {} survivors of the Kobayashi Maru safely on {}.", who, souls, self.planets[k].name));
+    }
+
     pub fn kill(&mut self, i: usize, killer: Option<u8>, how: String) {
         // A holographic decoy just flickers out.
         if self.players[i].decoy_until.is_some() {
@@ -3267,6 +3301,10 @@ impl World {
             p.nanites = false;
             p.overwatch = false;
             p.last_death = Some((p.x, p.y));
+        }
+        let souls = std::mem::take(&mut self.players[i].survivors);
+        if souls > 0 {
+            self.god(format!("{} goes down with {} survivors of the Kobayashi Maru aboard.", vlabel, souls));
         }
         let with_armies = if victim_armies > 0 { format!(" (carrying {} armies)", victim_armies) } else { String::new() };
         if self.players[i].ship == ShipType::Freighter && self.players[i].cargo > 0 {
@@ -3338,8 +3376,9 @@ impl World {
     fn ship_explosion(&mut self, i: usize) {
         let (x, y) = (self.players[i].x, self.players[i].y);
         let base = match self.players[i].ship {
-            // Vaal falling silent and Landru's computer dying don't blow anything up.
-            ShipType::Vaal | ShipType::Landru | ShipType::Nagilum => return,
+            // Vaal falling silent and Landru's computer dying don't blow anything
+            // up, and the Maru's tanks are long since empty.
+            ShipType::Vaal | ShipType::Landru | ShipType::Nagilum | ShipType::KobayashiMaru => return,
             ShipType::Starbase => 200.0,
             ShipType::Scout => 75.0,
             ShipType::SwarmShip => 5.0,
@@ -3620,6 +3659,9 @@ impl World {
         }
 
         let own_planet = planet_under.filter(|&(_, owner, _)| owner == self.players[i].team);
+        if let Some((k, _, _)) = own_planet.filter(|_| self.players[i].survivors > 0) {
+            self.land_survivors(i, k);
+        }
         let p = &mut self.players[i];
 
         // The whale probe's call drains all power.
@@ -4500,6 +4542,7 @@ impl World {
                 set(&mut flags, self.boardings.iter().any(|b| b.attacker == p.id), pf::BOARDING);
                 set(&mut flags, self.boardings.iter().any(|b| b.target == p.id), pf::BOARDED);
                 set(&mut flags, p.towing, pf::TOWING);
+                set(&mut flags, p.survivors > 0 && friendly, pf::SURVIVORS);
                 // An Excalbian shapeshifter looks like one of your own cruisers from afar.
                 let disguised = p.ship == ShipType::ExcalbianShip
                     && !friendly
@@ -4664,6 +4707,11 @@ impl World {
         let s = q.stats();
         let hurt = q.damage / s.max_damage;
         let healthy = hurt <= 0.6 && q.fuel >= s.max_fuel * 0.25 && !q.sys_out(System::Warp);
+        // With survivors aboard, the only job is fetching more of them (or
+        // getting them home).
+        if q.survivors > 0 && !matches!(task, Task::Rescue { .. }) {
+            return false;
+        }
         match *task {
             // Decker's gambit is for ships that are done for anyway.
             Task::Gambit { .. } => hurt > 0.45 && q.ship != ShipType::Starbase,
@@ -4679,6 +4727,9 @@ impl World {
             Task::Meet { target, .. } if self.players[target as usize].ship == ShipType::FerengiMarauder => healthy && q.ship == ShipType::Battleship,
             Task::Deliver { armies, .. } => healthy && (q.armies >= armies || q.max_armies_now() >= armies),
             Task::Speak { .. } | Task::Hold { .. } | Task::Meet { .. } => healthy && q.ship != ShipType::Starbase,
+            // Only a ship in good shape drops its shields beside the Maru; once
+            // hit, it gets away with whoever it has aboard.
+            Task::Rescue { .. } => healthy && q.ship != ShipType::Starbase && !q.sys_out(System::Transporters) && q.survivor_room() > 0 && hurt < 0.3,
             Task::Zap => true,
             _ => healthy,
         }

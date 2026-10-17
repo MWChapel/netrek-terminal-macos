@@ -114,6 +114,8 @@ pub mod pf {
     pub const BOARDED: u32 = 4194304;
     /// Towing a captured prize home.
     pub const TOWING: u32 = 8388608;
+    /// Carrying survivors of the Kobayashi Maru.
+    pub const SURVIVORS: u32 = 16777216;
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

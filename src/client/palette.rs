@@ -118,6 +118,8 @@ pub fn faction_rgb(f: Faction) -> Rgb {
         Faction::Scimitar => rgb(0x78a070),
         Faction::Calamarain => rgb(0x70c8ff),
         Faction::Nagilum => rgb(0x9a78d0),
+        // Klingon blood (pink, as Chang's ran).
+        Faction::Maru => rgb(0xe0508c),
     }
 }
 
@@ -129,6 +131,8 @@ pub fn player_rgb(p: &PlayerInfo) -> Rgb {
         ShipType::Tanker => rgb(0xc050ff),
         ShipType::Pulsar => rgb(0x40f0ff),
         ShipType::Fuseball => rgb(0xf0f0f0),
+        // The Maru is a civilian freighter, not one of the Klingons waiting for it.
+        ShipType::KobayashiMaru => rgb(0xd0d8e4),
         _ => p.faction.map_or(team_rgb(p.team), faction_rgb),
     }
 }
