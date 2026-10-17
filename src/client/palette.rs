@@ -120,6 +120,8 @@ pub fn faction_rgb(f: Faction) -> Rgb {
         Faction::Nagilum => rgb(0x9a78d0),
         // Klingon blood (pink, as Chang's ran).
         Faction::Maru => rgb(0xe0508c),
+        // Old blood.
+        Faction::EventHorizon => rgb(0xc0302a),
     }
 }
 

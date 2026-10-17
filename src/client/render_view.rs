@@ -1077,7 +1077,7 @@ mod tests {
             (S::DysonHatch, F::Dyson), (S::KzintiDreadnought, F::Kzinti), (S::KzintiCruiser, F::Kzinti), (S::KzintiStriker, F::Kzinti),
             (S::DeathStar, F::GalacticEmpire), (S::StarDestroyer, F::GalacticEmpire), (S::TieFighter, F::GalacticEmpire), (S::TieAdvanced, F::GalacticEmpire), (S::CygnusShip, F::Cygnus), (S::RogueMoon, F::Moonbase), (S::Eagle, F::Moonbase), (S::Mongo, F::Ming), (S::WarRocketAjax, F::Ming), (S::MingRocket, F::Ming),
             (S::Narada, F::Narada), (S::NaradaDrill, F::Narada), (S::KrenimTimeship, F::Krenim), (S::MalonFreighter, F::Malon), (S::Vaal, F::Vaal), (S::Landru, F::Landru),
-            (S::BluegillMother, F::Bluegill), (S::DreadnoughtMissile, F::Dreadnought), (S::Scimitar, F::Scimitar), (S::Calamarain, F::Calamarain), (S::Nagilum, F::Nagilum), (S::KobayashiMaru, F::Maru), (S::Ktinga, F::Maru),
+            (S::BluegillMother, F::Bluegill), (S::DreadnoughtMissile, F::Dreadnought), (S::Scimitar, F::Scimitar), (S::Calamarain, F::Calamarain), (S::Nagilum, F::Nagilum), (S::KobayashiMaru, F::Maru), (S::Ktinga, F::Maru), (S::EventHorizon, F::EventHorizon),
             (S::TempestCore, F::Tempest), (S::Flipper, F::Tempest), (S::Tanker, F::Tempest), (S::Pulsar, F::Tempest), (S::Fuseball, F::Tempest),
         ];
         let (pw, ph, cols) = (240, 160, 7);

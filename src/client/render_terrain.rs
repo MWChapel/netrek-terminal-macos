@@ -797,6 +797,41 @@ pub(super) const TEAR: Rgb = rgb(0xff50b0);
 pub(super) const TANAGRA: Rgb = rgb(0xe8b860);
 /// The Scimitar's thalaron weapon charging: a sickly green-white.
 pub(super) const THALARON: Rgb = rgb(0xa0ff90);
+/// The Event Horizon's gravity drive spinning up: cold blue-white rings...
+pub(super) const DRIVE: Rgb = rgb(0x9ec4ff);
+/// ...and the gateway it opens: the other side is red.
+pub(super) const GATEWAY: Rgb = rgb(0xd0202a);
+
+/// The gravity drive's three rings, tumbling about its core (unit radius,
+/// as flat points round the centre, each ring squashed as it turns).
+pub(super) fn drive_rings(tick: f32, n: usize) -> Vec<Vec<(f32, f32)>> {
+    (0..3)
+        .map(|k| {
+            let tilt = k as f32 * TAU / 3.0;
+            let squash = (tick * 0.12 * (k + 1) as f32).cos();
+            (0..n)
+                .map(|i| {
+                    let a = i as f32 / n as f32 * TAU;
+                    let (u, v) = (a.cos(), a.sin() * squash);
+                    (u * tilt.cos() - v * tilt.sin(), u * tilt.sin() + v * tilt.cos())
+                })
+                .collect()
+        })
+        .collect()
+}
+
+/// Arm `k` of the gateway's spiral, from its rim (unit radius) to the
+/// middle, turning as it drains inward.
+pub(super) fn gate_spiral(tick: f32, k: usize, n: usize) -> Vec<(f32, f32)> {
+    (0..=n)
+        .map(|i| {
+            let t = i as f32 / n as f32;
+            let a = k as f32 * TAU / 5.0 + t * 4.0 - tick * 0.15;
+            let r = 1.0 - t * 0.92;
+            (a.cos() * r, a.sin() * r)
+        })
+        .collect()
+}
 /// Vaal's power-draining field.
 pub(super) const VAAL_FIELD: Rgb = rgb(0xd84a30);
 
@@ -942,6 +977,29 @@ pub fn draw_zones_vec(px: &mut Canvas, f: &Frame, to: &dyn Fn(f64, f64) -> (f32,
                 px.glow(x, y, r, THALARON, 0.08);
                 px.ring(x, y, r, 2.0, THALARON, 0.8);
                 px.ring(x, y, r * (1.0 - pulse), 1.5, THALARON, 0.6 * pulse);
+            }
+            ZoneKind::GravityDrive => {
+                // The reach of the gateway to come, and the drive's rings
+                // tumbling faster and faster at the core.
+                let pulse = 0.5 + 0.5 * (tick * 0.4).sin();
+                px.ring_dashed(x, y, r, 1.2, DRIVE, 0.4 + 0.3 * pulse, 6.0);
+                let core = (r * 0.12).max(4.0);
+                px.glow(x, y, core * 1.6, DRIVE, 0.25 + 0.2 * pulse);
+                for ring in drive_rings(tick, if detail { 32 } else { 16 }) {
+                    let pts: Vec<(f32, f32)> = ring.into_iter().map(|(a, b)| (x + a * core, y + b * core)).collect();
+                    px.polyline(&pts, true, 1.4, DRIVE, 0.9, 0.0);
+                }
+            }
+            ZoneKind::Gateway => {
+                // A hole into somewhere red, with everything draining into it.
+                px.glow(x, y, r * 0.5, GATEWAY, 0.25);
+                px.ring(x, y, r, 1.5, GATEWAY, 0.5);
+                for k in 0..5 {
+                    let pts: Vec<(f32, f32)> = gate_spiral(tick, k, if detail { 40 } else { 16 }).into_iter().map(|(a, b)| (x + a * r, y + b * r)).collect();
+                    px.polyline(&pts, false, 1.5, GATEWAY, 0.7, 0.0);
+                }
+                px.disc(x, y, (r * 0.09).max(3.0), rgb(0x080000), 0.95);
+                px.ring(x, y, (r * 0.09).max(3.0), 2.0, mix(GATEWAY, rgb(0xffb090), 0.3 + 0.3 * (tick * 0.5).sin()), 0.9);
             }
             ZoneKind::EnergyDrain => {
                 px.ring_dashed(x, y, r, 1.2, VAAL_FIELD, 0.6, 5.0);

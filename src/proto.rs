@@ -116,6 +116,8 @@ pub mod pf {
     pub const TOWING: u32 = 8388608;
     /// Carrying survivors of the Kobayashi Maru.
     pub const SURVIVORS: u32 = 16777216;
+    /// Haunted by the Event Horizon (only set on your own ship).
+    pub const HAUNTED: u32 = 33554432;
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -435,6 +437,10 @@ pub enum ZoneKind {
     Thalaron,
     /// Vaal's field, draining the power of ships inside it.
     EnergyDrain,
+    /// The Event Horizon's gravity drive spinning up: the gateway will open this wide.
+    GravityDrive,
+    /// The gateway open: everything inside is dragged toward the other side.
+    Gateway,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

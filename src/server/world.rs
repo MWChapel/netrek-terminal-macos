@@ -71,6 +71,12 @@ pub struct Player {
     pub alpha_foe: bool,
     /// Survivors of the Kobayashi Maru aboard, to be landed on one of our worlds.
     pub survivors: u32,
+    /// The Event Horizon's hold on the crew, from 0 (none) to 1 (madness).
+    pub dread: f64,
+    /// Back from the other side: sees nothing beyond arm's length until this tick...
+    pub blind_until: u32,
+    /// ...and brought something back with it, which haunts its own side, until this tick.
+    pub hellbound_until: u32,
     /// Chang's Bird-of-Prey: its exhaust is visible until this tick.
     pub revealed_until: u32,
     /// Q's champion: only this empire's weapons can hurt it.
@@ -167,6 +173,8 @@ pub enum Away {
     Nexus,
     /// Inside Nagilum, being experimented on.
     Nagilum,
+    /// Through the Event Horizon's gateway, to the other side.
+    Hell,
 }
 
 /// A snapshot of a ship, for the Guardian of Forever.
@@ -234,6 +242,9 @@ impl Player {
             marked: false,
             alpha_foe: false,
             survivors: 0,
+            dread: 0.0,
+            blind_until: 0,
+            hellbound_until: 0,
             revealed_until: 0,
             only_hurt_by: None,
             rank: None,
@@ -1122,6 +1133,7 @@ impl World {
         p.tribbles = false;
         p.marked = false;
         p.survivors = 0;
+        (p.dread, p.blind_until, p.hellbound_until) = (0.0, 0, 0);
         p.jump_at = None;
         p.phased_until = 0;
         p.adapt = 1.0;
@@ -1936,6 +1948,20 @@ impl World {
                 p.y = (p.y + vy * 3500.0).clamp(1000.0, GWIDTH - 1000.0);
                 let text = format!("Nagilum releases you. \"Your death would have been... interesting.\" It leaves you damaged, and {}", gift);
                 self.warn(i as u8, text);
+            }
+            Away::Hell => {
+                // Back somewhere else, torn, blind, and not alone.
+                let (x, y) = super::terrain::random_open_spot(self);
+                let p = &mut self.players[i];
+                (p.x, p.y) = (x, y);
+                p.damage = (p.damage + s.max_damage * 0.25).min(s.max_damage * 0.9);
+                (p.shield, p.armies) = (0.0, 0);
+                p.dread = 0.4;
+                p.blind_until = tick + super::aliens::HELL_BLIND;
+                p.hellbound_until = tick + super::aliens::HELLBOUND;
+                let who = p.label();
+                self.warn(i as u8, "You're back. Your eyes... \"Where we're going, we won't need eyes to see.\" (blind for 20 s, and something came back with you)");
+                self.god(format!("{} comes back from the other side of the gateway. It isn't alone.", who));
             }
         }
     }
@@ -4464,12 +4490,17 @@ impl World {
         let mp = &self.players[me as usize];
         let my_team = mp.team;
         let mut rng = rand::thread_rng();
+        let blind = !omniscient && self.tick < mp.blind_until;
+        // The Event Horizon shows a haunted crew things that aren't there.
+        let haunted = !omniscient && mp.dread >= super::aliens::DREAD_VISIONS;
         let players = self
             .players
             .iter()
             .filter(|p| p.in_use)
             // Ships out of normal space can't be seen at all.
             .filter(|p| p.away.is_none() || p.id == me || omniscient)
+            // Back from the other side without eyes: only what's within reach.
+            .filter(|p| !blind || p.id == me || (p.x - mp.x).powi(2) + (p.y - mp.y).powi(2) < super::aliens::BLIND_SIGHT.powi(2))
             .map(|p| {
                 let friendly = omniscient || p.team == my_team || p.id == me || self.allied(p.team, my_team);
                 // Terrain: nebulae and ion storms hide ships from all but close range.
@@ -4500,7 +4531,10 @@ impl World {
                     && !omniscient
                     && p.alive()
                     && (p.x - mp.x).powi(2) + (p.y - mp.y).powi(2) > 2000.0f64.powi(2);
-                let (x, y) = if fuzzy {
+                let vision = if haunted && p.id != me && p.alive() { super::aliens::vision(self.tick, me, p, mp) } else { None };
+                let (x, y) = if let Some(at) = vision.and_then(|v| v.at) {
+                    at
+                } else if fuzzy {
                     (p.x + rng.gen_range(-4000.0..4000.0), p.y + rng.gen_range(-4000.0..4000.0))
                 } else if illusion {
                     // A Talosian illusion: to distant enemies it appears 1,500 to
@@ -4543,6 +4577,7 @@ impl World {
                 set(&mut flags, self.boardings.iter().any(|b| b.target == p.id), pf::BOARDED);
                 set(&mut flags, p.towing, pf::TOWING);
                 set(&mut flags, p.survivors > 0 && friendly, pf::SURVIVORS);
+                set(&mut flags, p.id == me && (p.dread >= super::aliens::DREAD_VISIONS || self.tick < p.hellbound_until), pf::HAUNTED);
                 // An Excalbian shapeshifter looks like one of your own cruisers from afar.
                 let disguised = p.ship == ShipType::ExcalbianShip
                     && !friendly
@@ -4555,11 +4590,16 @@ impl World {
                 let infected = p.guise.filter(|g| g.1 != ShipType::BluegillMother && !omniscient);
                 PlayerInfo {
                     id: p.id,
-                    name: if changeling { CHANGELING_GUISES[p.id as usize % CHANGELING_GUISES.len()].to_string() } else { p.name.clone() },
-                    team: match infected {
+                    name: match vision.and_then(|v| v.name) {
+                        Some(n) => n.to_string(),
+                        None if changeling => CHANGELING_GUISES[p.id as usize % CHANGELING_GUISES.len()].to_string(),
+                        None => p.name.clone(),
+                    },
+                    team: match (vision.and_then(|v| v.team), infected) {
+                        (Some(t), _) => t,
                         _ if disguised => my_team,
-                        Some((t, _)) => t,
-                        None => p.team,
+                        (_, Some((t, _))) => t,
+                        _ => p.team,
                     },
                     ship: if disguised { ShipType::Cruiser } else { p.ship },
                     state: p.state,
@@ -4586,6 +4626,7 @@ impl World {
         let torps = self
             .torps
             .iter()
+            .filter(|t| !blind || (t.x - mp.x).powi(2) + (t.y - mp.y).powi(2) < super::aliens::BLIND_SIGHT.powi(2))
             .map(|t| TorpInfo { owner: t.owner, team: t.team, kind: t.kind, x: t.x as i32, y: t.y as i32, explode: t.explode, quantum: t.quantum })
             .collect();
         let phasers = self.phasers.iter().map(|p| p.info.clone()).collect();

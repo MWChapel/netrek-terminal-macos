@@ -702,7 +702,7 @@ impl App {
         let label_col = rgb(0xa0a8b8);
 
         // Row 1: status lamps, lit when active.
-        let lamps: [(&str, bool, Rgb); 16] = [
+        let lamps: [(&str, bool, Rgb); 17] = [
             ("SHLD", me.flags & pf::SHIELD != 0, rgb(0x40a0ff)),
             ("TRAP", me.flags & pf::TRAPPED != 0, red),
             ("ZAP", me.flags & pf::ZAPPER != 0, yellow),
@@ -725,6 +725,8 @@ impl App {
             },
             // Survivors of the Kobayashi Maru aboard.
             ("SURV", me.flags & pf::SURVIVORS != 0, rgb(0x60e0ff)),
+            // Haunted by the Event Horizon (or by what came back from it).
+            ("DREAD", me.flags & pf::HAUNTED != 0, faction_rgb(Faction::EventHorizon)),
         ];
         let lfs = fs * 0.78;
         let mut x = pad;
@@ -821,7 +823,7 @@ impl App {
             if let Some(l) = &mi.lock {
                 status += &format!("  lock {}", l);
             }
-            for (flag, name) in [(pf::BOARDING, "BOARDING"), (pf::BOARDED, "BOARDED!"), (pf::TOWING, "TOWING PRIZE")] {
+            for (flag, name) in [(pf::BOARDING, "BOARDING"), (pf::BOARDED, "BOARDED!"), (pf::TOWING, "TOWING PRIZE"), (pf::HAUNTED, "HAUNTED")] {
                 if me.flags & flag != 0 {
                     status += "  ";
                     status += name;

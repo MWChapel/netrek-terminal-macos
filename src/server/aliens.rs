@@ -161,7 +161,7 @@ fn duration(kind: Faction) -> u32 {
         // The Moon takes its time crossing (and leaves when it's across).
         Faction::Moonbase => 10,
         Faction::Narada | Faction::Malon => 6,
-        Faction::Krenim | Faction::Vaal | Faction::Landru | Faction::Bluegill | Faction::Scimitar | Faction::Maru => 5,
+        Faction::Krenim | Faction::Vaal | Faction::Landru | Faction::Bluegill | Faction::Scimitar | Faction::Maru | Faction::EventHorizon => 5,
         _ => 4,
     };
     mins * 60 * UPS as u32
@@ -288,6 +288,7 @@ impl Director {
                         world.remove_player(id);
                     }
                 }
+                Faction::EventHorizon => exorcise(world),
                 Faction::Krenim if won => restore_history(world, &e),
                 Faction::Malon if won => theta_burst(world, &e),
                 // Left alone, their worlds go back to the natives.
@@ -1009,6 +1010,15 @@ impl Director {
                     place, MARU_SOULS
                 )
             }
+            Faction::EventHorizon => {
+                let Some(at) = open_spot(world, 8000.0) else { return };
+                spawn(world, "Event Horizon", ShipType::EventHorizon, at, 30.0);
+                next_at = world.tick + 30 * UPS as u32;
+                format!(
+                    "The EVENT HORIZON has come back. The lost starship has reappeared near {}, seven years after its gravity drive took it somewhere outside the universe. Its only transmission is screaming, and a voice: \"Liberate me...\" Something came back with it. Crews near it will see and hear things, and their ships will not want to leave. Every so often its gravity drive opens a gateway to wherever it went. Destroy it.",
+                    nearest_planet_name(world, at.0, at.1)
+                )
+            }
             Faction::Nagilum => {
                 let Some(at) = open_spot(world, 6000.0) else { return };
                 spawn(world, "Nagilum", ShipType::Nagilum, at, 0.0);
@@ -1133,6 +1143,7 @@ fn departed(e: &Event) -> bool {
         Faction::Malon | Faction::Dreadnought => e.level == 1,
         Faction::Nagilum => e.dwell == 1,
         Faction::Maru => e.level == GONE,
+        Faction::EventHorizon => e.level == HOME,
         _ => false,
     }
 }
@@ -1144,6 +1155,7 @@ fn departure_text(kind: Faction) -> String {
         Faction::Dreadnought => "The Dreadnought's mission is complete.".into(),
         Faction::Nagilum => "Nagilum has learned what it wanted to know about death. The hole in space closes.".into(),
         Faction::Maru => "The K't'ingas cloak and slip back across the Neutral Zone. The Kobayashi Maru is gone.".into(),
+        Faction::EventHorizon => "The gateway closes, and the Event Horizon goes with it, back where it came from, with the crews it took. It has what it wanted. For now.".into(),
         k => withdraw_text(k),
     }
 }
@@ -1197,6 +1209,7 @@ fn defeat_text(kind: Faction) -> String {
         Faction::Calamarain => "The Calamarain disperse, their cloud burned away.".into(),
         Faction::Nagilum => "Nagilum withdraws.".into(),
         Faction::Maru => "The last K't'inga is destroyed, and the Kobayashi Maru is taken in tow. \"I don't like to lose.\"".into(),
+        Faction::EventHorizon => "The Event Horizon breaks apart, its gravity drive collapsing in on itself. The voices stop. \"Liberate tutemet ex inferis.\"".into(),
     }
 }
 
@@ -1249,6 +1262,7 @@ fn withdraw_text(kind: Faction) -> String {
         Faction::Calamarain => "The Calamarain lose interest and drift away.".into(),
         Faction::Nagilum => "The hole in space closes. Nagilum is gone.".into(),
         Faction::Maru => "The Klingons cloak and withdraw across the Neutral Zone, and the Kobayashi Maru's distress call falls silent.".into(),
+        Faction::EventHorizon => "The Event Horizon's gravity drive fires, and the ship folds away into nothing. It has gone back to hell. The screaming stops.".into(),
     }
 }
 
@@ -1485,6 +1499,17 @@ fn post_duties(world: &mut World, e: &Event) {
         // Beam off the survivors. (Kirk's solution is for humans to find:
         // robots take the test as it was meant to be taken.)
         Faction::Maru => answer_distress(world, e, &mut d),
+        // Hit it from as far out as will do; rush it while its drive spins
+        // up, and get clear while the gateway is open.
+        Faction::EventHorizon => {
+            for &s in &ships {
+                d.push(match e.level {
+                    SPINNING => Duty::each(attack(s, Weapon::Any, 5000.0), 0),
+                    OPEN => Duty::each(avoid(s, GATE_R + 1500.0), 0),
+                    _ => Duty::each(attack(s, Weapon::Any, 8000.0), 2),
+                });
+            }
+        }
         _ => {}
     }
     // And whatever else has to be destroyed, wherever it is, a couple of
@@ -1493,7 +1518,7 @@ fn post_duties(world: &mut World, e: &Event) {
         s.pointless_target()
             || matches!(
                 s,
-                ShipType::TempestCore | ShipType::CygnusShip | ShipType::KrenimTimeship | ShipType::Vaal | ShipType::Landru | ShipType::Mongo | ShipType::RogueMoon | ShipType::Eagle | ShipType::KobayashiMaru
+                ShipType::TempestCore | ShipType::CygnusShip | ShipType::KrenimTimeship | ShipType::Vaal | ShipType::Landru | ShipType::Mongo | ShipType::RogueMoon | ShipType::Eagle | ShipType::KobayashiMaru | ShipType::EventHorizon
             )
             || (s == ShipType::WarRocketAjax && world.ajax_adrift.is_some())
     };
@@ -1691,6 +1716,7 @@ fn run_event(world: &mut World, e: &mut Event) {
                 ShipType::KobayashiMaru => maru(world, e, i, tick),
                 _ => ktinga(world, e, i, tick),
             },
+            Faction::EventHorizon => event_horizon(world, e, i, tick),
         }
     }
     if e.kind == Faction::Maru {
@@ -5739,6 +5765,283 @@ fn maru_spot(world: &World) -> Option<((f64, f64), String)> {
     open_spot(world, MARU_TRAP * 0.7).map(|at| (at, format!("in Gamma Hydra, sector 10, near {}", nearest_planet_name(world, at.0, at.1))))
 }
 
+/// The Event Horizon: how far its presence reaches, how fast dread builds
+/// at its hull (less further out), and how fast it fades away from it.
+pub const DREAD_R: f64 = 12_000.0;
+const DREAD_RATE: f64 = 0.0045;
+const DREAD_FADE: f64 = 0.002;
+/// Dread at which a crew starts seeing (and hearing) things, and at which
+/// the helm stops answering.
+pub const DREAD_VISIONS: f64 = 0.25;
+const DREAD_HELM: f64 = 0.5;
+/// How long a ship stays on the other side; how long it comes back blind,
+/// and how far it can see meanwhile; how long what came back with it
+/// haunts its own side, and how far.
+const HELL_TICKS: u32 = 12 * UPS as u32;
+pub const HELL_BLIND: u32 = 20 * UPS as u32;
+pub const BLIND_SIGHT: f64 = 2500.0;
+pub const HELLBOUND: u32 = 45 * UPS as u32;
+const HELLBOUND_R: f64 = 4000.0;
+const HELLBOUND_RATE: f64 = 0.0025;
+/// The gravity drive: how often it spins up, for how long, and how much
+/// damage knocks it out; how long the gateway stays open, how far it
+/// reaches, how hard it pulls, and the core that takes ships through.
+const DRIVE_EVERY: u32 = 50 * UPS as u32;
+const DRIVE_SPIN: u32 = 10 * UPS as u32;
+pub const DRIVE_BREAK: f64 = 120.0;
+const GATE_OPEN: u32 = 8 * UPS as u32;
+pub const GATE_R: f64 = 10_000.0;
+const GATE_PULL: f64 = 120.0;
+const GATE_CORE: f64 = 1300.0;
+/// How many it takes through before it goes home.
+pub const HORIZON_TAKES: u32 = 5;
+/// The gravity drive's state (`Event::level`).
+const ADRIFT: u8 = 0;
+const SPINNING: u8 = 1;
+const OPEN: u8 = 2;
+const HOME: u8 = 3;
+
+/// The Event Horizon's lost crew, and the dead it showed the Lewis and Clark's.
+const THE_DEAD: [&str; 10] = ["Weir", "Claire", "Denny", "Kilpack", "Corrick", "Justin", "Peters", "D.J.", "Starck", "Cooper"];
+
+/// What a haunted crew hears.
+const WHISPERS: [&str; 15] = [
+    "Liberate tutemet ex inferis.",
+    "Liberate me.",
+    "Save yourself from hell.",
+    "Where we're going, we won't need eyes to see.",
+    "You can't leave. The ship won't let you.",
+    "Do you see? Do you see?",
+    "It shows you things. Terrible things.",
+    "Hell is only a word. The reality is much, much worse.",
+    "We're not alone in here.",
+    "Join me, Billy.",
+    "Daddy? Come and find me. Please.",
+    "I've seen it. It's beautiful.",
+    "It brought us back. It wants more of us.",
+    "Don't look behind you.",
+    "There's no one out there. Only darkness.",
+];
+
+/// What a haunted crew sees in place of a ship: somewhere else, in someone
+/// else's colours, under a dead man's name.
+#[derive(Clone, Copy)]
+pub struct Vision {
+    pub at: Option<(f64, f64)>,
+    pub team: Option<Team>,
+    pub name: Option<&'static str>,
+}
+
+/// A roll from 0 to 1 that holds for three seconds at a time, so visions
+/// come and go rather than flicker.
+fn haunt_roll(tick: u32, a: u8, b: u8, salt: u32) -> f64 {
+    let mut h = (tick / (3 * UPS as u32)).wrapping_mul(2_654_435_761) ^ (a as u32) << 8 ^ (b as u32) << 16 ^ salt.wrapping_mul(40_503);
+    h ^= h >> 15;
+    h = h.wrapping_mul(2_246_822_519);
+    h ^= h >> 13;
+    h = h.wrapping_mul(3_266_489_917);
+    h ^= h >> 16;
+    h as f64 / u32::MAX as f64
+}
+
+/// What viewer `mp` (slot `me`), haunted by the Event Horizon, sees of ship
+/// `p`, if it isn't what's really there. The more dread, the more of the
+/// ships about are someone else; and now and then, the Event Horizon is
+/// right behind you.
+pub fn vision(tick: u32, me: u8, p: &Player, mp: &Player) -> Option<Vision> {
+    let d = mp.dread;
+    if p.ship == ShipType::EventHorizon {
+        if d >= DREAD_HELM && (tick + me as u32 * 37) % (9 * UPS as u32) < 8 {
+            let (vx, vy) = dir_vec(mp.dir);
+            return Some(Vision { at: Some((mp.x - vx * 1800.0, mp.y - vy * 1800.0)), team: None, name: None });
+        }
+        return None;
+    }
+    if p.faction.is_some() || haunt_roll(tick, me, p.id, 1) > d * 0.6 {
+        return None;
+    }
+    let pick = |salt: u32, n: usize| (haunt_roll(tick, me, p.id, salt) * n as f64) as usize % n;
+    let at = (haunt_roll(tick, me, p.id, 4) < 0.4).then(|| {
+        let a = haunt_roll(tick, me, p.id, 5) * TAU;
+        (p.x + a.cos() * 2500.0, p.y + a.sin() * 2500.0)
+    });
+    Some(Vision { at, team: Some(Team::PLAYABLE[pick(3, 4)]), name: Some(THE_DEAD[pick(2, THE_DEAD.len())]) })
+}
+
+/// A whisper to ship `j`, apparently from one of its own side (or from
+/// someone long dead).
+fn whisper(world: &mut World, j: usize) {
+    let mut rng = rand::thread_rng();
+    let q = &world.players[j];
+    let mates: Vec<String> = world.players.iter().filter(|m| m.alive() && m.team == q.team && m.faction.is_none() && m.id != q.id).map(|m| m.tag()).collect();
+    let from = match mates.choose(&mut rng) {
+        Some(m) if rng.gen_bool(0.5) => m.clone(),
+        _ => THE_DEAD.choose(&mut rng).unwrap().to_string(),
+    };
+    let text = WHISPERS.choose(&mut rng).unwrap().to_string();
+    world.outbox.push(Outgoing { dest: Dest::Player(j as u8), msg: ChatMsg { kind: MsgKind::Indiv, from: format!("{}->{}", from, q.tag()), text } });
+}
+
+/// The Event Horizon's hold on every crew: dread builds near it (and near
+/// ships that have come back from the other side, among their own), and
+/// with it come voices, a helm that turns back toward the ship, and in the
+/// end, madness.
+fn haunt(world: &mut World, i: usize, tick: u32) {
+    let mut rng = rand::thread_rng();
+    let (x, y) = (world.players[i].x, world.players[i].y);
+    let carriers: Vec<(Team, u8, f64, f64)> = world.players.iter().filter(|q| q.alive() && tick < q.hellbound_until).map(|q| (q.team, q.id, q.x, q.y)).collect();
+    for j in 0..MAXPLAYER {
+        let q = &world.players[j];
+        if !q.alive() || q.faction.is_some() {
+            continue;
+        }
+        let d = dist(q.x, q.y, x, y);
+        let mut dread = if d < DREAD_R { q.dread + DREAD_RATE * (1.0 - d / DREAD_R) } else { q.dread - DREAD_FADE };
+        if carriers.iter().any(|&(t, c, cx, cy)| t == q.team && c != q.id && dist(q.x, q.y, cx, cy) < HELLBOUND_R) {
+            dread += HELLBOUND_RATE;
+        }
+        let dread = dread.clamp(0.0, 1.0);
+        world.players[j].dread = dread;
+        if dread >= 1.0 {
+            madness(world, j);
+            continue;
+        }
+        if dread >= DREAD_VISIONS && rng.gen_bool((dread / (8.0 * UPS as f64)).min(1.0)) {
+            whisper(world, j);
+        }
+        // "She doesn't want you to leave."
+        let q = &world.players[j];
+        if dread >= DREAD_HELM && (tick + j as u32 * 13) % (4 * UPS as u32) == 0 && q.orbiting.is_none() && rng.gen_bool(dread) {
+            let toward = dir_to(q.x, q.y, x, y);
+            if dir_diff(q.desired_dir, toward).abs() > 24.0 {
+                cmd(world, j, ClientMsg::Course(toward as u8));
+                if rng.gen_bool(0.4) {
+                    world.warn(j as u8, "The helm turns back toward the Event Horizon on its own. It doesn't want you to leave.");
+                }
+            }
+        }
+    }
+}
+
+/// The crew of ship `j` has seen too much: they fire wildly, tear at the
+/// ship (and their own eyes), and come to with the dread a little eased.
+fn madness(world: &mut World, j: usize) {
+    let mut rng = rand::thread_rng();
+    let who = world.players[j].label();
+    world.players[j].dread = 0.5;
+    if world.players[j].shields_up {
+        cmd(world, j, ClientMsg::Shields);
+    }
+    for _ in 0..4 {
+        cmd(world, j, ClientMsg::Torp(rng.gen_range(0..=255)));
+    }
+    let max = world.players[j].stats().max_damage;
+    world.players[j].blind_until = world.tick + HELL_BLIND / 2;
+    world.warn(j as u8, "Your crew has gone mad! They tear at the ship, fire at shadows... and at their own eyes. (blind for 10 s)");
+    world.god(format!("The crew of {} goes mad. \"Liberate tutemet ex inferis.\"", who));
+    world.inflict(j, max * 0.2, None, "tore itself apart in the grip of the Event Horizon".into());
+}
+
+/// The Event Horizon (1997): the lost starship is back from wherever its
+/// gravity drive took it, and something came back with it. It drifts
+/// toward ships, haunting every crew near it, and every so often its
+/// gravity drive spins up and opens a gateway that drags ships through to
+/// the other side. Knock the drive out while it spins up (or destroy the
+/// ship); otherwise, when it has taken enough of us, it goes home.
+fn event_horizon(world: &mut World, e: &mut Event, i: usize, tick: u32) {
+    let id = i as u8;
+    let (x, y) = (world.players[i].x, world.players[i].y);
+    haunt(world, i, tick);
+    let hurt = |p: &Player| p.damage - p.shield;
+    match e.level {
+        SPINNING => {
+            hold(world, i, x, y);
+            world.zones.push(ZoneInfo { kind: ZoneKind::GravityDrive, x: x as i32, y: y as i32, r: GATE_R as i32 });
+            if hurt(&world.players[i]) - e.dwell as f64 / 10.0 >= DRIVE_BREAK {
+                e.level = ADRIFT;
+                e.next_at = tick + DRIVE_EVERY;
+                announce(world, "The Event Horizon's gravity drive is knocked out of alignment! Its rings grind to a halt... for now.");
+            } else if tick >= e.cooldown {
+                e.level = OPEN;
+                e.cooldown = tick + GATE_OPEN;
+                for j in empire_ships_near(world, x, y, GATE_R) {
+                    world.players[j].dread = (world.players[j].dread + 0.2).min(0.95);
+                }
+                announce(world, format!("THE GATEWAY IS OPEN! The Event Horizon's gravity drive has opened a door to the other side near {}. Everything within 10,000 is being dragged in. Get clear!", nearest_planet_name(world, x, y)));
+            }
+        }
+        OPEN => {
+            hold(world, i, x, y);
+            world.zones.push(ZoneInfo { kind: ZoneKind::Gateway, x: x as i32, y: y as i32, r: GATE_R as i32 });
+            gateway(world, e, x, y);
+            if tick >= e.cooldown {
+                e.next_at = tick + DRIVE_EVERY;
+                if e.souls >= HORIZON_TAKES {
+                    e.level = HOME;
+                    world.remove_player(id);
+                } else {
+                    e.level = ADRIFT;
+                    world.alert("The gateway closes. The Event Horizon's rings slow, and it drifts on.");
+                }
+            }
+        }
+        _ => {
+            if tick % 10 == 0 {
+                match nearest_enemy(world, i, 40_000.0, None) {
+                    Some((t, d)) if d > 3000.0 => {
+                        let (tx, ty) = (world.players[t].x, world.players[t].y);
+                        steer_to(world, i, tx, ty, 2);
+                    }
+                    _ => steer_to(world, i, x, y, 0),
+                }
+            }
+            if tick >= e.next_at && !empire_ships_near(world, x, y, GATE_R * 1.4).is_empty() {
+                e.level = SPINNING;
+                e.cooldown = tick + DRIVE_SPIN;
+                e.dwell = (hurt(&world.players[i]) * 10.0) as i32;
+                announce(world, format!("The Event Horizon's GRAVITY DRIVE is spinning up near {}! In 10 seconds it opens a gateway that drags in everything within 10,000. Hit it for {} damage to knock the drive out, or get clear.", nearest_planet_name(world, x, y), DRIVE_BREAK));
+            } else if (tick - e.started) % (40 * UPS as u32) == 40 * UPS as u32 - 1 {
+                world.god("Event Horizon: \"...liberate... tutemet... ex inferis...\" (screaming)");
+            }
+        }
+    }
+}
+
+/// The gateway open: ships within reach are dragged toward it, and those
+/// that reach the core go through to the other side.
+fn gateway(world: &mut World, e: &mut Event, x: f64, y: f64) {
+    for j in empire_ships_near(world, x, y, GATE_R) {
+        let q = &world.players[j];
+        let d = dist(q.x, q.y, x, y).max(1.0);
+        if d < GATE_CORE {
+            let who = q.label();
+            world.send_away(j, super::world::Away::Hell, HELL_TICKS);
+            (world.players[j].x, world.players[j].y) = (x, y);
+            e.souls += 1;
+            world.warn(j as u8, "You're pulled through the gateway. You see... you see... (12 s)");
+            announce(world, format!("{} is dragged through the gateway to the other side!", who));
+            continue;
+        }
+        if q.orbiting.is_none() && !super::terrain::anti_gravity(q.ship) {
+            // From warp 1 at the rim to warp 7 near the core: a ship running
+            // flat out gets clear; one that dawdles doesn't.
+            let pull = (WARP1 + GATE_PULL * (1.0 - d / GATE_R)).min(d - GATE_CORE * 0.5);
+            let q = &mut world.players[j];
+            q.x += (x - q.x) / d * pull;
+            q.y += (y - q.y) / d * pull;
+        }
+    }
+}
+
+/// The Event Horizon gone: crews are free of it (though those on the other
+/// side still have to come back).
+fn exorcise(world: &mut World) {
+    for p in world.players.iter_mut() {
+        p.dread = 0.0;
+        p.hellbound_until = 0;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -5784,7 +6087,7 @@ mod tests {
                         "warm", "TEMPEST", "Tempest", "NOMAD", "Nomad", "Armus", "anite", "hangeling", "Metron", "Pakled", "10-C",
                         "Caretaker", "Horta", "Sphere", "DYSON", "Dyson", "Kzin", "Death Star", "Imperial", "CYGNUS", "Cygnus", "MOON", "Moon", "MONGO", "Ming",
                         "NARADA", "Narada", "TIMESHIP", "Krenim", "Malon", "VAAL", "Vaal", "LANDRU", "Landru", "CONSPIRACY", "bluegill", "DREADNOUGHT", "Dreadnought",
-                        "SCIMITAR", "Scimitar", "CALAMARAIN", "Calamarain", "NAGILUM", "Nagilum", "Kobayashi", "K't'inga"]
+                        "SCIMITAR", "Scimitar", "CALAMARAIN", "Calamarain", "NAGILUM", "Nagilum", "Kobayashi", "K't'inga", "EVENT HORIZON", "Event Horizon"]
                         .iter()
                         .any(|k| m.contains(k))
                 })
@@ -7748,5 +8051,135 @@ mod tests {
         let said = said.expect("a robot talked Nomad down in the end");
         assert!(said >= ROBOT_DELAY, "spoke up after {} s", said / UPS as u32);
     }
-}
 
+    /// A world with the Event Horizon just arrived, and a Federation cruiser
+    /// this far east of it: (world, director, the Event Horizon, the cruiser).
+    fn horizon_world(dx: f64) -> (World, Director, usize, usize) {
+        let mut w = World::new();
+        let mut d = Director::new(AlienConfig { kinds: vec![Faction::EventHorizon], interval: 9999 });
+        d.spawn(&mut w);
+        let h = d.events[0].ships[0] as usize;
+        let id = w.add_player("Miller", false).unwrap();
+        w.join(id, Team::Fed, ShipType::Cruiser).unwrap();
+        let (x, y) = (w.players[h].x, w.players[h].y);
+        let p = &mut w.players[id as usize];
+        (p.x, p.y) = (x + dx, y);
+        (w, d, h, id as usize)
+    }
+
+    fn horizon_run(w: &mut World, d: &mut Director, k: usize, ticks: u32, whispers: &mut usize) {
+        for _ in 0..ticks {
+            d.tick(w);
+            w.tick();
+            *whispers += w.outbox.iter().filter(|o| o.msg.kind == MsgKind::Indiv && matches!(o.dest, Dest::Player(p) if p as usize == k)).count();
+            w.outbox.clear();
+            w.warnings.clear();
+            // Keep the cruiser in one piece: the test is what happens to its crew.
+            w.players[k].damage = 0.0;
+        }
+    }
+
+    #[test]
+    fn the_event_horizon_haunts_crews_near_it() {
+        let (mut w, mut d, h, k) = horizon_world(3000.0);
+        let mut whispers = 0;
+        horizon_run(&mut w, &mut d, k, 10 * UPS as u32, &mut whispers);
+        assert!(w.players[k].dread >= DREAD_VISIONS, "dread builds near it ({:.2})", w.players[k].dread);
+        let f = w.frame_for(k as u8);
+        assert!(f.players.iter().any(|p| p.id == k as u8 && p.flags & crate::proto::pf::HAUNTED != 0), "and the crew knows it");
+        horizon_run(&mut w, &mut d, k, 20 * UPS as u32, &mut whispers);
+        assert!(whispers > 0, "they hear voices");
+        // A friend nearby sometimes shows up as someone else entirely.
+        let id = w.add_player("Starck", false).unwrap();
+        w.join(id, Team::Fed, ShipType::Cruiser).unwrap();
+        (w.players[id as usize].x, w.players[id as usize].y) = (w.players[k].x + 1000.0, w.players[k].y);
+        w.players[k].dread = 0.9;
+        let strange = (0..60 * UPS as u32).step_by(UPS as usize).filter(|&t| {
+            w.tick = t;
+            let f = w.frame_for(k as u8);
+            f.players.iter().any(|p| p.id == id && (p.name != "Starck" || p.team != Team::Fed))
+        });
+        assert!(strange.count() > 0, "visions");
+        // An observer sees what's really there.
+        let f = w.frame_for_observer(Some(k as u8));
+        assert!(f.players.iter().all(|p| p.id != id || (p.name == "Starck" && p.team == Team::Fed)));
+        // Far away, it fades.
+        (w.players[k].x, w.players[k].y) = (w.players[h].x + DREAD_R + 5000.0, w.players[h].y);
+        w.players[k].dread = 0.5;
+        horizon_run(&mut w, &mut d, k, 10 * UPS as u32, &mut whispers);
+        assert!(w.players[k].dread < 0.4);
+    }
+
+    #[test]
+    fn madness_tears_at_the_ship_and_blinds_the_crew() {
+        let (mut w, mut d, _h, k) = horizon_world(2000.0);
+        w.players[k].dread = 0.999;
+        d.tick(&mut w);
+        assert!(w.players[k].damage > 0.0, "the crew tears at the ship");
+        assert!(w.players[k].dread <= 0.51, "and comes to");
+        assert!(w.players[k].blind_until > w.tick);
+    }
+
+    #[test]
+    fn the_gateway_drags_ships_to_the_other_side_and_back() {
+        let (mut w, mut d, h, k) = horizon_world(5000.0);
+        d.events[0].next_at = w.tick;
+        let mut whispers = 0;
+        horizon_run(&mut w, &mut d, k, 2, &mut whispers);
+        assert_eq!(d.events[0].level, SPINNING);
+        assert!(w.zones.iter().any(|z| z.kind == ZoneKind::GravityDrive));
+        horizon_run(&mut w, &mut d, k, DRIVE_SPIN, &mut whispers);
+        assert_eq!(d.events[0].level, OPEN);
+        let mut taken = false;
+        for _ in 0..GATE_OPEN {
+            horizon_run(&mut w, &mut d, k, 1, &mut whispers);
+            if matches!(w.players[k].away, Some((super::super::world::Away::Hell, _))) {
+                taken = true;
+                break;
+            }
+        }
+        assert!(taken, "dragged through the gateway");
+        assert_eq!(d.events[0].souls, 1);
+        horizon_run(&mut w, &mut d, k, HELL_TICKS + 2, &mut whispers);
+        let p = &w.players[k];
+        assert!(p.alive() && p.blind_until > w.tick && p.hellbound_until > w.tick, "back, blind, and not alone");
+        // Blind: nothing beyond arm's length (the Event Horizon included).
+        (w.players[h].x, w.players[h].y) = (w.players[k].x + BLIND_SIGHT + 2000.0, w.players[k].y);
+        let f = w.frame_for(k as u8);
+        assert!(f.players.iter().all(|p| p.id as usize != h), "sees nothing far off");
+        // What came back haunts its own side.
+        let id = w.add_player("Peters", false).unwrap();
+        w.join(id, Team::Fed, ShipType::Cruiser).unwrap();
+        (w.players[h].x, w.players[h].y) = (w.players[k].x + DREAD_R * 3.0, w.players[k].y);
+        (w.players[id as usize].x, w.players[id as usize].y) = (w.players[k].x - 1000.0, w.players[k].y);
+        let before = w.players[id as usize].dread;
+        horizon_run(&mut w, &mut d, k, 3 * UPS as u32, &mut whispers);
+        assert!(w.players[id as usize].dread > before, "its own side feels it");
+    }
+
+    #[test]
+    fn hitting_the_drive_as_it_spins_up_knocks_it_out() {
+        let (mut w, mut d, h, k) = horizon_world(8000.0);
+        d.events[0].next_at = w.tick;
+        let mut whispers = 0;
+        horizon_run(&mut w, &mut d, k, 2, &mut whispers);
+        assert_eq!(d.events[0].level, SPINNING);
+        w.inflict(h, DRIVE_BREAK + 10.0, Some(k as u8), "test".into());
+        horizon_run(&mut w, &mut d, k, 2, &mut whispers);
+        assert_eq!(d.events[0].level, ADRIFT, "the drive is knocked out");
+        horizon_run(&mut w, &mut d, k, DRIVE_SPIN, &mut whispers);
+        assert!(!w.zones.iter().any(|z| z.kind == ZoneKind::Gateway), "and no gateway opens");
+    }
+
+    #[test]
+    fn the_event_horizon_goes_home_when_it_has_taken_enough() {
+        let (mut w, mut d, _h, k) = horizon_world(1500.0);
+        d.events[0].souls = HORIZON_TAKES - 1;
+        d.events[0].next_at = w.tick;
+        let mut whispers = 0;
+        horizon_run(&mut w, &mut d, k, DRIVE_SPIN + GATE_OPEN + 5, &mut whispers);
+        assert!(d.events.is_empty(), "it has gone");
+        assert_eq!(d.log.last(), Some(&(Faction::EventHorizon, Ending::Departed)));
+        assert!(w.players.iter().all(|p| p.dread == 0.0), "and its hold is broken");
+    }
+}

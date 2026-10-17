@@ -17,14 +17,14 @@ that runs entirely inside a terminal window on macOS.
 - **Trek-style ships:** each empire has its own ship designs (Federation saucers and
   nacelles, Klingon D7s and Birds-of-Prey, Romulan warbirds, Orion raiders).
 - **Robots:** AI pilots fight, bomb, carry armies and capture planets, so you can play solo.
-- **Alien incursions** (optional): forty-seven threats, from Khan, the Borg and the
+- **Alien incursions** (optional): forty-eight threats, from Khan, the Borg and the
   planet killer to V'Ger, Species 8472, the Jem'Hadar, General Chang, Q, Nomad, the
   Metrons' arena, a Dyson sphere, a plague of tribbles and the Kobayashi Maru (the
   no-win scenario), drop into the game, and the
   Kzinti arrive with a Ringworld that stays until they lose it. From a galaxy far, far
   away, the Galactic Empire brings the Death Star, the USS Cygnus waits inside the
-  Black Hole, the Moon drifts through with Moonbase Alpha, and Ming the Merciless brings
-  the planet Mongo.
+  Black Hole, the Moon drifts through with Moonbase Alpha, Ming the Merciless brings
+  the planet Mongo, and the Event Horizon comes back from hell with something aboard.
 - **Extras** (optional, each its own server option): career ranks and service records,
   personal orders from command, treaties between empires, 32 kinds of space terrain (10
   in any one galaxy), supply convoys that buy upgrades for your empire, subsystem damage,
@@ -159,7 +159,7 @@ netrek <COMMAND>
 | `-b, --bind <ADDR>` | `0.0.0.0` | Address to bind; use `127.0.0.1` for local-only |
 | `--bots <N>` | `6` | Robot players kept in the game |
 | `-e, --empires <LIST>` | `fed,rom` | Empires the robots play for: `all`, or a comma list such as `fed,rom,kli` |
-| `--aliens [LIST]` | off | Alien incursions: bare `--aliens` for all forty-seven, or a list such as `khan,borg,vger`. See [Alien incursions](#alien-incursions) |
+| `--aliens [LIST]` | off | Alien incursions: bare `--aliens` for all forty-eight, or a list such as `khan,borg,vger`. See [Alien incursions](#alien-incursions) |
 | `--alien-interval <SECS>` | `150` | Average seconds between incursions |
 | `--ranks [FILE]` | off | Career ranks, service records and a leaderboard, saved to `FILE` (default `~/.netrek/service-records.tsv`). See [Extras](#extras) |
 | `--orders` | off | Personal orders from command, with rewards |
@@ -589,6 +589,8 @@ Robots keep the game lively when there aren't enough people. They:
 - finish **Ming the Merciless** the way Flash did: when War Rocket Ajax is disabled, each
   empire's nearest robot gets behind it and **pushes it into Mingo City with a pressor
   beam**
+- fight the **Event Horizon** from a distance, rush it together while its gravity
+  drive spins up, and scatter when the gateway opens
 - answer the **Kobayashi Maru's distress call** straight away: each empire sends its
   nearest robot in good shape to drop its shields beside the Maru and beam survivors
   aboard, and a robot that's hit gets away with whoever it has and lands them on its
@@ -654,7 +656,7 @@ with aliens on the server keeps 8 of them free for incursions (11 with the Kzint
 is announced to everyone as a magenta **ALERT** message with a klaxon.
 
 ```sh
-netrek server --empires all --bots 12 --aliens            # all forty-seven
+netrek server --empires all --bots 12 --aliens            # all forty-eight
 netrek solo --aliens khan,borg,doomsday --alien-interval 90
 ```
 
@@ -707,6 +709,7 @@ netrek solo --aliens khan,borg,doomsday --alien-interval 90
 | `calamarain` | **The Calamarain** (*Déjà Q*, TNG): a living cloud of ionized gas that hunts the **most decorated captain** about (highest rank, then most kills). Any ship it envelops (within 2,500) loses 4 shields a tick, then hull. **Torpedoes do only 10%** (plasma 30%); **phasers burn it** at full strength. 450 hull, 3.5 kills. |
 | `nagilum` | **Nagilum** (*Where Silence Has Lease*, TNG): a hole in space with a mind behind it opens in open space and drifts toward ships. It **pulls in** ships within 7,000, and one that reaches its maw (1,500) is **swallowed for 20 seconds**: out of normal space, unseen and untouchable. Nagilum is studying death: it sends you back thrown clear, with **two systems knocked out** (with `--subsystems`; otherwise 30% hull damage) and a gift (a full tank, +1 kill, or full shields and ablative armour). It can't be harmed. When it has studied four ships it leaves. |
 | `maru` | **The Kobayashi Maru** (*Star Trek II: The Wrath of Khan*): a distress call. "We've struck a gravitic mine and lost all power..." The neutronic fuel carrier is **adrift in the Neutral Zone** (one on the Klingon border if `--terrain` has made one, otherwise on the Klingon border itself), with **381 souls aboard**. It can't move, and **empire fire can't touch it**. When the first ship comes within 8,000, **it's a trap: three Klingon K't'inga battlecruisers decloak** round it, and **another decloaks every 25 seconds** (up to six). They take 8 seconds to come about before opening fire, fight any ship within 10,000 of the Maru, and **75 seconds after the trap is sprung they destroy the Maru** with everyone still aboard. **To rescue survivors, stop within 1,500 of it (warp 2 or less) with your shields down**: your transporters beam over 20 a second, as many as your hold takes (15 for each army it could carry, less any armies aboard: a cruiser takes 150). Then get clear (the Klingons won't leave the Zone) and **orbit any of your own worlds** to land them: **a kill for every 100**. Survivors aboard a ship that's destroyed die with it; the status line shows **SURVIVORS** (**SURV**) while you carry them. It's the **no-win scenario**... unless a captain within 15,000 of the Maru sends a message saying they **don't believe in the no-win scenario**: then the scenario has been **reprogrammed**. The Klingons' **shields drop for good**, no more decloak, the Maru is safe, and that captain earns **3 kills** (a commendation for original thinking). Destroy the K't'ingas and the Maru is towed home with everyone still aboard (a kill per 100 more, to the same captain). Otherwise, once the Maru is gone the Klingons cloak and leave 30 seconds later. |
+| `horizon` | **The Event Horizon** (*Event Horizon*, 1997): the lost starship is back, seven years after its gravity drive opened a door to somewhere outside the universe, and **something came back with it**. It drifts slowly toward ships, broadcasting screams and *"Liberate tutemet ex inferis"*. **Dread** builds in any crew within 12,000 (faster the closer they are; it fades away from it). As it grows they **see things**: on their screen only, ships nearby wear the wrong colours, sit where they aren't and carry the names of the dead (Weir, Claire, Denny...), and now and then the Event Horizon is **right behind them**. They **hear things**: private messages that seem to come from their own teammates. Past half, **the helm turns back toward it on its own**. At full dread **the crew goes mad**: the shields drop, torpedoes fly in every direction, the ship takes 20% hull damage, and the crew is **blind** for 10 seconds. Every 50 seconds (with ships near) its **gravity drive spins up** for 10 seconds, its rings tumbling; **hit it for 120 damage** to knock the drive out. Otherwise **the gateway opens** for 8 seconds and drags in every ship within 10,000 (warp 1 at the rim, warp 7 near the middle), and any ship that reaches the core **goes through to the other side**. It comes back 12 seconds later somewhere else, shields gone and hull torn, **blind for 20 seconds** (*"where we're going, we won't need eyes to see"*: it sees nothing beyond 2,500), and **something comes back with it**: for 45 seconds its own teammates within 4,000 feel the dread too. When the Event Horizon has taken five ships, it **goes home**. 300 shields, 700 hull, 4 kills. |
 
 **How aliens behave:**
 
@@ -728,7 +731,7 @@ netrek solo --aliens khan,borg,doomsday --alien-interval 90
 - **Ending:** an incursion ends when all its ships are destroyed (or V'Ger is joined, the
   probe answered, Q's trial judged, Nomad talked into destroying itself, Armus starved,
   the Metrons' duel decided, first contact made with Species 10-C, peace made with the
-  Horta, the Dyson sphere's hatch destroyed, the Death Star blown up, the Cygnus destroyed, the Moon gone off the far edge, Ming's palace brought down, the Narada destroyed, Vaal silenced, Landru's planet retaken, the bluegill mother killed, the K't'ingas destroyed once the Kobayashi Maru's scenario is reprogrammed, or the last tribble or nanite cleared), or it withdraws after 4–6 minutes. Some leave of their own accord: the Narada after two worlds, the Malon freighter off the far edge, the Dreadnought when it detonates, Nagilum when it has studied four ships, the Klingons 30 seconds after the Kobayashi Maru is gone. The Kzinti
+  Horta, the Dyson sphere's hatch destroyed, the Death Star blown up, the Cygnus destroyed, the Moon gone off the far edge, Ming's palace brought down, the Narada destroyed, Vaal silenced, Landru's planet retaken, the bluegill mother killed, the K't'ingas destroyed once the Kobayashi Maru's scenario is reprogrammed, the Event Horizon destroyed, or the last tribble or nanite cleared), or it withdraws after 4–6 minutes. Some leave of their own accord: the Narada after two worlds, the Malon freighter off the far edge, the Dreadnought when it detonates, Nagilum when it has studied four ships, the Klingons 30 seconds after the Kobayashi Maru is gone, the Event Horizon when it has taken five ships through its gateway. The Kzinti
   are the exception: they stay until they've lost the whole Ringworld. If an empire loses its last planet to aliens, it
   has been wiped out by alien invaders.
 
@@ -782,9 +785,10 @@ netrek solo --aliens khan,borg,doomsday --alien-interval 90
 | Calamarain | electric blue | `CM` | A crackling knot of gas clouds |
 | Nagilum | violet | `NG` | A hole in space, rimmed with faint light, with two eyes in it |
 | Kobayashi Maru | Klingon pink | `KM` | The Maru is civilian white: a bridge on a long spine between three pairs of fuel tanks, one holed by the mine (labelled `Kobayashi Maru`). The K't'ingas are D7-style battlecruisers in pink, a command bulb on a long neck and wings with nacelles (labelled `Klingon`) |
+| Event Horizon | old blood | `EH` | A long dark hull: the bridge module forward, a ribbed corridor spine, and the gravity drive astern (a spiked core in three rings that tumble, faster as the drive spins up) between two red-lit engine pods. The drive spinning up shows as blue-white rings and a dashed circle at the gateway's reach; the open gateway is a red whirlpool draining into a black core |
 
 The status line shows **PREY** when the Hirogen are after you, **TRIB** when you're
-carrying tribbles, **NANO** when you're infected, and **SURV** when you have the Kobayashi Maru's survivors aboard.
+carrying tribbles, **NANO** when you're infected, **SURV** when you have the Kobayashi Maru's survivors aboard, and **DREAD** (status line: **HAUNTED**) when the Event Horizon has its hold on your crew. While you're haunted, don't trust what you see or who's messaging you.
 
 **Alien vessels:**
 
@@ -848,6 +852,7 @@ carrying tribbles, **NANO** when you're infected, and **SURV** when you have the
 | Nagilum | 1 | invulnerable | | pulls in within 7,000, swallows ships for 20 s | – |
 | Kobayashi Maru | 0 | – | – | none; empire fire can't touch it | – |
 | K't'inga battlecruiser | 7 | 120 | 130 | torpedo 30, phaser 65 | 1.8 |
+| Event Horizon | 2 | 300 | 700 | dread within 12,000; gravity drive gateway (10,000) | 4 |
 
 The monsters regenerate quickly. The planet killer only takes 40% of normal weapon
 damage, and a Borg cube's resistance builds as it's hit.
@@ -1011,6 +1016,12 @@ damage, and a Borg cube's resistance builds as it's hit.
   first can grab a load straight away. Don't wait for a full hold: **raise shields and run**
   once you're hit, and land them on your nearest world. Or, like Kirk, refuse to accept
   the no-win scenario.
+- **The Event Horizon:** don't linger near it. Fight from 8,000 or more and swap ships in
+  and out before the dread builds. When the gravity drive spins up, **everyone hits it at
+  once**: 120 damage stops the gateway. If it opens, run at full warp. When you're haunted,
+  remember that the ship behind you might not be there, the friend in enemy colours might
+  be a friend, and that message from your teammate probably isn't from them. If a friend
+  comes back from the other side, give them room.
 - **Borg:** a cube assimilates a ship it holds in its tractor beam within about 2,600
   units for four seconds. Its tractor is far stronger than any pressor, so don't try to
   push free. Instead stay out of range, and if you're caught, run at full speed: cubes
@@ -1534,7 +1545,7 @@ The tests include:
   robot war three times, and checks the robots dealt with it properly most of the time.
   `robot_alien_report` (run with `--ignored --nocapture`, `TRIALS=` and `ONLY=`) prints
   how well robots cope with every incursion.
-- **`every_incursion_plays_out`:** runs each of the forty-seven alien incursions against a
+- **`every_incursion_plays_out`:** runs each of the forty-eight alien incursions against a
   four-empire robot war and checks it arrives, acts and ends cleanly.
 - **Alien mechanics:** `vger_merge_ends_the_threat`, `crystal_shatters_on_resonance`,
   `whale_probe_drains_and_is_answered`, `bioships_only_fear_plasma`,
@@ -1563,6 +1574,10 @@ The tests include:
   `survivors_are_beamed_aboard_with_shields_down_and_landed_at_home`,
   `no_win_the_klingons_keep_coming_and_destroy_the_maru`,
   `kirk_reprograms_the_no_win_scenario`, `robots_rescue_maru_survivors`,
+  `the_event_horizon_haunts_crews_near_it`, `madness_tears_at_the_ship_and_blinds_the_crew`,
+  `the_gateway_drags_ships_to_the_other_side_and_back`,
+  `hitting_the_drive_as_it_spins_up_knocks_it_out`,
+  `the_event_horizon_goes_home_when_it_has_taken_enough`,
   `cygnus_only_comes_with_its_black_hole`, `cygnus_holds_its_spot_and_fires_on_passing_ships`
   and `cygnus_only_hurt_from_inside_the_gravity_well`.
 - **`retaking_alien_planets`:** liberated and resettled planets lose their alien mark.

@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 pub const DEFAULT_PORT: u16 = 2592; // the traditional Netrek port
-pub const PROTOCOL_VERSION: u32 = 27;
+pub const PROTOCOL_VERSION: u32 = 28;
 
 pub const UPS: u64 = 10; // server updates per second, like the original
 pub const GWIDTH: f64 = 100_000.0;
@@ -178,10 +178,12 @@ pub enum Faction {
     /// The Kobayashi Maru and the Klingons waiting for whoever answers its
     /// distress call (Star Trek II: The Wrath of Khan).
     Maru,
+    /// The Event Horizon, back from wherever its gravity drive took it.
+    EventHorizon,
 }
 
 impl Faction {
-    pub const ALL: [Faction; 47] = [
+    pub const ALL: [Faction; 48] = [
         Faction::Khan,
         Faction::Gorn,
         Faction::Tholian,
@@ -229,6 +231,7 @@ impl Faction {
         Faction::Calamarain,
         Faction::Nagilum,
         Faction::Maru,
+        Faction::EventHorizon,
     ];
 
     /// Name used on the command line.
@@ -281,6 +284,7 @@ impl Faction {
             Faction::Calamarain => "calamarain",
             Faction::Nagilum => "nagilum",
             Faction::Maru => "maru",
+            Faction::EventHorizon => "horizon",
         }
     }
 
@@ -333,6 +337,7 @@ impl Faction {
             Faction::Calamarain => "the Calamarain",
             Faction::Nagilum => "Nagilum",
             Faction::Maru => "the Kobayashi Maru",
+            Faction::EventHorizon => "the Event Horizon",
         }
     }
 
@@ -386,6 +391,7 @@ impl Faction {
             Faction::Calamarain => "Calamarain",
             Faction::Nagilum => "Nagilum",
             Faction::Maru => "Klingon",
+            Faction::EventHorizon => "Event Horizon",
         }
     }
 
@@ -439,6 +445,7 @@ impl Faction {
             Faction::Calamarain => "CM",
             Faction::Nagilum => "NG",
             Faction::Maru => "KM",
+            Faction::EventHorizon => "EH",
         }
     }
 
@@ -592,6 +599,8 @@ pub enum ShipType {
     KobayashiMaru,
     /// A Klingon K't'inga battlecruiser, lying in wait for it under cloak.
     Ktinga,
+    /// The Event Horizon: a starship with a gravity drive, and something aboard.
+    EventHorizon,
 }
 
 impl ShipType {
@@ -771,6 +780,7 @@ impl ShipType {
             ShipType::Scimitar => 900.0,
             ShipType::Calamarain | ShipType::Nagilum => 1500.0,
             ShipType::KobayashiMaru => 700.0,
+            ShipType::EventHorizon => 1300.0,
             _ => EXPDIST,
         }
     }
@@ -996,7 +1006,7 @@ pub struct ShipStats {
     pub tract_str: f64,
 }
 
-pub static SHIPS: [ShipStats; 94] = [
+pub static SHIPS: [ShipStats; 95] = [
     ShipStats {
         name: "Scout", abbr: "SC", max_speed: 12, max_shield: 75.0, max_damage: 75.0,
         max_fuel: 5000.0, max_armies: 2, torp_damage: 25.0, torp_speed: 16.0, torp_fuse: 16,
@@ -1842,6 +1852,15 @@ pub static SHIPS: [ShipStats; 94] = [
         recharge: 500.0, repair: 60.0, warp_cost: 0.0, cloak_cost: 0.0, shield_cost: 0.0,
         turns: 170_000.0, acc: 150, dec: 200, wpn_cool: 2.0, egn_cool: 6.0,
         max_etemp: 100_000.0, max_wtemp: 1000.0, mass: 2000.0, tract_range: 1.0, tract_str: 1.0,
+    },
+    ShipStats {
+        name: "Event Horizon", abbr: "EH", max_speed: 2, max_shield: 300.0, max_damage: 700.0,
+        max_fuel: 1_000_000.0, max_armies: 0, torp_damage: 0.0, torp_speed: 10.0, torp_fuse: 30,
+        torp_cost: 0.0, phaser_damage: 0.0, phaser_cost: 0.0,
+        plasma_damage: 0.0, plasma_speed: 0.0, plasma_fuse: 0, plasma_cost: 0.0,
+        recharge: 500.0, repair: 120.0, warp_cost: 0.0, cloak_cost: 0.0, shield_cost: 0.0,
+        turns: 20000.0, acc: 50, dec: 150, wpn_cool: 50.0, egn_cool: 50.0,
+        max_etemp: 100_000.0, max_wtemp: 100_000.0, mass: 10_000_000.0, tract_range: 1.0, tract_str: 1.0,
     },
 ];
 

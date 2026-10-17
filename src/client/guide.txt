@@ -167,6 +167,7 @@ In orbit, w fires at anything hostile in range, special weapons first. Off when 
 @ Landru | Bomb and take its planet
 @ Nagilum | Stay 7,000 away
 @ Kobayashi | Shields down by it, beam, run
+@ Event Horizon | Break its drive; don't linger
 ## Outbreaks
 @ Tribbles | Avoid T planets; Klingons cure
 @ Nanites | d, or a friendly repair world

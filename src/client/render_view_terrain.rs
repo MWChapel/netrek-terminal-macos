@@ -1320,6 +1320,28 @@ pub(super) fn draw_zone_piece(c: &mut Canvas, cam: &Cam, f: &Frame, piece: ZoneP
                     ring3(c, cam, x, y, r * (1.0 - pulse), 400.0 * (1.0 - pulse), 1.5, THALARON, 0.6 * pulse, false);
                     glow3(c, cam, ctr, 1500.0, THALARON, 0.4);
                 }
+                ZoneKind::GravityDrive => {
+                    // The drive's rings tumbling round the core, standing up out of
+                    // the plane, and the reach of the gateway to come.
+                    let pulse = 0.5 + 0.5 * (tick * 0.4).sin();
+                    ring3(c, cam, x, y, r, 0.0, 1.2, DRIVE, 0.35 + 0.3 * pulse, true);
+                    let core = 1100.0;
+                    for (k, ring) in drive_rings(tick, 24).into_iter().enumerate() {
+                        let pts: Vec<V3> = ring.into_iter().map(|(a, b)| if k == 0 { cam.at(x + a * core, y, b * core) } else { cam.at(x + a * core, y + b * core * 0.5, b * core * 0.85) }).collect();
+                        poly3(c, cam, &pts, true, 1.4, DRIVE, 0.85, false);
+                    }
+                    glow3(c, cam, ctr, 1600.0, DRIVE, 0.25 + 0.25 * pulse);
+                }
+                ZoneKind::Gateway => {
+                    // A whirlpool down into the red, everything draining into it.
+                    ring3(c, cam, x, y, r, 0.0, 1.5, GATEWAY, 0.5, false);
+                    for k in 0..5 {
+                        let pts: Vec<V3> = gate_spiral(tick, k, 32).into_iter().enumerate().map(|(i, (a, b))| cam.at(x + a * r, y + b * r, -(i as f32) * 60.0)).collect();
+                        poly3(c, cam, &pts, false, 1.5, GATEWAY, 0.7, false);
+                    }
+                    glow3(c, cam, cam.at(x, y, -2000.0), 1800.0, GATEWAY, 0.6);
+                    label(c, tr, cam, x, y, 1500.0, "Gateway", GATEWAY, fs);
+                }
                 ZoneKind::EnergyDrain => {
                     ring3(c, cam, x, y, r, 0.0, 1.2, VAAL_FIELD, 0.6, true);
                     ring3(c, cam, x, y, r * 0.5, 800.0, 1.0, VAAL_FIELD, 0.3, false);

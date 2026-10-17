@@ -610,6 +610,31 @@ fn kobayashi_maru() -> Vec<Part> {
     v
 }
 
+/// The Event Horizon: the bridge module forward, a long corridor spine
+/// back to the gravity drive (a sphere in three rings, spiked at its core)
+/// and the engine pods astern.
+fn event_horizon() -> Vec<Part> {
+    let mut v = vec![sym(&[(0.0, -1.0), (0.24, -0.84), (0.12, -0.62), (0.0, -0.66)]), capsule((0.0, -0.66), (0.0, 0.2), 0.12)];
+    for k in 0..6 {
+        let y = -0.5 + k as f32 * 0.12;
+        v.push(line((-0.1, y), (0.1, y)));
+    }
+    v.push(circle((0.0, 0.48), 0.3));
+    v.push(Circle { c: (0.0, 0.48), r: 0.38, fill: false });
+    // The spiked core.
+    let core = (0..8)
+        .map(|k| {
+            let a = k as f32 / 8.0 * TAU;
+            let r = if k % 2 == 0 { 0.16 } else { 0.07 };
+            (a.cos() * r, 0.48 + a.sin() * r)
+        })
+        .collect();
+    v.push(Hole { pts: core });
+    v.extend(pair(|s| capsule((s * 0.38, 0.62), (s * 0.38, 0.98), 0.14)));
+    v.extend(pair(|s| line((s * 0.2, 0.7), (s * 0.32, 0.75))));
+    v
+}
+
 /// Alien vessels and monsters.
 fn alien(f: Faction, ship: ShipType) -> Vec<Part> {
     let mut v = Vec::new();
@@ -1085,6 +1110,7 @@ fn alien(f: Faction, ship: ShipType) -> Vec<Part> {
         }
         Faction::Moonbase => return if ship == ShipType::RogueMoon { rogue_moon() } else { eagle() },
         Faction::Maru => return if ship == ShipType::KobayashiMaru { kobayashi_maru() } else { klingon(ShipType::Cruiser) },
+        Faction::EventHorizon => return event_horizon(),
         // Nanites never fly a ship of their own.
         Faction::Nanites => {
             v.push(Circle { c: (0.0, 0.0), r: 0.3, fill: true });
@@ -1106,6 +1132,7 @@ pub fn engine_points(team: Team, ship: ShipType, faction: Option<Faction>) -> Ve
         Some(Faction::Ferengi) => return vec![(0.0, 0.3)],
         Some(Faction::Kzinti) => return vec![(0.35, 0.9), (-0.35, 0.9)],
         Some(Faction::Maru) if ship == ShipType::Ktinga => return engine_points(Team::Kli, ShipType::Cruiser, None),
+        Some(Faction::EventHorizon) => return vec![(0.38, 1.0), (-0.38, 1.0)],
         Some(Faction::Ming) if ship != ShipType::Mongo => return vec![(0.0, 0.98)],
         Some(Faction::Moonbase) if ship == ShipType::Eagle => return vec![(0.08, 0.98), (-0.08, 0.98)],
         Some(Faction::GalacticEmpire) => {
@@ -1284,6 +1311,7 @@ mod tests {
             (Team::Ind, ShipType::Nagilum, Some(Faction::Nagilum)),
             (Team::Ind, ShipType::KobayashiMaru, Some(Faction::Maru)),
             (Team::Ind, ShipType::Ktinga, Some(Faction::Maru)),
+            (Team::Ind, ShipType::EventHorizon, Some(Faction::EventHorizon)),
         ]);
         let cols = rows.iter().map(|r| r.len()).max().unwrap_or(1);
         let mut c = Canvas::new(cols as i32 * cell as i32, rows.len() as i32 * cell as i32, [0.0, 0.0, 0.0]);

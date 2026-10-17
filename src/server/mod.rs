@@ -793,7 +793,7 @@ mod tests {
     /// shows up in a human player's view.
     #[test]
     fn new_aliens_show_up_for_players() {
-        let new = [Faction::Narada, Faction::Krenim, Faction::Malon, Faction::Vaal, Faction::Landru, Faction::Bluegill, Faction::Dreadnought, Faction::Scimitar, Faction::Calamarain, Faction::Nagilum, Faction::Maru];
+        let new = [Faction::Narada, Faction::Krenim, Faction::Malon, Faction::Vaal, Faction::Landru, Faction::Bluegill, Faction::Dreadnought, Faction::Scimitar, Faction::Calamarain, Faction::Nagilum, Faction::Maru, Faction::EventHorizon];
         for kind in new {
             let features = Features { ranks: true, orders: true, diplomacy: true, terrain: true, supply: true, rank_tech: true, subsystems: true, boarding: true, outposts: true };
             let mut world = World::with_features(features);

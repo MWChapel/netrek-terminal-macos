@@ -778,6 +778,45 @@ pub(super) fn alien_model(ship: ShipType, faction: Option<Faction>, tick: u32, f
             m.glows = [(-0.08f32, 0.1f32), (0.08, 0.1), (-0.08, 0.02), (0.08, 0.02)].iter().map(|&(x, h)| ([x, 1.03, h], 0.06, rgb(0xffc080), 0.6)).collect();
             m
         }
+        (Faction::EventHorizon, _) => {
+            // The Event Horizon: the bridge module forward, a long corridor
+            // spine, and the gravity drive astern: a spiked core inside three
+            // rings that never stop turning. Its engines burn red.
+            boxy([0.0, -0.84, 0.0], [0.2, 0.12, 0.07], &mut faces);
+            boxy([0.0, -0.84, 0.0], [0.07, 0.12, 0.2], &mut faces);
+            tube([0.0, -0.72, 0.0], [0.0, 0.2, 0.0], 0.06, 0.06, seg / 3 + 3, (false, false), &mut faces);
+            for k in 0..6 {
+                let y = -0.55 + k as f32 * 0.13;
+                lines.extend(circle_lines([0.0, y, 0.0], [0.0, 1.0, 0.0], 0.085, 8));
+            }
+            let core = [0.0, 0.48, 0.0];
+            ball(core, 0.16, seg / 2 + 2, lv / 2 + 2, &mut faces);
+            // The spikes.
+            for k in 0..8 {
+                let (a, b) = (k as f32 / 8.0 * TAU, if k % 2 == 0 { 0.5f32 } else { -0.5 });
+                let d = [a.cos() * b.cos(), a.sin() * b.cos(), b.sin()];
+                lines.push((add(core, mul(d, 0.16)), add(core, mul(d, 0.3))));
+            }
+            // The rings, tumbling.
+            for k in 0..3 {
+                let a = t * 0.05 * (k + 1) as f32 + k as f32 * TAU / 3.0;
+                let axis = match k {
+                    0 => [a.cos(), 0.0, a.sin()],
+                    1 => [0.0, a.cos(), a.sin()],
+                    _ => [a.cos(), a.sin(), 0.0],
+                };
+                lines.extend(circle_lines(core, axis, 0.3 + k as f32 * 0.04, 24));
+            }
+            for sd in [-1.0f32, 1.0] {
+                tube([sd * 0.36, 0.6, 0.0], [sd * 0.36, 0.98, 0.0], 0.07, 0.09, seg / 3 + 3, (true, true), &mut faces);
+                tube([sd * 0.08, 0.66, 0.0], [sd * 0.3, 0.74, 0.0], 0.02, 0.02, 4, (false, false), &mut faces);
+            }
+            let mut m = Model::from_mesh((faces, lines));
+            m.hull = Some(rgb(0x55575c));
+            m.line_col = Some(rgb(0x9ec4ff));
+            m.glows = vec![(core, 0.22, rgb(0xff4030), 0.5), ([0.36, 1.0, 0.0], 0.08, rgb(0xff6040), 0.6), ([-0.36, 1.0, 0.0], 0.08, rgb(0xff6040), 0.6)];
+            m
+        }
         (Faction::Tempest, _) => {
             // The Tempest's creatures stay arcade sprites: glowing vector
             // shapes, standing upright to face you.
