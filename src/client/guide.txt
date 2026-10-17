@@ -98,7 +98,8 @@ From Captain up you're worth +0.5 kill per rank to whoever gets you. /tech lists
 - Slipstreams add warp 3; wormholes cross the galaxy.
 - Asteroids and planetoids soak up torpedoes: cover.
 - Stars, comet tails and derelicts refuel and repair.
-- Avoid the black hole, pulsar, minefields, Metreon gas and the galactic barrier.
+- Avoid the black holes, pulsar, minefields, Metreon gas and the galactic barrier.
+- The Black Hole's warning gives the warp you need to break free.
 ## Supplies
 Escort your freighter, raid theirs. /upgrade shields|repair|torps|phasers|engines (10, 20, 30 supplies).
 ## Orders
@@ -138,6 +139,7 @@ In orbit, w fires at anything hostile in range, special weapons first. Off when 
 @ Tempest | Shoot flippers; d to Superzap
 @ Death Star | Scout/DD torp from dead astern
 @ Star Destroyers | Attack from behind: 2x
+@ Cygnus | Only hurt from inside the well
 ## Don't shoot
 @ V'Ger | Park at the core 10 s
 @ Whale probe | Bring it 2 armies

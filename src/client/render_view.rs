@@ -286,7 +286,12 @@ pub(super) fn viewscreen(tr: &TextRenderer, f: Option<&Frame>, slot: u8, watch: 
         let a = cam.local(ph.x1 as f32, ph.y1 as f32);
         let b = cam.local(ph.x2 as f32, ph.y2 as f32);
         let Some((p, q)) = cam.segment(a, b) else { continue };
-        let col = f.players.iter().find(|p| p.id == ph.owner).map_or(WHITE, player_rgb);
+        let col = match f.players.iter().find(|p| p.id == ph.owner) {
+            Some(p) if p.ship == ShipType::DeathStar => rgb(0x40ff60),
+            Some(p) if p.ship == ShipType::CygnusShip => rgb(0xff3030),
+            Some(p) => player_rgb(p),
+            None => WHITE,
+        };
         c.line(p.0, p.1, q.0, q.1, 6.0, col, 0.25, 0.0);
         c.line(p.0, p.1, q.0, q.1, 1.6, mix(col, WHITE, 0.7), 0.95, 0.0);
         if ph.hit && b.1 > NEAR {
@@ -1063,7 +1068,7 @@ mod tests {
             (S::ArmusSlick, F::Armus), (S::ChangelingShip, F::Changeling), (S::MetronPresence, F::Metrons), (S::PakledClunker, F::Pakleds),
             (S::DarkMatterAnomaly, F::TenC), (S::CaretakerArray, F::Caretaker), (S::Horta, F::Horta), (S::DelphicSphere, F::SphereBuilders),
             (S::DysonHatch, F::Dyson), (S::KzintiDreadnought, F::Kzinti), (S::KzintiCruiser, F::Kzinti), (S::KzintiStriker, F::Kzinti),
-            (S::DeathStar, F::GalacticEmpire), (S::StarDestroyer, F::GalacticEmpire), (S::TieFighter, F::GalacticEmpire), (S::TieAdvanced, F::GalacticEmpire),
+            (S::DeathStar, F::GalacticEmpire), (S::StarDestroyer, F::GalacticEmpire), (S::TieFighter, F::GalacticEmpire), (S::TieAdvanced, F::GalacticEmpire), (S::CygnusShip, F::Cygnus),
             (S::TempestCore, F::Tempest), (S::Flipper, F::Tempest), (S::Tanker, F::Tempest), (S::Pulsar, F::Tempest), (S::Fuseball, F::Tempest),
         ];
         let (pw, ph, cols) = (240, 160, 7);

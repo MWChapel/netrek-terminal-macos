@@ -14,6 +14,8 @@ use std::f32::consts::{PI, TAU};
 
 /// How far the viewscreen sees terrain.
 const RANGE: f32 = 45_000.0;
+/// How deep the Black Hole's whirlpool funnels below the plane.
+const FUNNEL: f32 = 5000.0;
 
 /// Whether `t` is a stretch between two points rather than a round patch.
 fn is_segment(t: &TerrainInfo) -> bool {
@@ -262,6 +264,58 @@ pub(super) fn draw(c: &mut Canvas, cam: &Cam, t: &TerrainInfo, tick: u32, tr: &T
             }
             disc(c, true);
             label(c, tr, cam, x, y, 2200.0, &t.name, ACCRETION, fs);
+        }
+        TerrainKind::GreatBlackHole => {
+            // A vast whirlpool: luminous arms spiralling down a funnel into
+            // the black eye far below the plane.
+            ring3(c, cam, x, y, r, 0.0, 1.2, MAELSTROM, 0.3, true);
+            let funnel = |s: f32| -FUNNEL * s.powi(3);
+            let eye = cam.at(x, y, funnel(1.0));
+            glow3(c, cam, eye, r * 0.8, MAELSTROM, 0.25);
+            let n = 70;
+            for k in 0..ARMS {
+                for st in 0..3 {
+                    let pts: Vec<(V3, f32)> = (0..=n)
+                        .map(|j| {
+                            let s = j as f32 / n as f32;
+                            let (a, d) = arm_point(k, s, r, tickf, sd);
+                            let a = a - st as f32 * 0.07;
+                            (cam.at(x + a.cos() * d * r, y + a.sin() * d * r, funnel(s)), s)
+                        })
+                        .collect();
+                    for j in 0..n {
+                        let ((p, s), (q, _)) = (pts[j], pts[j + 1]);
+                        let Some((a2, b2)) = cam.segment3(p, q) else { continue };
+                        let z = ((p[2] + q[2]) / 2.0).max(NEAR);
+                        let col = mix(MAELSTROM, MAELSTROM_HOT, s.powf(1.5));
+                        let a = (0.2 + 0.7 * s) * if st == 0 { 1.0 } else { 0.4 };
+                        let wdt = ((120.0 + 380.0 * s * (1.0 - s)) / z * cam.focal).clamp(0.7, 9.0);
+                        c.line(a2.0, a2.1, b2.0, b2.1, wdt * 3.0, col, a * 0.15, 0.0);
+                        c.line(a2.0, a2.1, b2.0, b2.1, wdt, col, a, 0.0);
+                    }
+                }
+            }
+            // Debris whirling down the arms.
+            for k in 0..40u64 {
+                let s = ((rnd(sd, k + 900) + tickf * 0.004 * (1.0 + rnd(sd, k + 950))) % 1.0).powf(0.8);
+                let (a, d) = arm_point(k as usize % ARMS, s, r, tickf, sd);
+                let a = a - rnd(sd, k + 990) * 0.25;
+                glow3(c, cam, cam.at(x + a.cos() * d * r, y + a.sin() * d * r, funnel(s)), 150.0 + 250.0 * s, MAELSTROM_HOT, 0.8);
+            }
+            // The eye: a black event horizon ringed with light.
+            glow3(c, cam, eye, GREAT_HORIZON * 3.0, MAELSTROM_HOT, 0.6);
+            glow3(c, cam, eye, GREAT_HORIZON * 1.6, WHITE, 0.45);
+            let rim: Vec<V3> = (0..48)
+                .map(|k| {
+                    let a = k as f32 / 48.0 * TAU;
+                    cam.at(x + a.cos() * GREAT_HORIZON, y + a.sin() * GREAT_HORIZON, funnel(1.0))
+                })
+                .collect();
+            if let Some(q) = cam.clip_poly(&rim) {
+                c.fill_poly(&q, [0.0, 0.0, 0.0], 1.0);
+            }
+            poly3(c, cam, &rim, true, 2.0, mix(MAELSTROM_HOT, WHITE, 0.5), 0.95, false);
+            label(c, tr, cam, x, y, 2500.0, &t.name, MAELSTROM_HOT, fs);
         }
         TerrainKind::Pulsar => {
             ring3(c, cam, x, y, r, 0.0, 1.0, PULSAR, 0.2, true);
@@ -643,6 +697,7 @@ pub(super) fn draw_inside(c: &mut Canvas, cam: &Cam, f: &Frame, w: f32, h: f32, 
             TerrainKind::Magnetar => (MAGNETAR, 0.05 + 0.1 * deep),
             TerrainKind::GravitonEddy => (EDDY, 0.05),
             TerrainKind::Minefield => (MINES, 0.04),
+            TerrainKind::GreatBlackHole => (MAELSTROM, 0.04 + 0.2 * deep * deep),
             _ => continue,
         };
         c.fill_rect(0.0, 0.0, w, h, col, a);
@@ -1271,6 +1326,40 @@ mod tests {
 
     /// Renders the Dyson sphere from outside and inside, and the other
     /// alien zones, into $TMPDIR/netrek-view-zones.ppm.
+    #[test]
+    fn view_black_hole_gallery() {
+        use crate::consts::Faction;
+        let tr = TextRenderer::load();
+        let mut f = crate::server::world::World::new().frame_for(0);
+        f.tick = 120;
+        f.planets.clear();
+        let (cx, cy, r) = (50_000i32, 50_000i32, 12_000i32);
+        f.terrain = vec![TerrainInfo { kind: TerrainKind::GreatBlackHole, x: cx, y: cy, r, x2: cx, y2: cy, phase: 0, name: "the Black Hole".into() }];
+        let cyg = (cx - 5400, cy);
+        // (camera x, y, heading)
+        let views: Vec<(i32, i32, u8)> = vec![(cx, cy + 30_000, 0), (cx, cy + 15_000, 0), (cx - 5400, cy + 4000, 0), (cx + 3000, cy + 3000, 200)];
+        let (pw, ph) = (480, 220);
+        let mut c = Canvas::new(pw * 2 + 6, (ph + 6) * 2, [30.0, 30.0, 30.0]);
+        for (k, (x, y, dir)) in views.into_iter().enumerate() {
+            let me = PlayerInfo {
+                id: 0, name: "me".into(), team: Team::Fed, ship: ShipType::Cruiser, state: PState::Alive, x, y, dir, speed: 0,
+                flags: 0, kills: 0.0, armies: 0, tractor_target: None, fuzzy: false, explode_frame: 0, faction: None, rank: None,
+            };
+            let cygnus = PlayerInfo { id: 1, name: "Cygnus".into(), team: Team::Ind, ship: ShipType::CygnusShip, x: cyg.0, y: cyg.1, dir: 64, faction: Some(Faction::Cygnus), ..me.clone() };
+            f.players = vec![me, cygnus];
+            let img = super::super::render_view::viewscreen(&tr, Some(&f), 0, None, 12.0, pw, ph);
+            c.draw_canvas(&img, (k as i32 % 2) * (pw + 6), (k as i32 / 2) * (ph + 6));
+        }
+        let mut out = format!("P6 {} {} 255\n", c.w, c.h).into_bytes();
+        for y in 0..c.h {
+            for x in 0..c.w {
+                let p = c.get(x, y);
+                out.extend([p[0] as u8, p[1] as u8, p[2] as u8]);
+            }
+        }
+        std::fs::write(std::env::temp_dir().join("netrek-view-hole.ppm"), out).unwrap();
+    }
+
     #[test]
     fn view_web_gallery() {
         use crate::proto::WebInfo;

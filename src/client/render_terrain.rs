@@ -32,6 +32,26 @@ pub(super) const PLANETOID: Rgb = rgb(0x9a9088);
 pub(super) const BARRIER: Rgb = rgb(0xb070ff);
 pub(super) const RIFT: Rgb = rgb(0xff90d0);
 pub(super) const STATION: Rgb = rgb(0xc0c8d8);
+/// The Black Hole's whirlpool: deep violet at the edge, ice blue-white at
+/// the eye.
+pub(super) const MAELSTROM: Rgb = rgb(0x6a4cff);
+pub(super) const MAELSTROM_HOT: Rgb = rgb(0xb8e8ff);
+/// Spiral arms in the Black Hole's whirlpool, and how many turns each makes.
+pub(super) const ARMS: usize = 5;
+pub(super) const ARM_TURNS: f32 = 0.85;
+/// The Black Hole's event horizon (matches the server).
+pub(super) const GREAT_HORIZON: f32 = 1500.0;
+
+/// A point on spiral arm `k` of the Black Hole's whirlpool, `s` of the way
+/// in from the edge (0) to the event horizon (1): (angle, distance from the
+/// centre, as a fraction of `r`). The whirlpool turns anticlockwise on the
+/// map, and the arms trail behind, winding tighter as they fall in.
+pub(super) fn arm_point(k: usize, s: f32, r: f32, tick: f32, sd: u64) -> (f32, f32) {
+    let h = GREAT_HORIZON / r;
+    let d = 1.0 - s * (1.0 - h);
+    let a = rnd(sd, k as u64) * 0.6 + k as f32 * TAU / ARMS as f32 - tick * 0.03 - ARM_TURNS * TAU * s * s.sqrt();
+    (a, d)
+}
 
 /// Pulsar cycle length in ticks (matches the server).
 pub(super) const PULSAR_PERIOD: f32 = 100.0;
@@ -162,6 +182,57 @@ pub fn draw_vec(
                 px.disc(x, y, u(700.0).max(2.0), [0.0, 0.0, 0.0], 1.0);
                 px.ring(x, y, u(700.0).max(2.0), 1.0, rgb(0xb070ff), 0.9);
                 label(px, x, y - r * 0.55, ACCRETION);
+            }
+            TerrainKind::GreatBlackHole => {
+                let tk = tick;
+                px.glow(x, y, r * 1.05, MAELSTROM, if detail { 0.16 } else { 0.22 });
+                if detail {
+                    px.ring_dashed(x, y, r, 1.0, MAELSTROM, 0.3, 8.0);
+                }
+                // The whirlpool: luminous arms spiralling into the eye.
+                let n = if detail { 60 } else { 18 };
+                let strands = if detail { 3 } else { 1 };
+                for k in 0..ARMS {
+                    for st in 0..strands {
+                        let off = st as f32 * 0.07;
+                        let pts: Vec<(f32, f32, f32)> = (0..=n)
+                            .map(|j| {
+                                let s = j as f32 / n as f32;
+                                let (a, d) = arm_point(k, s, t.r as f32, tk, sd);
+                                let a = a - off;
+                                (x + a.cos() * d * r, y + a.sin() * d * r, s)
+                            })
+                            .collect();
+                        for j in 0..n {
+                            let (p, q) = (pts[j], pts[j + 1]);
+                            let s = p.2;
+                            let col = mix(MAELSTROM, MAELSTROM_HOT, s.powf(1.5));
+                            let a = (0.15 + 0.75 * s) * if st == 0 { 1.0 } else { 0.45 };
+                            let wdt = if detail { 1.0 + 3.0 * s * (1.0 - s) * 2.0 } else { 1.2 };
+                            px.line(p.0, p.1, q.0, q.1, wdt * 3.0, col, a * 0.18, 0.0);
+                            px.line(p.0, p.1, q.0, q.1, wdt, col, a, 0.0);
+                        }
+                    }
+                }
+                // Debris whirling in: sparks travelling down the arms.
+                if detail {
+                    for k in 0..24u64 {
+                        let s = ((rnd(sd, k + 900) + tk * 0.004 * (1.0 + rnd(sd, k + 950))) % 1.0).powf(0.8);
+                        let (a, d) = arm_point(k as usize % ARMS, s, t.r as f32, tk, sd);
+                        let a = a - rnd(sd, k + 990) * 0.25;
+                        px.glow(x + a.cos() * d * r, y + a.sin() * d * r, 2.0 + 3.0 * s, MAELSTROM_HOT, 0.7);
+                    }
+                }
+                // The eye: a black event horizon in a blaze of light.
+                let eye = u(GREAT_HORIZON as f64).max(2.5);
+                px.glow(x, y, eye * 3.2, MAELSTROM_HOT, 0.55);
+                px.glow(x, y, eye * 1.8, WHITE, 0.5);
+                px.disc(x, y, eye, [0.0, 0.0, 0.0], 1.0);
+                px.ring(x, y, eye, 1.6, mix(MAELSTROM_HOT, WHITE, 0.5), 0.95);
+                label(px, x, y - r * 0.6, MAELSTROM_HOT);
+                if !detail {
+                    px.text_centered(tr, x, y + eye + fs * 1.2, "BLACK HOLE", fs * 0.75, scale(MAELSTROM_HOT, 0.8));
+                }
             }
             TerrainKind::Pulsar => {
                 let since = PULSAR_PERIOD - t.phase as f32;
@@ -745,6 +816,24 @@ pub fn draw_braille(
                 b.circle(x, y, (700.0 / per_dot).max(1.0), Color::Magenta, 1);
                 name(x, y - r * 0.5, t, Color::DarkYellow);
             }
+            TerrainKind::GreatBlackHole => {
+                b.arc(x, y, r, Color::DarkBlue, 0, 3);
+                let n = if detail { 40 } else { 12 };
+                for k in 0..ARMS {
+                    let pts: Vec<(f64, f64)> = (0..=n)
+                        .map(|j| {
+                            let (a, d) = arm_point(k, j as f32 / n as f32, t.r as f32, tick as f32, sd);
+                            (x + a.cos() as f64 * d as f64 * r, y + a.sin() as f64 * d as f64 * r)
+                        })
+                        .collect();
+                    for j in 0..n {
+                        let col = if j > n * 2 / 3 { Color::Cyan } else if j > n / 3 { Color::Blue } else { Color::DarkMagenta };
+                        b.line(pts[j].0, pts[j].1, pts[j + 1].0, pts[j + 1].1, col, 1);
+                    }
+                }
+                b.circle(x, y, (GREAT_HORIZON as f64 / per_dot).max(1.5), Color::White, 2);
+                name(x, y - r * 0.6, t, Color::Cyan);
+            }
             TerrainKind::Pulsar => {
                 b.disc(x, y, (300.0 / per_dot).max(0.8), Color::White, 2);
                 if detail {
@@ -892,6 +981,7 @@ mod tests {
                     TerrainKind::Planetoid => 1500.0,
                     TerrainKind::AbandonedStation => 1500.0,
                     TerrainKind::FluidicRift => 700.0,
+                    TerrainKind::GreatBlackHole => 7500.0,
                     TerrainKind::GalacticBarrier => 350.0,
                     TerrainKind::Derelict => 900.0,
                     TerrainKind::Wormhole => 600.0,

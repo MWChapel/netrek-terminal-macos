@@ -33,7 +33,7 @@ enum Cmd {
         /// (khan, gorn, tholian, fesarius, mirror, doomsday, amoeba, borg, vger, crystal,
         /// probe, 8472, jemhadar, tribbles, chang, hirogen, q, ferengi, swarm, tempest,
         /// nomad, armus, nanites, changeling, metrons, pakled, 10c, caretaker, horta, spheres,
-        /// dyson, kzinti, empire)
+        /// dyson, kzinti, empire, cygnus)
         #[arg(long, num_args = 0..=1, default_missing_value = "all", value_parser = parse_aliens)]
         aliens: Option<Aliens>,
         /// Average seconds between alien incursions
@@ -77,7 +77,7 @@ enum Cmd {
         /// (khan, gorn, tholian, fesarius, mirror, doomsday, amoeba, borg, vger, crystal,
         /// probe, 8472, jemhadar, tribbles, chang, hirogen, q, ferengi, swarm, tempest,
         /// nomad, armus, nanites, changeling, metrons, pakled, 10c, caretaker, horta, spheres,
-        /// dyson, kzinti, empire)
+        /// dyson, kzinti, empire, cygnus)
         #[arg(long, num_args = 0..=1, default_missing_value = "all", value_parser = parse_aliens)]
         aliens: Option<Aliens>,
         /// Average seconds between alien incursions
@@ -103,7 +103,7 @@ struct Extras {
     /// Treaties between empires (/treaty, /break, /treaties)
     #[arg(long)]
     diplomacy: bool,
-    /// Space terrain: 10 of 21 kinds per galaxy, picked at random (nebulae, black hole,
+    /// Space terrain: 10 of 22 kinds per galaxy, picked at random (nebulae, black hole,
     /// wormhole, minefields, magnetar, galactic barrier, fluidic rift and more)
     #[arg(long)]
     terrain: bool,

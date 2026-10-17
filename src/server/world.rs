@@ -2232,6 +2232,21 @@ impl World {
         if p.ship == ShipType::TieAdvanced && rand::thread_rng().gen_bool(0.25) {
             return;
         }
+        // The Cygnus hangs inside the Black Hole's gravity well, which bends
+        // away any fire from outside it.
+        if self.players[i].ship == ShipType::CygnusShip {
+            let inside = killer.map_or(false, |k| {
+                let q = &self.players[k as usize];
+                super::terrain::in_great_hole(self, q.x, q.y).is_some()
+            });
+            if !inside {
+                if let Some(k) = killer.filter(|&k| self.players[k as usize].faction.is_none()) {
+                    self.warn(k, "The Black Hole's gravity bends your fire away from the Cygnus: get inside its gravity well to hurt it");
+                }
+                return;
+            }
+        }
+        let p = &self.players[i];
         // The Death Star's one weakness: a torpedo down the thermal exhaust
         // port, from a small ship in the trench behind it.
         if p.ship == ShipType::DeathStar && kind == HitKind::Photon {

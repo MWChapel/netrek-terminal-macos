@@ -128,7 +128,7 @@ fn duration(kind: Faction) -> u32 {
     let mins = match kind {
         Faction::Khan | Faction::Gorn | Faction::Mirror | Faction::Tholian | Faction::GalacticEmpire => 6,
         Faction::Borg | Faction::Vger | Faction::Species8472 | Faction::Tribbles | Faction::Hirogen => 5,
-        Faction::TenC | Faction::SphereBuilders | Faction::Dyson => 5,
+        Faction::TenC | Faction::SphereBuilders | Faction::Dyson | Faction::Cygnus => 5,
         _ => 4,
     };
     mins * 60 * UPS as u32
@@ -263,6 +263,10 @@ impl Director {
         // The Kzinti only ever come once: they stay until the Ringworld breaks free.
         if self.kzinti.is_some() || self.ring_gone {
             active.push(Faction::Kzinti);
+        }
+        // The Cygnus only turns up where there's a Black Hole for it to hang in.
+        if !world.terrain.iter().any(|t| t.kind == TerrainKind::GreatBlackHole) {
+            active.push(Faction::Cygnus);
         }
         let choices: Vec<Faction> = self.cfg.kinds.iter().copied().filter(|k| !active.contains(k)).collect();
         let Some(&kind) = choices.choose(&mut rng) else { return };
@@ -669,6 +673,25 @@ impl Director {
                     name
                 )
             }
+            Faction::Cygnus => {
+                let Some(hole) = world.terrain.iter().find(|t| t.kind == TerrainKind::GreatBlackHole) else { return };
+                let (hx, hy, hr) = (hole.x, hole.y, hole.r);
+                // Hanging well inside the gravity well, held there by its
+                // anti-gravity field, broadside on to the whirlpool.
+                let a = rng.gen_range(0.0..TAU);
+                let at = (hx + a.cos() * hr * CYGNUS_DEPTH, hy + a.sin() * hr * CYGNUS_DEPTH);
+                spawn(world, "Cygnus", ShipType::CygnusShip, at, 30.0);
+                let Some(&c) = ships.first() else { return };
+                let p = &mut world.players[c as usize];
+                (p.x, p.y) = at;
+                p.dir = (dir_to(hx, hy, at.0, at.1) + 64.0).rem_euclid(256.0);
+                p.desired_dir = p.dir;
+                waypoint = at;
+                format!(
+                    "The USS CYGNUS, lost for twenty years, has been found hanging at the edge of the Black Hole near {}, held there by Dr. Hans Reinhardt's anti-gravity field! Its laser batteries and torpedoes fire on any ship that passes. The Black Hole's gravity bends away all fire from outside its well: to destroy the Cygnus you must go in after it.",
+                    nearest_planet_name(world, hx, hy)
+                )
+            }
             Faction::GalacticEmpire => {
                 let Some(k) = most_populous(world) else { return };
                 let (px, py, name) = (world.planets[k].x, world.planets[k].y, world.planets[k].name);
@@ -787,6 +810,7 @@ fn defeat_text(kind: Faction) -> String {
         Faction::Horta => "The Horta is no longer a threat to the colonies.".into(),
         Faction::SphereBuilders => "The last Delphic sphere is destroyed, and the anomalies around it fade.".into(),
         Faction::Dyson => "The Dyson sphere's hatch emitter is destroyed! Its doors jam open and every ship inside flies free.".into(),
+        Faction::Cygnus => "The USS Cygnus breaks up and tumbles over the event horizon. Reinhardt has gone where no one can follow.".into(),
         Faction::Kzinti => "The Kzinti fleet is destroyed... for now.".into(),
         Faction::GalacticEmpire => "Great shot, that was one in a million! The Death Star explodes in a chain reaction, and what's left of the Imperial fleet jumps to hyperspace.".into(),
     }
@@ -825,6 +849,7 @@ fn withdraw_text(kind: Faction) -> String {
         Faction::Horta => "The Horta burrows deep into the rock and falls silent.".into(),
         Faction::SphereBuilders => "The Sphere Builders withdraw their spheres, and the anomalies fade.".into(),
         Faction::Dyson => "The Dyson sphere's automated systems go dormant. Its hatch swings open and the trapped ships fly free.".into(),
+        Faction::Cygnus => "The USS Cygnus drifts over the event horizon and vanishes into the Black Hole. Reinhardt has gone to see what lies beyond.".into(),
         Faction::Kzinti => "The Kzinti never withdraw.".into(),
         Faction::GalacticEmpire => "The Death Star and its fleet jump to hyperspace. \"This will be a day long remembered.\"".into(),
     }
@@ -976,6 +1001,7 @@ fn run_event(world: &mut World, e: &mut Event) {
             Faction::SphereBuilders => sphere(world, i, n, tick),
             Faction::Dyson => dyson(world, e, i, tick),
             Faction::Kzinti => {}
+            Faction::Cygnus => cygnus(world, e, i, tick),
             Faction::GalacticEmpire => match world.players[i].ship {
                 ShipType::DeathStar => death_star(world, e, i, tick),
                 ShipType::StarDestroyer => star_destroyer(world, e, i, tick),
@@ -3226,6 +3252,41 @@ const TIE_CAP: usize = 6;
 const TIE_LAUNCH: u32 = 15 * UPS as u32;
 
 /// The empires' world with the most armies.
+/// How far into the Black Hole's gravity well the Cygnus hangs (a fraction
+/// of its radius), and how far its guns reach.
+pub const CYGNUS_DEPTH: f64 = 0.45;
+const CYGNUS_LASER: f64 = 7000.0;
+const CYGNUS_TORP: f64 = 11_000.0;
+
+/// The USS Cygnus (*The Black Hole*): Reinhardt's ship hangs inside the
+/// Black Hole's gravity well and never moves from its spot. Its sentry
+/// robots' laser batteries and its torpedo tubes fire on any ship passing
+/// by. (Fire from outside the well can't touch it: see `World::inflict`.)
+fn cygnus(world: &mut World, e: &mut Event, i: usize, tick: u32) {
+    let mut rng = rand::thread_rng();
+    let p = &mut world.players[i];
+    (p.x, p.y) = e.waypoint;
+    (p.speed, p.desired_speed) = (0, 0);
+    p.lock = Lock::None;
+    let (x, y) = (p.x, p.y);
+    // The laser batteries: a quick red bolt at the nearest ship.
+    if tick % 12 == 0 {
+        if let Some((j, _)) = nearest_enemy(world, i, CYGNUS_LASER, None) {
+            beam(world, i, j, 18.0, "was cut down by the Cygnus's laser batteries");
+        }
+    }
+    // Torpedoes at anything further out (the Black Hole bends them too).
+    if tick % 7 == 0 && rng.gen_bool(0.6) {
+        if let Some((j, _)) = nearest_enemy(world, i, CYGNUS_TORP, None) {
+            let q = &world.players[j];
+            let (vx, vy) = dir_vec(q.dir);
+            let v = q.speed as f64 * WARP1;
+            let aim = lead(x, y, q.x, q.y, vx * v, vy * v, world.players[i].stats().torp_speed * WARP1);
+            cmd(world, i, ClientMsg::Torp((aim + rng.gen_range(-4.0..4.0)).rem_euclid(256.0) as u8));
+        }
+    }
+}
+
 fn most_populous(world: &World) -> Option<usize> {
     (0..world.planets.len())
         .filter(|&k| Team::PLAYABLE.contains(&world.planets[k].owner))
@@ -3848,6 +3909,9 @@ mod tests {
                     bots.push(bot::spawn(&mut world, t).unwrap());
                 }
             }
+            if kind == Faction::Cygnus {
+                world.terrain.push(super::super::terrain::tests_make(TerrainKind::GreatBlackHole, 50_000.0, 50_000.0, super::super::terrain::GREAT_HOLE_R));
+            }
             let mut director = Director::new(AlienConfig { kinds: vec![kind], interval: 30 });
             director.next_spawn = 5;
             let mut log = Vec::new();
@@ -3870,7 +3934,7 @@ mod tests {
                     ["Khan", "Gorn", "Tholian", "Fesarius", "Balok", "Terran", "planet killer", "amoeba", "Borg", "V'Ger",
                         "Crystalline", "probe", "8472", "Jem'Hadar", "wormhole", "ribble", "Chang", "Hirogen", "Q", "Ferengi",
                         "warm", "TEMPEST", "Tempest", "NOMAD", "Nomad", "Armus", "anite", "hangeling", "Metron", "Pakled", "10-C",
-                        "Caretaker", "Horta", "Sphere", "DYSON", "Dyson", "Kzin", "Death Star", "Imperial"]
+                        "Caretaker", "Horta", "Sphere", "DYSON", "Dyson", "Kzin", "Death Star", "Imperial", "CYGNUS", "Cygnus"]
                         .iter()
                         .any(|k| m.contains(k))
                 })
@@ -3924,6 +3988,65 @@ mod tests {
     }
 
     /// Set up a world with one Federation cruiser (slot returned) near (x, y).
+    /// A world with the Black Hole at the centre and the Cygnus in it.
+    fn cygnus_world() -> (World, Director, usize) {
+        let mut w = World::new();
+        w.terrain.push(super::super::terrain::tests_make(TerrainKind::GreatBlackHole, 50_000.0, 50_000.0, super::super::terrain::GREAT_HOLE_R));
+        let mut d = Director::new(AlienConfig { kinds: vec![Faction::Cygnus], interval: 9999 });
+        d.spawn(&mut w);
+        let c = d.events[0].ships[0] as usize;
+        (w, d, c)
+    }
+
+    #[test]
+    fn cygnus_only_comes_with_its_black_hole() {
+        let mut w = World::new();
+        let mut d = Director::new(AlienConfig { kinds: vec![Faction::Cygnus], interval: 9999 });
+        d.spawn(&mut w);
+        assert!(d.events.is_empty(), "no Black Hole, no Cygnus");
+        let (w, d, c) = cygnus_world();
+        assert_eq!(d.events[0].kind, Faction::Cygnus);
+        let p = &w.players[c];
+        assert_eq!(p.ship, ShipType::CygnusShip);
+        let r = dist(p.x, p.y, 50_000.0, 50_000.0);
+        assert!(r > super::super::terrain::GREAT_HORIZON && r < super::super::terrain::GREAT_HOLE_R, "inside the gravity well");
+    }
+
+    #[test]
+    fn cygnus_holds_its_spot_and_fires_on_passing_ships() {
+        let (mut w, mut d, c) = cygnus_world();
+        let (cx, cy) = (w.players[c].x, w.players[c].y);
+        let id = w.add_player("Kirk", false).unwrap();
+        w.join(id, Team::Fed, ShipType::Cruiser).unwrap();
+        (w.players[id as usize].x, w.players[id as usize].y) = (cx + 3000.0, cy);
+        w.players[id as usize].speed = 0;
+        let (shield, hull) = (w.players[id as usize].shield, w.players[id as usize].damage);
+        for _ in 0..60 {
+            d.tick(&mut w);
+            w.tick();
+        }
+        let p = &w.players[c];
+        assert_eq!((p.x, p.y), (cx, cy), "the Cygnus never moves");
+        let k = &w.players[id as usize];
+        assert!(k.shield < shield || k.damage > hull || !k.alive(), "it fired on the passing ship");
+    }
+
+    #[test]
+    fn cygnus_only_hurt_from_inside_the_gravity_well() {
+        let (mut w, _d, c) = cygnus_world();
+        let id = w.add_player("Kirk", false).unwrap();
+        w.join(id, Team::Fed, ShipType::Cruiser).unwrap();
+        let k = id as usize;
+        (w.players[k].x, w.players[k].y) = (50_000.0, 50_000.0 + super::super::terrain::GREAT_HOLE_R + 2000.0);
+        let before = (w.players[c].shield, w.players[c].damage);
+        w.inflict(c, 80.0, Some(id), "test".into());
+        assert_eq!((w.players[c].shield, w.players[c].damage), before, "fire from outside the well is bent away");
+        assert!(w.warnings.iter().any(|m| m.1.contains("gravity well")), "the shooter is told why");
+        (w.players[k].x, w.players[k].y) = (w.players[c].x + 2000.0, w.players[c].y);
+        w.inflict(c, 80.0, Some(id), "test".into());
+        assert_ne!((w.players[c].shield, w.players[c].damage), before, "fire from inside the well hurts it");
+    }
+
     fn with_cruiser(x: f64, y: f64) -> (World, u8) {
         let mut w = World::new();
         let id = w.add_player("Kirk", false).unwrap();

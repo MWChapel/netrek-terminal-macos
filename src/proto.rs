@@ -233,6 +233,9 @@ pub enum TerrainKind {
     FluidicRift,
     /// A neutral outpost that repairs and refuels anyone holding beside it.
     AbandonedStation,
+    /// The Black Hole (the Disney film): a vast whirlpool whose gravity
+    /// drags in anything that strays near; the USS Cygnus hangs inside it.
+    GreatBlackHole,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

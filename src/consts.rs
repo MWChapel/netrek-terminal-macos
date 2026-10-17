@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 pub const DEFAULT_PORT: u16 = 2592; // the traditional Netrek port
-pub const PROTOCOL_VERSION: u32 = 22;
+pub const PROTOCOL_VERSION: u32 = 23;
 
 pub const UPS: u64 = 10; // server updates per second, like the original
 pub const GWIDTH: f64 = 100_000.0;
@@ -149,10 +149,12 @@ pub enum Faction {
     Dyson,
     Kzinti,
     GalacticEmpire,
+    /// The USS Cygnus, at the edge of the Black Hole (the Disney film).
+    Cygnus,
 }
 
 impl Faction {
-    pub const ALL: [Faction; 33] = [
+    pub const ALL: [Faction; 34] = [
         Faction::Khan,
         Faction::Gorn,
         Faction::Tholian,
@@ -186,6 +188,7 @@ impl Faction {
         Faction::Dyson,
         Faction::Kzinti,
         Faction::GalacticEmpire,
+        Faction::Cygnus,
     ];
 
     /// Name used on the command line.
@@ -224,6 +227,7 @@ impl Faction {
             Faction::Dyson => "dyson",
             Faction::Kzinti => "kzinti",
             Faction::GalacticEmpire => "empire",
+            Faction::Cygnus => "cygnus",
         }
     }
 
@@ -262,6 +266,7 @@ impl Faction {
             Faction::Dyson => "the Dyson sphere",
             Faction::Kzinti => "the Kzinti",
             Faction::GalacticEmpire => "the Galactic Empire",
+            Faction::Cygnus => "the USS Cygnus",
         }
     }
 
@@ -301,6 +306,7 @@ impl Faction {
             Faction::Dyson => "Dyson",
             Faction::Kzinti => "Kzinti",
             Faction::GalacticEmpire => "Imperial",
+            Faction::Cygnus => "Cygnus",
         }
     }
 
@@ -340,6 +346,7 @@ impl Faction {
             Faction::Dyson => "DY",
             Faction::Kzinti => "KZ",
             Faction::GalacticEmpire => "GE",
+            Faction::Cygnus => "CY",
         }
     }
 
@@ -430,6 +437,8 @@ pub enum ShipType {
     TieFighter,
     /// Darth Vader's own TIE fighter.
     TieAdvanced,
+    /// The USS Cygnus, hanging at the edge of the Black Hole.
+    CygnusShip,
 }
 
 impl ShipType {
@@ -571,6 +580,7 @@ impl ShipType {
             ShipType::DelphicSphere => 1400.0,
             ShipType::DeathStar => 2200.0,
             ShipType::StarDestroyer => 650.0,
+            ShipType::CygnusShip => 1100.0,
             _ => EXPDIST,
         }
     }
@@ -598,6 +608,8 @@ impl ShipType {
             ShipType::Destroyer | ShipType::FerengiMarauder | ShipType::HirogenHunter | ShipType::JemHadarFighter | ShipType::TholianVessel | ShipType::KzintiStriker => 3,
             ShipType::Assault | ShipType::Augment | ShipType::GornRaider => 5,
             ShipType::Battleship | ShipType::KzintiDreadnought | ShipType::StarDestroyer => 6,
+            // Reinhardt, Maximilian and a crew of humanoid robots.
+            ShipType::CygnusShip => 10,
             _ => 4,
         }
     }
@@ -779,7 +791,7 @@ pub struct ShipStats {
     pub tract_str: f64,
 }
 
-pub static SHIPS: [ShipStats; 64] = [
+pub static SHIPS: [ShipStats; 65] = [
     ShipStats {
         name: "Scout", abbr: "SC", max_speed: 12, max_shield: 75.0, max_damage: 75.0,
         max_fuel: 5000.0, max_armies: 2, torp_damage: 25.0, torp_speed: 16.0, torp_fuse: 16,
@@ -1355,6 +1367,15 @@ pub static SHIPS: [ShipStats; 64] = [
         recharge: 500.0, repair: 60.0, warp_cost: 0.0, cloak_cost: 0.0, shield_cost: 0.0,
         turns: 650_000.0, acc: 400, dec: 400, wpn_cool: 50.0, egn_cool: 50.0,
         max_etemp: 100_000.0, max_wtemp: 100_000.0, mass: 800.0, tract_range: 1.0, tract_str: 1.0,
+    },
+    ShipStats {
+        name: "USS Cygnus", abbr: "CY", max_speed: 0, max_shield: 400.0, max_damage: 1200.0,
+        max_fuel: 1_000_000.0, max_armies: 0, torp_damage: 40.0, torp_speed: 14.0, torp_fuse: 40,
+        torp_cost: 0.0, phaser_damage: 0.0, phaser_cost: 0.0,
+        plasma_damage: 0.0, plasma_speed: 0.0, plasma_fuse: 0, plasma_cost: 0.0,
+        recharge: 500.0, repair: 60.0, warp_cost: 0.0, cloak_cost: 0.0, shield_cost: 0.0,
+        turns: 0.0, acc: 0, dec: 1000, wpn_cool: 50.0, egn_cool: 50.0,
+        max_etemp: 100_000.0, max_wtemp: 100_000.0, mass: 1_000_000.0, tract_range: 1.0, tract_str: 1.0,
     },
 ];
 

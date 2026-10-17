@@ -98,6 +98,8 @@ pub fn faction_rgb(f: Faction) -> Rgb {
         Faction::Dyson => rgb(0xd0a860),
         Faction::Kzinti => rgb(0xff8c1a),
         Faction::GalacticEmpire => rgb(0x8090c0),
+        // The Cygnus's thousands of lights, glowing green-white.
+        Faction::Cygnus => rgb(0x9cf0b4),
     }
 }
 

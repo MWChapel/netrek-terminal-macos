@@ -419,6 +419,8 @@ impl App {
             let col = match owner {
                 // The Death Star's superlaser (and its turbolasers) are green.
                 Some(p) if p.ship == ShipType::DeathStar => rgb(0x40ff60),
+                // The Cygnus's sentry robots fire red lasers.
+                Some(p) if p.ship == ShipType::CygnusShip => rgb(0xff3030),
                 Some(p) => player_rgb(p),
                 None => WHITE,
             };

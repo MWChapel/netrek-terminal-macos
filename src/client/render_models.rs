@@ -567,6 +567,84 @@ pub(super) fn alien_model(ship: ShipType, faction: Option<Faction>, tick: u32, f
             m.lights = false;
             m
         }
+        (Faction::Cygnus, _) => {
+            // The USS Cygnus: a long open lattice of girders lit like a
+            // cathedral at night, a tall command tower amidships with the
+            // control room on top, the glass observation dome on its
+            // forward boom, outrigger pods and the engine block astern.
+            boxy([0.0, 0.05, 0.0], [0.07, 0.78, 0.05], &mut faces);
+            // The lattice: four rails and their bracing.
+            let (hw, hh, y0, y1) = (0.24f32, 0.15f32, -0.72f32, 0.8f32);
+            let corners = [(-hw, -hh), (hw, -hh), (hw, hh), (-hw, hh)];
+            for &(x, h) in &corners {
+                lines.push(([x, y0, h], [x, y1, h]));
+            }
+            let bays = 10;
+            for k in 0..=bays {
+                let y = y0 + (y1 - y0) * k as f32 / bays as f32;
+                for c in 0..4 {
+                    let (a, b) = (corners[c], corners[(c + 1) % 4]);
+                    lines.push(([a.0, y, a.1], [b.0, y, b.1]));
+                }
+                if k < bays {
+                    let yn = y0 + (y1 - y0) * (k + 1) as f32 / bays as f32;
+                    for c in 0..4 {
+                        let (a, b) = (corners[c], corners[(c + 1) % 4]);
+                        let (a, b) = if k % 2 == 0 { (a, b) } else { (b, a) };
+                        lines.push(([a.0, y, a.1], [b.0, yn, b.1]));
+                    }
+                }
+            }
+            // The command tower, tapering up to the control room.
+            let tower = [(-0.08, -0.1), (0.08, -0.1), (0.05, 0.1), (-0.05, 0.1)];
+            for (k, &(x, y)) in tower.iter().enumerate() {
+                let (nx, ny) = tower[(k + 1) % 4];
+                faces.push(Face::facing_out(vec![[x, y, 0.0], [nx, ny, 0.0], [nx * 0.5, ny * 0.6, 0.72], [x * 0.5, y * 0.6, 0.72]], [0.0, 0.0, 0.36], true));
+            }
+            ball([0.0, -0.01, 0.78], 0.1, seg / 2 + 2, lv / 2 + 2, &mut faces);
+            tube([0.0, 0.0, 0.88], [0.0, 0.0, 1.05], 0.012, 0.004, 4, (false, false), &mut faces);
+            // And a shorter one hanging below.
+            tube([0.0, 0.05, -0.04], [0.0, 0.05, -0.42], 0.07, 0.03, seg / 3 + 3, (false, true), &mut faces);
+            // The forward boom and the glass observation dome.
+            tube([0.0, -0.72, 0.0], [0.0, -0.9, 0.0], 0.04, 0.04, seg / 3 + 3, (false, false), &mut faces);
+            let n0 = faces.len();
+            ball([0.0, -0.98, 0.0], 0.11, seg / 2 + 2, lv / 2 + 2, &mut faces);
+            for face in &mut faces[n0..] {
+                face.paint = Some(rgb(0x8ad8b0));
+            }
+            // Outrigger pods on struts.
+            for sd in [-1.0f32, 1.0] {
+                tube([sd * 0.58, 0.18, 0.0], [sd * 0.58, 0.74, 0.0], 0.07, 0.06, seg / 3 + 3, (true, true), &mut faces);
+                tube([sd * 0.24, 0.32, 0.0], [sd * 0.55, 0.42, 0.0], 0.02, 0.02, 4, (false, false), &mut faces);
+                tube([sd * 0.24, 0.62, 0.0], [sd * 0.55, 0.62, 0.0], 0.02, 0.02, 4, (false, false), &mut faces);
+            }
+            // The engine block.
+            boxy([0.0, 0.88, 0.0], [0.3, 0.08, 0.13], &mut faces);
+            let mut m = Model::from_mesh((faces, lines));
+            m.hull = Some(rgb(0x4a5250));
+            m.line_col = Some(rgb(0xa8b8b0));
+            // Thousands of lights: along the lattice, up the tower, in the dome.
+            let lit = rgb(0xe8ffd8);
+            for k in 0..=bays {
+                let y = y0 + (y1 - y0) * k as f32 / bays as f32;
+                for &(x, h) in &corners {
+                    let twinkle = 0.55 + 0.45 * ((t * 0.07 + k as f32 * 1.7 + x * 9.0 + h * 5.0).sin() * 0.5 + 0.5);
+                    m.glows.push(([x, y, h], 0.03, lit, twinkle));
+                }
+            }
+            for k in 0..6 {
+                let h = 0.1 + k as f32 * 0.11;
+                m.glows.push(([0.0, -0.1 + h * 0.06, h], 0.025, lit, 0.9));
+            }
+            m.glows.push(([0.0, -0.01, 0.82], 0.16, rgb(0x9cf0b4), 0.6));
+            m.glows.push(([0.0, -0.98, 0.0], 0.2, rgb(0x9cf0b4), 0.55));
+            for sd in [-1.0f32, 1.0] {
+                m.glows.push(([sd * 0.58, 0.77, 0.0], 0.09, rgb(0xfff0c0), 0.7));
+                m.glows.push(([sd * 0.15, 0.97, 0.0], 0.1, rgb(0xfff0c0), 0.8));
+            }
+            m.lights = false;
+            m
+        }
         (Faction::Tempest, _) => {
             // The Tempest's creatures stay arcade sprites: glowing vector
             // shapes, standing upright to face you.

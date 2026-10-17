@@ -41,6 +41,10 @@ pub const METREON_BLAST: f64 = 2500.0;
 pub const BARRIER_REACH: f64 = 350.0;
 pub const STATION_REACH: f64 = 1500.0;
 pub const HORIZON: f64 = 600.0;
+/// The Black Hole (the Disney film): how far its gravity reaches, and its
+/// event horizon.
+pub const GREAT_HOLE_R: f64 = 12_000.0;
+pub const GREAT_HORIZON: f64 = 1500.0;
 pub const PULSAR_PERIOD: i32 = 100;
 pub const MOUTH: f64 = 600.0;
 pub const SALVAGE_REACH: f64 = 900.0;
@@ -141,7 +145,7 @@ fn update_tail(t: &mut Terrain) {
 /// Kinds of terrain each galaxy gets, drawn at random from all of them.
 pub const ACTIVE_KINDS: usize = 10;
 
-pub const ALL_KINDS: [TerrainKind; 21] = [
+pub const ALL_KINDS: [TerrainKind; 22] = [
     TerrainKind::Nebula,
     TerrainKind::IonStorm,
     TerrainKind::Asteroids,
@@ -163,6 +167,7 @@ pub const ALL_KINDS: [TerrainKind; 21] = [
     TerrainKind::GalacticBarrier,
     TerrainKind::FluidicRift,
     TerrainKind::AbandonedStation,
+    TerrainKind::GreatBlackHole,
 ];
 
 /// A fresh set of terrain: ten kinds, picked at random, each placed clear
@@ -172,6 +177,12 @@ pub fn generate(world: &mut World) {
     world.terrain.clear();
     let mut kinds = ALL_KINDS.to_vec();
     kinds.shuffle(&mut rng);
+    // The Black Hole needs a vast stretch of open space: if it's one of this
+    // galaxy's kinds, it goes down first.
+    if let Some(k) = kinds.iter().take(ACTIVE_KINDS).position(|&k| k == TerrainKind::GreatBlackHole) {
+        let hole = kinds.remove(k);
+        kinds.insert(0, hole);
+    }
     let mut active = 0;
     for kind in kinds {
         if active >= ACTIVE_KINDS {
@@ -317,6 +328,11 @@ fn spawn_kind(world: &mut World, kind: TerrainKind) -> usize {
         }
         TerrainKind::FluidicRift => many(world, &["fluidic rift"], 1, 700.0..701.0, 3000.0),
         TerrainKind::AbandonedStation => many(world, &["abandoned station K-7"], 1, STATION_REACH..STATION_REACH + 1.0, 3000.0),
+        TerrainKind::GreatBlackHole => {
+            // Planets may sit at the very edge of its pull, but no closer.
+            let t = place(world, GREAT_HOLE_R, -1500.0).map(|p| Terrain::new(kind, "the Black Hole", p, GREAT_HOLE_R));
+            add(world, t);
+        }
     }
     world.terrain.len() - before
 }
@@ -386,6 +402,8 @@ pub fn escape(world: &World, x: f64, y: f64) -> Option<f64> {
         let d = dist(x, y, t.x, t.y);
         let danger = match t.kind {
             TerrainKind::BlackHole => d < t.r + 1000.0,
+            // Robots will go in after the Cygnus, but not too deep.
+            TerrainKind::GreatBlackHole => d < t.r * 0.35,
             TerrainKind::Star => d < STAR_CORE + 2500.0,
             TerrainKind::Comet => d < COMET_HEAD + 1500.0,
             _ => false,
@@ -395,6 +413,18 @@ pub fn escape(world: &World, x: f64, y: f64) -> Option<f64> {
         }
     }
     None
+}
+
+/// How hard the Black Hole drags things in, per tick, at distance `d` from
+/// its centre: barely at all at the edge, beyond any ship's engines at the
+/// event horizon.
+pub fn great_pull(d: f64, r: f64) -> f64 {
+    10.0 + 230.0 * (1.0 - d / r).max(0.0).powi(3)
+}
+
+/// The Black Hole whose gravity well (x, y) is in, if any.
+pub fn in_great_hole(world: &World, x: f64, y: f64) -> Option<&Terrain> {
+    world.terrain.iter().find(|t| t.kind == TerrainKind::GreatBlackHole && dist(x, y, t.x, t.y) < t.r)
 }
 
 /// Whether (x, y) is inside an asteroid field (robots slow down there).
@@ -519,6 +549,27 @@ pub fn tick(world: &mut World) {
                     }
                     if tick % 30 == j as u32 % 30 {
                         warns.push((id, "Gravity well! Go to full impulse to break free".into()));
+                    }
+                }
+                TerrainKind::GreatBlackHole if d < t.r => {
+                    if d < GREAT_HORIZON {
+                        doomed.push((j, format!("was swallowed by {}", t.name)));
+                        continue;
+                    }
+                    // Orbiting a planet at the edge of the pull holds you.
+                    if p.orbiting.is_none() && !p.techs.contains(&Tech::MetaphasicShields) {
+                        let pull = great_pull(d, t.r);
+                        p.x += (t.x - p.x) / d * pull;
+                        p.y += (t.y - p.y) / d * pull;
+                        // And the whirlpool sweeps you round as it drags you in.
+                        let (rx, ry) = ((p.x - t.x) / d, (p.y - t.y) / d);
+                        let swirl = pull * 0.35;
+                        p.x += ry * swirl;
+                        p.y -= rx * swirl;
+                    }
+                    if tick % 30 == j as u32 % 30 {
+                        let escape = (great_pull(d, t.r) / WARP1).ceil() as i32 + 1;
+                        warns.push((id, format!("Caught in the Black Hole's gravity! You need warp {} or more to break free", escape)));
                     }
                 }
                 TerrainKind::Pulsar => {
@@ -675,6 +726,15 @@ pub fn tick(world: &mut World) {
                 TerrainKind::Magnetar if d < f.r => t.dir = (t.dir + 1.5).rem_euclid(256.0),
                 TerrainKind::Planetoid if d < f.r => t.fuse = 0,
                 TerrainKind::GalacticBarrier if seg_dist(t.x, t.y, f.x, f.y, f.x2, f.y2) < BARRIER_REACH => t.fuse = 0,
+                TerrainKind::GreatBlackHole if d < f.r => {
+                    if d < GREAT_HORIZON {
+                        t.fuse = 0;
+                    } else {
+                        let pull = great_pull(d, f.r);
+                        t.x += (f.x - t.x) / d * pull;
+                        t.y += (f.y - t.y) / d * pull;
+                    }
+                }
                 TerrainKind::BlackHole if d < f.r => {
                     if d < HORIZON {
                         t.fuse = 0;
@@ -854,6 +914,23 @@ mod tests {
         tick(&mut w);
         assert!(w.players[k].x < 55_000.0, "pulled in");
         w.players[k].x = 50_300.0;
+        tick(&mut w);
+        assert_eq!(w.players[k].state, PState::Exploding);
+    }
+
+    #[test]
+    fn great_black_hole_drags_ships_in() {
+        let (mut w, k) = setup(58_000.0, 50_000.0);
+        put(&mut w, TerrainKind::GreatBlackHole, 50_000.0, 50_000.0, GREAT_HOLE_R);
+        tick(&mut w);
+        let d = dist(w.players[k].x, w.players[k].y, 50_000.0, 50_000.0);
+        assert!(d < 8000.0 - 10.0, "pulled in");
+        // It pulls far harder than the ordinary kind, and from much further out.
+        assert!(great_pull(3000.0, GREAT_HOLE_R) > 8.0 + 70.0 * (1.0f64 - 3000.0 / 7000.0).powi(2));
+        // Deep inside, only a fast ship gets out.
+        assert!(great_pull(2000.0, GREAT_HOLE_R) > 6.0 * WARP1);
+        w.players[k].x = 50_000.0 + GREAT_HORIZON - 100.0;
+        w.players[k].y = 50_000.0;
         tick(&mut w);
         assert_eq!(w.players[k].state, PState::Exploding);
     }
