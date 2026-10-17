@@ -1,9 +1,10 @@
 //! Terminal client: connects to a server, reads keyboard + mouse, and draws
-//! the tactical and galactic displays with braille graphics.
+//! the tactical and galactic displays as SIXEL images.
 
 mod canvas;
 mod guide;
 mod palette;
+mod probe;
 mod render;
 mod render_terrain;
 mod render_vec;
@@ -39,20 +40,19 @@ pub struct ClientConfig {
     pub name: String,
     pub team: Option<Team>,
     pub ship: ShipType,
-    /// Graphics style; None picks the best the terminal supports.
-    pub gfx: Option<Gfx>,
     /// Start with sound effects off.
     pub mute: bool,
     /// Connect as an observer.
     pub observe: bool,
 }
 
-#[derive(Clone, Copy, PartialEq, Debug)]
-pub enum Gfx {
-    /// Real pixel images (SIXEL) with thin anti-aliased vector drawing.
-    Vector,
-    /// Braille line art.
-    Braille,
+/// What the terminal reported at startup (see [`require_vector`]).
+pub use probe::Answers as Terminal;
+
+/// Check that this terminal can show the client's graphics (SIXEL images),
+/// before connecting or starting a server. The client won't run without them.
+pub fn require_vector() -> Result<Terminal, String> {
+    probe::require_vector()
 }
 
 /// Image slots: tactical, galactic, dashboard, comms, players, popup, viewscreen.
@@ -68,70 +68,6 @@ struct Image {
     y: i32,
     slot: usize,
     data: Vec<u8>,
-}
-
-/// What we found out about the terminal's image support.
-pub struct SixelCheck {
-    pub supported: bool,
-    /// Advice to show the player when images aren't available.
-    pub hint: Option<&'static str>,
-}
-
-/// Terminal apps known not to display SIXEL images.
-const NO_SIXEL_APPS: [&str; 4] = ["Terminal.app", "Alacritty", "kitty", "Ghostty"];
-
-/// Inside tmux, find the terminal app hosting the tmux client that shows our
-/// pane, by walking up its process tree (e.g. tmux -> zsh -> login -> Terminal).
-fn tmux_outer_app() -> Option<String> {
-    let out = std::process::Command::new("tmux").args(["display", "-p", "#{client_pid}"]).output().ok()?;
-    let mut pid: u32 = String::from_utf8_lossy(&out.stdout).trim().parse().ok()?;
-    for _ in 0..12 {
-        let out = std::process::Command::new("ps").args(["-o", "ppid=,comm=", "-p", &pid.to_string()]).output().ok()?;
-        let line = String::from_utf8_lossy(&out.stdout).trim().to_string();
-        let (ppid, comm) = line.split_once(char::is_whitespace)?;
-        let comm = comm.trim();
-        if comm.contains(".app/") || ["wezterm-gui", "alacritty", "kitty", "ghostty", "foot"].iter().any(|n| comm.to_lowercase().ends_with(n)) {
-            return Some(comm.to_string());
-        }
-        pid = ppid.trim().parse().ok()?;
-        if pid <= 1 {
-            break;
-        }
-    }
-    None
-}
-
-/// Whether the terminal (and tmux, if we're inside it) can show SIXEL images.
-pub fn sixel_check() -> SixelCheck {
-    if std::env::var_os("TMUX").is_some() {
-        if let Some(app) = tmux_outer_app() {
-            if NO_SIXEL_APPS.iter().any(|n| app.contains(n)) {
-                return SixelCheck {
-                    supported: false,
-                    hint: Some("This terminal app can't show images; attach tmux from iTerm2 for vector graphics"),
-                };
-            }
-        }
-        let tmux_sixel = std::process::Command::new("tmux")
-            .args(["display", "-p", "#{client_termfeatures}"])
-            .output()
-            .map(|o| String::from_utf8_lossy(&o.stdout).contains("sixel"))
-            .unwrap_or(false);
-        if !tmux_sixel {
-            return SixelCheck {
-                supported: false,
-                hint: Some("Tip: for vector graphics in tmux add  set -as terminal-features ',xterm*:sixel'  to ~/.tmux.conf and reattach"),
-            };
-        }
-        return SixelCheck { supported: true, hint: None };
-    }
-    let prog = std::env::var("TERM_PROGRAM").unwrap_or_default();
-    let term = std::env::var("TERM").unwrap_or_default();
-    if matches!(prog.as_str(), "iTerm.app" | "WezTerm") || ["foot", "mlterm", "contour"].iter().any(|t| term.contains(t)) {
-        return SixelCheck { supported: true, hint: None };
-    }
-    let hint = (prog == "Apple_Terminal").then_some("Terminal.app can't show images; run in iTerm2 for vector graphics");
-    SixelCheck { supported: false, hint }
 }
 
 enum NetEvent {
@@ -215,6 +151,8 @@ struct LeakFilter {
     esc: Option<(KeyEvent, Instant)>,
     /// Characters of a sequence being reassembled (after "ESC").
     seq: Option<String>,
+    /// The Esc that started that sequence, given back if it comes to nothing.
+    seq_esc: Option<KeyEvent>,
 }
 
 enum Leak {
@@ -249,11 +187,11 @@ impl LeakFilter {
                 return match parse_seq(seq) {
                     Seq::Partial => Leak::Swallow,
                     Seq::Mouse(m) => {
-                        self.seq = None;
+                        (self.seq, self.seq_esc) = (None, None);
                         Leak::Mouse(m)
                     }
                     Seq::Key(key) => {
-                        self.seq = None;
+                        (self.seq, self.seq_esc) = (None, None);
                         Leak::Key(key)
                     }
                     Seq::Broken => Leak::Replay(self.take_seq()),
@@ -268,6 +206,7 @@ impl LeakFilter {
             // "ESC [" read together can also come through as Alt-[.
             KeyCode::Char('[') if held.is_some() || k.modifiers.contains(KeyModifiers::ALT) => {
                 self.seq = Some("[".into());
+                self.seq_esc = held.map(|(e, _)| e);
                 Leak::Swallow
             }
             KeyCode::Esc => {
@@ -298,7 +237,7 @@ impl LeakFilter {
 
     fn take_seq(&mut self) -> Vec<KeyEvent> {
         let s = self.seq.take().unwrap_or_default();
-        s.chars().map(|c| KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE)).collect()
+        self.seq_esc.take().into_iter().chain(s.chars().map(|c| KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE))).collect()
     }
 }
 
@@ -376,11 +315,13 @@ pub struct App {
     closed: Option<String>,
     motd: Vec<String>,
     redraw: bool,
-    gfx: Gfx,
     truecolor: bool,
     text: sixel::TextRenderer,
     /// Size of one character cell in screen pixels.
     cell_px: (f64, f64),
+    /// The cell size the terminal reported at startup, for when the window
+    /// size doesn't come with pixels.
+    probed_cell_px: Option<(f64, f64)>,
     images: Vec<Image>,
     sent: [Option<u64>; IMAGE_SLOTS],
     last_gal: Instant,
@@ -389,7 +330,6 @@ pub struct App {
     phaser_age: HashMap<PhaserKey, u8>,
     /// Guard against mouse reports that leak through as keystrokes.
     leak: LeakFilter,
-    tmux_hint: bool,
     /// The advanced tech list goes in the controls panel (when there's a
     /// player-list column), otherwise on one line in the message panel.
     tech_in_controls: bool,
@@ -404,7 +344,7 @@ pub struct App {
     guide_fit: std::cell::Cell<usize>,
 }
 
-pub fn run(cfg: ClientConfig) -> io::Result<()> {
+pub fn run(cfg: ClientConfig, term: Terminal) -> io::Result<()> {
     let stream = TcpStream::connect((cfg.host.as_str(), cfg.port))
         .map_err(|e| io::Error::new(e.kind(), format!("cannot connect to {}:{}: {}", cfg.host, cfg.port, e)))?;
     stream.set_nodelay(true)?;
@@ -436,53 +376,7 @@ pub fn run(cfg: ClientConfig) -> io::Result<()> {
         }
     });
 
-    let outfit_team = cfg.team;
-    let outfit_ship = cfg.ship;
-    let cfg_mute = cfg.mute;
-    let check = sixel_check();
-    let gfx = cfg.gfx.unwrap_or(if check.supported { Gfx::Vector } else { Gfx::Braille });
-    let hint = if cfg.gfx.is_none() { check.hint } else { None };
-    let tmux_hint = hint.is_some();
-    let mut app = App {
-        cfg,
-        writer,
-        slot,
-        frame: None,
-        msgs: VecDeque::new(),
-        warning: None,
-        pointer: None,
-        zoom: 1.0,
-        mode: Mode::Play,
-        popup: Popup::None,
-        outfit_team,
-        outfit_ship,
-        layout: Layout::default(),
-        last_center: (GWIDTH / 2.0, GWIDTH / 2.0),
-        quit: false,
-        closed: None,
-        motd,
-        redraw: false,
-        gfx,
-        truecolor: palette::truecolor_supported(),
-        text: sixel::TextRenderer::load(),
-        cell_px: (8.0, 16.0),
-        images: Vec::new(),
-        sent: [None; IMAGE_SLOTS],
-        last_gal: Instant::now(),
-        phaser_age: HashMap::new(),
-        leak: LeakFilter::default(),
-        tmux_hint,
-        tech_in_controls: false,
-        sound: sound::Sound::new(!cfg_mute),
-        observer,
-        guide: false,
-        guide_pos: 0,
-        guide_fit: std::cell::Cell::new(8),
-    };
-    if let Some(h) = hint {
-        app.warn(h);
-    }
-
+    let mut app = App::new(cfg, writer, slot, motd, observer, term.cell_px);
     let _guard = TermGuard::enter()?;
     let result = app.main_loop(&inbox);
     drop(_guard);
@@ -521,6 +415,45 @@ impl Drop for TermGuard {
 }
 
 impl App {
+    fn new(cfg: ClientConfig, writer: BufWriter<TcpStream>, slot: u8, motd: Vec<String>, observer: bool, probed_cell_px: Option<(f64, f64)>) -> App {
+        let (outfit_team, outfit_ship, mute) = (cfg.team, cfg.ship, cfg.mute);
+        App {
+            cfg,
+            writer,
+            slot,
+            frame: None,
+            msgs: VecDeque::new(),
+            warning: None,
+            pointer: None,
+            zoom: 1.0,
+            mode: Mode::Play,
+            popup: Popup::None,
+            outfit_team,
+            outfit_ship,
+            layout: Layout::default(),
+            last_center: (GWIDTH / 2.0, GWIDTH / 2.0),
+            quit: false,
+            closed: None,
+            motd,
+            redraw: false,
+            truecolor: palette::truecolor_supported(),
+            text: sixel::TextRenderer::load(),
+            cell_px: probed_cell_px.unwrap_or((8.0, 16.0)),
+            probed_cell_px,
+            images: Vec::new(),
+            sent: [None; IMAGE_SLOTS],
+            last_gal: Instant::now(),
+            phaser_age: HashMap::new(),
+            leak: LeakFilter::default(),
+            tech_in_controls: false,
+            sound: sound::Sound::new(!mute),
+            observer,
+            guide: false,
+            guide_pos: 0,
+            guide_fit: std::cell::Cell::new(8),
+        }
+    }
+
     fn main_loop(&mut self, inbox: &Inbox) -> io::Result<()> {
         let (w, h) = terminal::size()?;
         let mut screen = Screen::new(w, h);
@@ -599,9 +532,14 @@ impl App {
     }
 
     fn measure_cells(&mut self) {
-        if let Ok(ws) = terminal::window_size() {
-            if ws.width > 0 && ws.height > 0 && ws.columns > 0 && ws.rows > 0 {
+        match terminal::window_size() {
+            Ok(ws) if ws.width > 0 && ws.height > 0 && ws.columns > 0 && ws.rows > 0 => {
                 self.cell_px = (ws.width as f64 / ws.columns as f64, ws.height as f64 / ws.rows as f64);
+            }
+            _ => {
+                if let Some(c) = self.probed_cell_px {
+                    self.cell_px = c;
+                }
             }
         }
     }
@@ -843,17 +781,54 @@ impl App {
             .min_by(|a, b| a.1.total_cmp(&b.1))
     }
 
+    /// Galaxy units covered by a couple of character cells at the pointer:
+    /// how close a click has to be to a ship to pick it.
+    fn pointer_reach(&self) -> f64 {
+        let l = &self.layout;
+        match self.pointer {
+            Some((col, row)) if l.gal.contains(col, row) => 2.0 * GWIDTH / l.gal.w.max(1) as f64,
+            _ => 2.0 * l.cpx.0.max(l.cpx.1) * l.upd,
+        }
+    }
+
     fn on_mouse(&mut self, m: MouseEvent) {
         self.pointer = Some((m.column as i32, m.row as i32));
+        let click = matches!(m.kind, MouseEventKind::Down(_));
         // A click with a popup open just closes it (the maps are covered).
-        if self.popup != Popup::None && matches!(m.kind, MouseEventKind::Down(_)) {
-            self.popup = Popup::None;
+        if self.popup != Popup::None {
+            if click {
+                self.popup = Popup::None;
+            }
             return;
         }
-        if self.observer && self.mode == Mode::Play {
+        // A click answers "really quit?" with no.
+        if self.mode == Mode::ConfirmQuit {
+            if click {
+                self.mode = Mode::Play;
+            }
+            return;
+        }
+        if !self.observer && self.my_state() == PState::Outfit {
+            return;
+        }
+        // The wheel zooms whatever you're doing, alive or not.
+        match m.kind {
+            MouseEventKind::ScrollUp => {
+                self.zoom = (self.zoom / 1.25).max(0.4);
+                return;
+            }
+            MouseEventKind::ScrollDown => {
+                self.zoom = (self.zoom * 1.25).min(4.0);
+                return;
+            }
+            _ => {}
+        }
+        if self.observer {
             return self.observer_mouse(m);
         }
-        if self.my_state() != PState::Alive || self.mode != Mode::Play {
+        // The buttons act on the maps only, and keep working while you type
+        // a message or pick a ship to refit to.
+        if self.my_state() != PState::Alive || self.pointer_world().is_none() {
             return;
         }
         match m.kind {
@@ -869,8 +844,6 @@ impl App {
                 let d = self.aim();
                 self.cmd(ClientMsg::Phaser(d));
             }
-            MouseEventKind::ScrollUp => self.zoom = (self.zoom / 1.25).max(0.4),
-            MouseEventKind::ScrollDown => self.zoom = (self.zoom * 1.25).min(4.0),
             _ => {}
         }
     }
@@ -1004,17 +977,6 @@ impl App {
             'm' => self.mode = Mode::Compose { target: None, text: String::new() },
             // Server commands (/record, /treaty ...) go out as a message starting with '/'.
             '/' => self.mode = Mode::Compose { target: Some(MsgTarget::All), text: "/".into() },
-            'g' => {
-                self.gfx = match self.gfx {
-                    Gfx::Vector => Gfx::Braille,
-                    Gfx::Braille => Gfx::Vector,
-                };
-                self.redraw = true;
-                self.warn(match self.gfx {
-                    Gfx::Vector => "Graphics: vector (sixel images)",
-                    Gfx::Braille => "Graphics: braille line art",
-                });
-            }
             'S' => {
                 self.sound.enabled = !self.sound.enabled && self.sound.available();
                 self.warn(if self.sound.enabled { "Sound on" } else if self.sound.available() { "Sound off" } else { "No audio player found (afplay)" });
@@ -1215,13 +1177,6 @@ impl App {
             KeyCode::Char('+') | KeyCode::Char('=') => self.zoom = (self.zoom / 1.25).max(0.4),
             KeyCode::Char('-') | KeyCode::Char('_') => self.zoom = (self.zoom * 1.25).min(4.0),
             KeyCode::Char('i') => self.info_pointer(),
-            KeyCode::Char('g') => {
-                self.gfx = match self.gfx {
-                    Gfx::Vector => Gfx::Braille,
-                    Gfx::Braille => Gfx::Vector,
-                };
-                self.redraw = true;
-            }
             KeyCode::Char('S') => {
                 self.sound.enabled = !self.sound.enabled && self.sound.available();
                 self.warn(if self.sound.enabled { "Sound on" } else { "Sound off" });
@@ -1231,26 +1186,24 @@ impl App {
         }
     }
 
-    /// Observers: click a ship to follow it, or anywhere else to look there.
+    /// Observers: click a ship to follow it, or anywhere else on a map to
+    /// look there.
     fn observer_mouse(&mut self, m: MouseEvent) {
-        match m.kind {
-            MouseEventKind::Down(MouseButton::Left) => {
-                let Some((x, y)) = self.pointer_world() else { return };
-                let near = self
-                    .nearest_player_to_pointer()
-                    .filter(|p| p.state == PState::Alive && ((p.x as f64 - x).powi(2) + (p.y as f64 - y).powi(2)).sqrt() < 3000.0 * self.zoom)
-                    .map(|p| p.id);
-                match near {
-                    Some(id) => self.follow(Some(id)),
-                    None => {
-                        self.follow(None);
-                        self.last_center = (x, y);
-                    }
-                }
+        if m.kind != MouseEventKind::Down(MouseButton::Left) {
+            return;
+        }
+        let Some((x, y)) = self.pointer_world() else { return };
+        let reach = self.pointer_reach().max(1500.0);
+        let near = self
+            .nearest_player_to_pointer()
+            .filter(|p| ((p.x as f64 - x).powi(2) + (p.y as f64 - y).powi(2)).sqrt() < reach)
+            .map(|p| p.id);
+        match near {
+            Some(id) => self.follow(Some(id)),
+            None => {
+                self.follow(None);
+                self.last_center = (x, y);
             }
-            MouseEventKind::ScrollUp => self.zoom = (self.zoom / 1.25).max(0.4),
-            MouseEventKind::ScrollDown => self.zoom = (self.zoom * 1.25).min(4.0),
-            _ => {}
         }
     }
 
@@ -1425,6 +1378,104 @@ mod tests {
         f.esc.as_mut().unwrap().1 -= LeakFilter::HOLD;
         assert_eq!(f.expire().len(), 1);
         // "ESC [" then something else: the keys are replayed, not lost.
-        assert_eq!(feed_all(&mut f, &[esc(), key('['), key('x')]), vec!["Char('[')", "Char('x')"]);
+        assert_eq!(feed_all(&mut f, &[esc(), key('['), key('x')]), vec!["Esc", "Char('[')", "Char('x')"]);
+        assert_eq!(feed_all(&mut f, &[esc(), key('['), key('<'), key('1'), esc()]), vec!["Esc", "Char('[')", "Char('<')", "Char('1')", "Esc"]);
+    }
+
+    /// An app on the game screen, flying a cruiser in mid-galaxy, laid out
+    /// on a 170x50 window, and the server end of its connection.
+    fn game_app() -> (App, BufReader<TcpStream>) {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let (server, _) = listener.accept().unwrap();
+        server.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+        let cfg = ClientConfig { host: "test".into(), port: 0, name: "me".into(), team: None, ship: ShipType::Cruiser, mute: true, observe: false };
+        let mut app = App::new(cfg, BufWriter::new(client), 0, Vec::new(), false, Some((8.0, 17.0)));
+        let mut f = crate::server::world::World::new().frame_for(0);
+        f.players = vec![PlayerInfo {
+            id: 0,
+            name: "me".into(),
+            team: Team::Fed,
+            ship: ShipType::Cruiser,
+            state: PState::Alive,
+            x: 50_000,
+            y: 50_000,
+            dir: 0,
+            speed: 0,
+            flags: 0,
+            kills: 0.0,
+            armies: 0,
+            tractor_target: None,
+            fuzzy: false,
+            explode_frame: 0,
+            faction: None,
+            rank: None,
+        }];
+        app.frame = Some(f);
+        app.draw(&mut Screen::new(170, 50));
+        (app, BufReader::new(server))
+    }
+
+    /// What the app sent since the last call, up to a marker it's made to send.
+    fn sent(app: &mut App, server: &mut BufReader<TcpStream>) -> Vec<String> {
+        app.cmd(ClientMsg::Shields);
+        let mut out = Vec::new();
+        loop {
+            match read_msg::<ClientMsg, _>(server).unwrap() {
+                ClientMsg::Shields => return out,
+                m => out.push(format!("{:?}", m)),
+            }
+        }
+    }
+
+    fn mouse(app: &mut App, kind: MouseEventKind, col: i32, row: i32) {
+        app.on_mouse(MouseEvent { kind, column: col as u16, row: row as u16, modifiers: KeyModifiers::NONE });
+    }
+
+    /// Clicks aim from the ship at the spot clicked, on either map; clicks
+    /// anywhere else don't fire; the wheel zooms even when you can't fly.
+    #[test]
+    fn clicks_act_on_the_maps_only() {
+        let (mut app, mut server) = game_app();
+        let (tac, gal) = (app.layout.tac, app.layout.gal);
+        let (mid_x, mid_y) = (tac.x + tac.w / 2, tac.y + tac.h / 2);
+        let down = MouseEventKind::Down;
+        // Straight right of the ship: due east (64); straight up: north (0).
+        mouse(&mut app, down(MouseButton::Left), tac.x + tac.w - 2, mid_y);
+        mouse(&mut app, down(MouseButton::Right), mid_x, tac.y + 1);
+        mouse(&mut app, down(MouseButton::Middle), mid_x - 10, mid_y);
+        let got = sent(&mut app, &mut server);
+        assert_eq!(got.len(), 3, "{:?}", got);
+        let dir = |m: &str| m.trim_end_matches(')').rsplit('(').next().unwrap().parse::<i32>().unwrap();
+        assert!(got[0].starts_with("Torp") && (dir(&got[0]) - 64).abs() <= 1, "{:?}", got);
+        assert!(got[1].starts_with("Course") && (dir(&got[1]) - 0).abs() <= 1, "{:?}", got);
+        assert!(got[2].starts_with("Phaser") && (dir(&got[2]) - 192).abs() <= 1, "{:?}", got);
+        // On the galaxy map: the top left corner is north-west of mid-galaxy.
+        mouse(&mut app, down(MouseButton::Right), gal.x, gal.y);
+        let got = sent(&mut app, &mut server);
+        assert!(got.len() == 1 && (dir(&got[0]) - 224).abs() <= 2, "{:?}", got);
+        // The controls, the message panel and the frames don't fire.
+        for (c, r) in [(2, tac.y + tac.h + 3), (gal.x + 5, tac.y + tac.h + 5), (0, 0), (tac.x + tac.w, mid_y)] {
+            mouse(&mut app, down(MouseButton::Left), c, r);
+        }
+        assert!(sent(&mut app, &mut server).is_empty());
+        // Typing a message doesn't stop the guns.
+        app.mode = Mode::Compose { target: Some(MsgTarget::All), text: "hi".into() };
+        mouse(&mut app, down(MouseButton::Left), mid_x + 5, mid_y);
+        assert_eq!(sent(&mut app, &mut server).len(), 1);
+        assert!(matches!(app.mode, Mode::Compose { .. }));
+        // A click with a popup open only closes it; one at "really quit?" says no.
+        app.popup = Popup::Help;
+        mouse(&mut app, down(MouseButton::Left), mid_x + 5, mid_y);
+        assert!(app.popup == Popup::None && sent(&mut app, &mut server).is_empty());
+        app.mode = Mode::ConfirmQuit;
+        mouse(&mut app, down(MouseButton::Left), mid_x + 5, mid_y);
+        assert!(app.mode == Mode::Play && !app.quit && sent(&mut app, &mut server).is_empty());
+        // Dead: no shots, but the wheel still zooms.
+        app.frame.as_mut().unwrap().players[0].state = PState::Exploding;
+        mouse(&mut app, down(MouseButton::Left), mid_x + 5, mid_y);
+        mouse(&mut app, MouseEventKind::ScrollDown, 2, tac.y + tac.h + 3);
+        assert!(sent(&mut app, &mut server).is_empty());
+        assert!(app.zoom > 1.0);
     }
 }

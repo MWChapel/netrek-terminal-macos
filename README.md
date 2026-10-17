@@ -9,8 +9,8 @@ that runs entirely inside a terminal window on macOS.
   window), with the
   dashboard, player list and message window underneath, like the original X11 client.
 - **Real graphics in the terminal:** vector-style maps and control panel drawn with
-  [tiny-skia](https://github.com/linebender/tiny-skia) and sent as SIXEL images. On
-  terminals without image support it falls back to braille line art.
+  [tiny-skia](https://github.com/linebender/tiny-skia) and sent as SIXEL images. The
+  client needs a terminal that can show them, and won't start in one that can't.
 - **Authentic rules:** the 40-planet galaxy, the six ship classes, and weapons, fuel,
   heat, orbiting, bombing, army carrying and planet capture use numbers from the
   Vanilla Netrek server source.
@@ -44,7 +44,7 @@ that runs entirely inside a terminal window on macOS.
 - [Quick start](#quick-start)
 - [Command-line reference](#command-line-reference)
   - [Observers](#observers)
-- [Terminal setup and graphics modes](#terminal-setup-and-graphics-modes)
+- [Terminal setup](#terminal-setup)
 - [The screen](#the-screen)
 - [Controls](#controls)
 - [How to play](#how-to-play)
@@ -81,8 +81,8 @@ that runs entirely inside a terminal window on macOS.
   [Sound](#sound).
 - **Rust**, a recent stable toolchain: `brew install rust` or [rustup](https://rustup.rs).
 - A terminal of at least **80×24**. **160×50 or larger** gives the classic proportions.
-- Optional, for vector graphics: a terminal with SIXEL support (iTerm2, WezTerm, foot),
-  or tmux 3.4+ in front of one. See [Terminal setup](#terminal-setup-and-graphics-modes).
+- A terminal with **SIXEL** image support (iTerm2, WezTerm, foot, mlterm), or tmux 3.4+
+  in front of one. The client won't start anywhere else. See [Terminal setup](#terminal-setup).
 
 ## Build and install
 
@@ -189,7 +189,6 @@ Starts a server on a random localhost port in the background and connects to it.
 | `-n, --name <NAME>` | `$USER` | Your callsign |
 | `-t, --team <TEAM>` | `fed` | Preferred team: `fed`, `rom`, `kli`, `ori` |
 | `-s, --ship <SHIP>` | `CA` | Preferred ship: `SC`, `DD`, `CA`, `BB`, `AS`, `SB` |
-| `-g, --gfx <MODE>` | `auto` | Map graphics: `auto`, `vector` (alias `sixel`), `braille` |
 | `--mute` | off | Start with sound effects off |
 
 ### `netrek play [HOST]`
@@ -234,24 +233,27 @@ Observers never take a player slot, so they don't crowd out robots or aliens. Up
 watch at once, and the player list shows who's watching. Servers allow observers unless
 started with `--no-observers`.
 
-## Terminal setup and graphics modes
+## Terminal setup
 
-The client picks the best graphics your terminal supports. Press `g` in game to switch
-between the modes, or force one with `--gfx`.
+The client draws everything in game as SIXEL images: thin anti-aliased lines, outlined
+planets, crisp labels and a graphical dashboard. It checks the terminal before it connects
+(or, for `solo`, before it starts the server). Where images can't be shown it stops with
+a message saying what to use instead:
 
-| Mode | Looks like | Works in |
-|---|---|---|
-| **vector** | Real pixel images: thin anti-aliased lines, outlined planets, crisp labels, graphical dashboard | iTerm2, WezTerm, foot, mlterm; tmux 3.4+ when configured (below) |
-| **braille** | Braille-dot line art | Any Unicode terminal |
+| Terminal | Works? |
+|---|---|
+| iTerm2, WezTerm, foot, mlterm, contour | Yes |
+| Any other terminal that lists SIXEL (feature 4) in its device attributes | Yes |
+| tmux 3.4+ | Yes, when configured and attached from one of the above (see below) |
+| Terminal.app, Alacritty, kitty, Ghostty | No |
 
-In both modes the layout is sized in real screen pixels, so the maps stay square
-whatever your font's cell shape. In vector mode the help, player and planet popups are
-drawn as images over the maps, so the maps stay in vector mode while a popup is open.
+The layout is sized in real screen pixels, so the maps stay square whatever your font's
+cell shape. The help, player and planet popups are drawn as images over the maps.
 
 ### iTerm2
 
-Vector mode works out of the box. Make sure **Settings → Profiles → Terminal → Enable
-mouse reporting** is on (the default) for mouse aiming.
+Works out of the box. Make sure **Settings → Profiles → Terminal → Enable mouse
+reporting** is on (the default) for mouse aiming.
 
 ### tmux
 
@@ -270,24 +272,22 @@ tmux source ~/.tmux.conf
 # prefix + d, then: tmux attach
 ```
 
-If you run inside tmux without this setting, the client falls back to braille mode and
-shows a one-line hint. The outer terminal must itself support SIXEL. Inside tmux, the
-client checks which app is hosting your tmux client (by walking its process tree). If
-that's Terminal.app (or another terminal without SIXEL), it stays in braille mode and
-suggests attaching from iTerm2. The same tmux session can be attached from Terminal.app
-and from iTerm2 at different times, and the client picks the right mode each time it
+Without this setting the client won't start, and says so. The outer terminal must itself
+support SIXEL. Inside tmux, the client checks which app is hosting your tmux client (by
+walking its process tree). If that's Terminal.app (or another terminal without SIXEL), it
+won't start and suggests attaching from iTerm2. The same tmux session can be attached
+from Terminal.app and from iTerm2 at different times; the client checks each time it
 starts.
 
 ### Terminal.app
 
-Terminal.app can't display images, so it uses **braille** line art. For the full vector
-look, run in iTerm2 instead.
+Terminal.app can't display images, so the client won't run there. Use iTerm2 instead.
 
 ### Colors and fonts
 
 - **Color:** 24-bit color is used when `COLORTERM=truecolor` (or on iTerm2, WezTerm and
   Ghostty). Otherwise it falls back to the 256-color palette.
-- **Fonts:** vector mode draws text into its images with the system Menlo font (falling
+- **Fonts:** the client draws text into its images with the system Menlo font (falling
   back to Monaco or SF Mono). No font setup is needed.
 
 ## The screen
@@ -337,7 +337,9 @@ look, run in iTerm2 instead.
 
 The keys follow the original Netrek client where possible. Commands that need a
 direction use the **mouse pointer**, whether it's over the tactical or the galactic
-map. With no mouse, they fire along your current heading.
+map. With no mouse (or the pointer off the maps), keys fire along your current heading.
+Mouse buttons only act when you click on a map, and keep working while you type a
+message.
 
 ### Flying
 
@@ -374,7 +376,7 @@ map. With no mouse, they fire along your current heading.
 **Overwatch** (`w`) turns your ship into a sentry guarding a planet. It can only be
 switched on **while you're orbiting a planet**, and it switches itself off the moment you
 leave orbit (or your ship is destroyed). While it's on, the status line shows
-**OVERWATCH** (vector mode: the orange **OVWT** lamp), and every enemy that comes into
+the orange **OVWT** lamp, and every enemy that comes into
 range draws fire from you. It picks the nearest enemy you can see and reaches for **special
 weapons first**:
 1. Your heavy weapon (`e`), whenever it's ready: the isokinetic cannon out to 9,000, the
@@ -414,11 +416,10 @@ Overwatch works on any server (protocol version 6).
 | `m` | Send a message: then `A` all, `T` your team, `F`/`R`/`K`/`O` a team, or a player slot (`0`–`9`, `a`–`v`). Type, then Enter |
 | `/` | Type a server command, such as `/record`, `/orders`, `/treaty rom` or `/upgrade torps` (see [Extras](#extras)) |
 | `L` | Player list |
-| `G` | Field manual: a players' and strategy guide shown in place of the player list (vector and braille). `[` `]` page through it, `{` `}` jump between chapters, `G` again to close |
+| `G` | Field manual: a players' and strategy guide shown in place of the player list. `[` `]` page through it, `{` `}` jump between chapters, `G` again to close |
 | `P` | Planet list |
 | `?` or `h` | Help |
 | `+` / `-`, mouse wheel | Zoom the tactical view |
-| `g` | Switch graphics: vector / braille |
 | `S` | Sound on / off |
 | `Ctrl-L` | Redraw the screen |
 | `q` | Quit (asks to confirm); `Ctrl-C` quits immediately |
@@ -721,8 +722,7 @@ netrek solo --aliens khan,borg,doomsday --alien-interval 90
 - **Planets:** planets taken by Khan, the Terran Empire or the Galactic Empire are shown in
   the alien's colour. Planets devoured by the planet killer or destroyed by Species 8472 or
   the Death Star turn grey.
-  Planets infested with tribbles are marked `T` (and shown with a dashed ring in vector
-  mode). All of
+  Planets infested with tribbles are marked `T` and shown with a dashed ring. All of
   them can be retaken with armies, and everything is
   restored when the galaxy resets.
 - **Ending:** an incursion ends when all its ships are destroyed (or V'Ger is joined, the
@@ -757,7 +757,7 @@ netrek solo --aliens khan,borg,doomsday --alien-interval 90
 | Tempest | neon blue web | `TP` | Arcade vector art: red bowtie flippers, purple diamond tankers, cyan zigzag pulsars, white spiky fuseballs, a yellow starburst core |
 | Nomad | silver | `NM` | A squat cylinder with a sensor head and two side panels |
 | Armus | oily violet | `AR` | A pool of tar with a face in it, inside a wobbling black slick with an oily sheen |
-| Nanites | aqua | – | No ships: infected ships show **NANITES** (vector mode: **NANO**) on their status line |
+| Nanites | aqua | – | No ships: infected ships show the **NANO** lamp on their status line |
 | Changelings | amber | `CL` | Your own empire's cruisers, until hit; then a drop of molten gold |
 | Metrons | white | `ME` | A radiant figure of light beside a glowing white arena ring |
 | Pakleds | khaki | `PA` | A lumpy hull with mismatched pods bolted on |
@@ -783,9 +783,8 @@ netrek solo --aliens khan,borg,doomsday --alien-interval 90
 | Nagilum | violet | `NG` | A hole in space, rimmed with faint light, with two eyes in it |
 | Kobayashi Maru | Klingon pink | `KM` | The Maru is civilian white: a bridge on a long spine between three pairs of fuel tanks, one holed by the mine (labelled `Kobayashi Maru`). The K't'ingas are D7-style battlecruisers in pink, a command bulb on a long neck and wings with nacelles (labelled `Klingon`) |
 
-The status line shows **HUNTED** (vector mode: **PREY**) when the Hirogen are after you,
-**TRIBBLES** (**TRIB**) when you're carrying them, **NANITES** (**NANO**) when you're
-infected, and **SURVIVORS** (**SURV**) when you have the Kobayashi Maru's survivors aboard.
+The status line shows **PREY** when the Hirogen are after you, **TRIB** when you're
+carrying tribbles, **NANO** when you're infected, and **SURV** when you have the Kobayashi Maru's survivors aboard.
 
 **Alien vessels:**
 
@@ -1360,8 +1359,8 @@ and type **`/build defence`**, **`/build yard`** or **`/build sensor`**:
 - **One per planet.** Building another type replaces the old one.
 - **Lost with the planet:** an outpost is destroyed when its planet changes hands
   (including sections of the Ringworld, or when the ring jumps away).
-- Outposts show as a small badge on the planet in vector mode, as a letter after the
-  planet's tags in braille, in the planet list (`P`) and in a planet's info (`i`).
+- Outposts show as a small badge on the planet, as a letter in the planet list (`P`),
+  and in a planet's info (`i`).
 
 Robots build too: while in orbit of one of their colonies (or a home world near the
 front) with the supplies or armies to spare and no enemy about, they put up a shipyard
@@ -1415,15 +1414,16 @@ checked when a client connects).
 
 ## Troubleshooting
 
-**It's in braille mode, but I'm using iTerm2.**
+**"Netrek needs a terminal that can show SIXEL images", but I'm using iTerm2.**
 You're probably inside tmux without the SIXEL feature enabled. See [tmux](#tmux). Check
 with `tmux display -p '#{client_termfeatures}'`: it should list `sixel`. Also check the
 outer terminal really is iTerm2. `tmux show-environment -g TERM_PROGRAM` shows what tmux
 was started from.
 
 **The maps look stretched or don't fill the window.**
-The client measures character cells in pixels. If your terminal doesn't report pixel
-sizes it assumes 8×16 cells. Resize the window or press `Ctrl-L` to re-measure.
+The client measures character cells in pixels. If the window size doesn't come with
+pixels it uses the cell size the terminal reported at startup, or else assumes 8×16
+cells. Resize the window or press `Ctrl-L` to re-measure.
 
 **Leftover images or garbage on screen.**
 Press `Ctrl-L` to clear and redraw everything.
@@ -1492,15 +1492,16 @@ src/
     terrain.rs          space terrain: generation and effects (--terrain)
     supply.rs           supply convoys and upgrades (--supply)
   client/
-    mod.rs              connection, input handling, graphics-mode detection, sound triggers
-    render.rs           layout, outfit screen, text dashboard, player list, messages, popups
-    render_vec.rs       vector-mode maps, graphical control panel and popups
-    render_terrain.rs   space terrain, in vector and braille
+    mod.rs              connection, keyboard and mouse input, sound triggers
+    probe.rs            startup check that the terminal can show SIXEL images
+    render.rs           layout, outfit screen, player list, messages, text popups
+    render_vec.rs       maps, graphical control panel and popups
+    render_terrain.rs   space terrain
     palette.rs          colours for empires, aliens and planets; terminal colour conversion
     shipart.rs          per-empire ship designs
     vg.rs               vector canvas on tiny-skia (paths, dashes, gradients, text)
     sixel.rs            SIXEL encoder with adaptive palette; font rendering (fontdue)
-    canvas.rs           diffing terminal screen buffer; braille canvas
+    canvas.rs           diffing terminal screen buffer
     sound.rs            sound synthesis and playback
 ```
 
@@ -1511,11 +1512,10 @@ src/
 2. **Client, text layer:** draws into a character-cell buffer and writes only the cells
    that changed.
 3. **Client, graphics:**
-   - In **vector** mode the maps and control panel are drawn with tiny-skia, encoded as
-     SIXEL and placed over reserved cells. The text layer never writes into those cells.
-     Images are only re-sent when they change. A popup is its own image, painted last
-     so it stays on top.
-   - In **braille** mode the maps are drawn as braille-dot line art in the text layer.
+   The maps, control panel, viewscreen, player list and messages are drawn with
+   tiny-skia, encoded as SIXEL and placed over reserved cells. The text layer never
+   writes into those cells. Images are only re-sent when they change. A popup is its own
+   image, painted last so it stays on top.
 
 ## Development
 

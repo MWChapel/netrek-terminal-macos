@@ -296,6 +296,7 @@ dependencies = [
  "clap",
  "crossterm",
  "fontdue",
+ "libc",
  "rand",
  "serde",
  "tiny-skia",

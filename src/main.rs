@@ -167,9 +167,6 @@ struct Who {
     /// Preferred ship: SC, DD, CA, BB, AS or SB
     #[arg(short, long, default_value = "CA", value_parser = parse_ship)]
     ship: ShipType,
-    /// Graphics for the maps: auto, vector (sixel images) or braille
-    #[arg(short, long, default_value = "auto", value_parser = ["auto", "vector", "sixel", "braille"])]
-    gfx: String,
     /// Start with sound effects turned off (toggle in game with S)
     #[arg(long)]
     mute: bool,
@@ -223,14 +220,6 @@ fn parse_ship(s: &str) -> Result<ShipType, String> {
     ShipType::from_abbr(s).ok_or_else(|| "ship must be one of SC DD CA BB AS SB".into())
 }
 
-fn parse_gfx(s: &str) -> Option<client::Gfx> {
-    match s {
-        "vector" | "sixel" => Some(client::Gfx::Vector),
-        "braille" => Some(client::Gfx::Braille),
-        _ => None,
-    }
-}
-
 fn player_name(who: &Who) -> String {
     who.name
         .clone()
@@ -240,6 +229,19 @@ fn player_name(who: &Who) -> String {
 
 fn main() {
     let cli = Cli::parse();
+    // The client only runs with SIXEL graphics, so check the terminal before
+    // connecting or starting a server.
+    let term = match cli.cmd {
+        Cmd::Server { .. } => None,
+        _ => match client::require_vector() {
+            Ok(t) => Some(t),
+            Err(e) => {
+                eprintln!("netrek: {}", e);
+                std::process::exit(1);
+            }
+        },
+    };
+    let term = move || term.expect("checked above");
     let result = match cli.cmd {
         Cmd::Server { port, bind, bots, empires, aliens, alien_interval, extras, no_observers } => server::run(server::ServerConfig {
             bind,
@@ -259,20 +261,18 @@ fn main() {
             name: player_name(&who),
             team: who.team,
             ship: who.ship,
-            gfx: parse_gfx(&who.gfx),
             mute: who.mute,
             observe: false,
-        }),
+        }, term()),
         Cmd::Observe { host, port, who } => client::run(client::ClientConfig {
             host,
             port,
             name: player_name(&who),
             team: who.team,
             ship: who.ship,
-            gfx: parse_gfx(&who.gfx),
             mute: who.mute,
             observe: true,
-        }),
+        }, term()),
         Cmd::Solo { bots, empires, aliens, alien_interval, extras, who } => {
             let cfg = server::ServerConfig {
                 bind: "127.0.0.1".into(),
@@ -293,10 +293,9 @@ fn main() {
                     name: player_name(&who),
                     team: who.team.or(Some(Team::Fed)),
                     ship: who.ship,
-                    gfx: parse_gfx(&who.gfx),
                     mute: who.mute,
                     observe: false,
-                })
+                }, term())
             })
         }
     };

@@ -1,6 +1,6 @@
 //! Everything that draws to the screen.
 
-use super::canvas::{Braille, Screen};
+use super::canvas::Screen;
 use super::{App, Layout, Mode, Popup, Rect, IMAGE_SLOTS, POPUP_SLOT, VIEW_SLOT};
 use crate::consts::*;
 use crate::proto::*;
@@ -19,148 +19,6 @@ pub fn team_color(t: Team) -> Color {
         Team::Ori => Color::Cyan,
         Team::Ind => Color::Grey,
     }
-}
-
-/// Outline of each ship class, nose pointing up, in units of the ship radius.
-fn ship_shape(s: ShipType) -> &'static [(f64, f64)] {
-    match s {
-        ShipType::Scout => &[(0.0, -1.0), (0.55, 0.8), (0.0, 0.35), (-0.55, 0.8)],
-        ShipType::Destroyer => &[(0.0, -1.0), (0.35, 0.1), (0.85, 0.9), (0.0, 0.5), (-0.85, 0.9), (-0.35, 0.1)],
-        ShipType::Cruiser => &[
-            (0.0, -1.0), (0.6, -0.55), (0.25, 0.0), (0.8, 0.95), (0.3, 0.6), (-0.3, 0.6), (-0.8, 0.95), (-0.25, 0.0), (-0.6, -0.55),
-        ],
-        ShipType::Battleship => &[(0.0, -1.0), (0.75, -0.35), (0.75, 0.95), (-0.75, 0.95), (-0.75, -0.35)],
-        ShipType::Assault => &[(0.0, -0.85), (0.95, 0.15), (0.55, 0.95), (-0.55, 0.95), (-0.95, 0.15)],
-        ShipType::Starbase
-        | ShipType::Fesarius
-        | ShipType::Amoeba
-        | ShipType::VgerCloud
-        | ShipType::CrystalEntity
-        | ShipType::ArmusSlick
-        | ShipType::MetronPresence
-        | ShipType::DarkMatterAnomaly
-        | ShipType::CaretakerArray
-        | ShipType::DelphicSphere
-        | ShipType::DeathStar
-        | ShipType::RogueMoon
-        | ShipType::Mongo => &[
-            (0.0, -1.0), (0.7, -0.7), (1.0, 0.0), (0.7, 0.7), (0.0, 1.0), (-0.7, 0.7), (-1.0, 0.0), (-0.7, -0.7),
-        ],
-        ShipType::BorgCube => &[(-0.75, -0.75), (0.75, -0.75), (0.75, 0.75), (-0.75, 0.75)],
-        // The Cygnus: a long lattice hull with outrigger pods.
-        // Ming's rockets: a pointed fuselage with swept fins.
-        ShipType::WarRocketAjax | ShipType::MingRocket => &[
-            (0.0, -1.0), (0.18, -0.6), (0.18, 0.3), (0.7, 0.85), (0.6, 1.0), (0.15, 0.8), (-0.15, 0.8), (-0.6, 1.0), (-0.7, 0.85), (-0.18, 0.3), (-0.18, -0.6),
-        ],
-        // The Eagle: nose cone, spine and four leg pods.
-        ShipType::Eagle => &[
-            (0.0, -1.0), (0.14, -0.72), (0.14, -0.65), (0.4, -0.65), (0.4, -0.42), (0.14, -0.42), (0.14, 0.42), (0.4, 0.42), (0.4, 0.68),
-            (0.18, 0.68), (0.18, 0.98), (-0.18, 0.98), (-0.18, 0.68), (-0.4, 0.68), (-0.4, 0.42), (-0.14, 0.42), (-0.14, -0.42), (-0.4, -0.42),
-            (-0.4, -0.65), (-0.14, -0.65), (-0.14, -0.72),
-        ],
-        ShipType::CygnusShip | ShipType::CygnusRelic => &[
-            (0.0, -1.0), (0.25, -0.7), (0.25, 0.2), (0.65, 0.2), (0.65, 0.75), (0.3, 0.98), (-0.3, 0.98), (-0.65, 0.75), (-0.65, 0.2), (-0.25, 0.2), (-0.25, -0.7),
-        ],
-        ShipType::Freighter => &[(0.0, -1.0), (0.4, -0.75), (0.45, 0.95), (-0.45, 0.95), (-0.4, -0.75)],
-        ShipType::Defiant | ShipType::Corsair | ShipType::VidiianHarvester | ShipType::TalosianShip | ShipType::SulibanCell | ShipType::KelvanShip => {
-            &[(0.0, -1.0), (0.55, 0.8), (0.0, 0.45), (-0.55, 0.8)]
-        }
-        ShipType::IconianShip | ShipType::BreenWarship | ShipType::XindiWarship | ShipType::KazonRaider | ShipType::HusnockWarship | ShipType::ExcalbianShip => &[
-            (0.0, -1.0), (0.6, -0.55), (0.25, 0.0), (0.8, 0.95), (0.3, 0.6), (-0.3, 0.6), (-0.8, 0.95), (-0.25, 0.0), (-0.6, -0.55),
-        ],
-        ShipType::PreserverObelisk => &[(0.0, -1.0), (0.3, 0.0), (0.0, 1.0), (-0.3, 0.0)],
-        ShipType::Flipper => &[(-0.9, -0.5), (0.0, 0.0), (-0.9, 0.5), (0.9, -0.5), (0.0, 0.0), (0.9, 0.5)],
-        ShipType::Tanker | ShipType::Pulsar | ShipType::Fuseball => &[(0.0, -0.8), (0.7, 0.0), (0.0, 0.8), (-0.7, 0.0)],
-        ShipType::TempestCore => &[
-            (0.0, -1.0), (0.3, -0.3), (1.0, 0.0), (0.3, 0.3), (0.0, 1.0), (-0.3, 0.3), (-1.0, 0.0), (-0.3, -0.3),
-        ],
-        ShipType::VothCityShip | ShipType::SheliakShip => &[
-            (0.0, -1.0), (0.7, -0.7), (1.0, 0.0), (0.7, 0.7), (0.0, 1.0), (-0.7, 0.7), (-1.0, 0.0), (-0.7, -0.7),
-        ],
-        ShipType::Warbird | ShipType::NeghVar => &[
-            (0.0, -1.0), (0.6, -0.55), (0.25, 0.0), (0.8, 0.95), (0.3, 0.6), (-0.3, 0.6), (-0.8, 0.95), (-0.25, 0.0), (-0.6, -0.55),
-        ],
-
-        ShipType::PlanetKiller => &[(-0.5, -1.0), (0.5, -1.0), (0.26, 1.0), (-0.26, 1.0)],
-        ShipType::NomadProbe => &[(-0.35, -1.0), (0.35, -1.0), (0.5, 0.3), (0.35, 1.0), (-0.35, 1.0), (-0.5, 0.3)],
-        ShipType::KzintiDreadnought => &[
-            (0.0, -0.8), (0.45, -0.55), (0.9, -0.2), (0.85, 0.6), (0.4, 0.95), (-0.4, 0.95), (-0.85, 0.6), (-0.9, -0.2), (-0.45, -0.55),
-        ],
-        ShipType::KzintiCruiser => &[(0.0, -1.0), (0.3, -0.5), (0.75, 0.0), (0.95, 0.7), (0.0, 0.75), (-0.95, 0.7), (-0.75, 0.0), (-0.3, -0.5)],
-        ShipType::KzintiStriker => &[(0.0, -1.0), (0.25, -0.2), (0.85, 0.55), (0.0, 0.7), (-0.85, 0.55), (-0.25, -0.2)],
-        ShipType::DysonHatch => &[(-0.9, -0.5), (0.9, -0.5), (0.9, 0.5), (-0.9, 0.5)],
-        ShipType::StarDestroyer => &[(0.0, -1.0), (0.62, 0.8), (0.62, 0.95), (-0.62, 0.95), (-0.62, 0.8)],
-        // Seen face on, as everyone remembers them: |o|
-        ShipType::TieFighter | ShipType::TieAdvanced => &[
-            (-0.9, -0.85), (-0.7, -0.85), (-0.7, -0.1), (0.7, -0.1), (0.7, -0.85), (0.9, -0.85),
-            (0.9, 0.85), (0.7, 0.85), (0.7, 0.1), (-0.7, 0.1), (-0.7, 0.85), (-0.9, 0.85),
-        ],
-        ShipType::PakledClunker => &[(0.0, -0.9), (0.8, -0.5), (0.8, 0.9), (-0.8, 0.9), (-0.8, -0.5)],
-        ShipType::Horta => &[(0.0, -0.8), (0.6, -0.4), (0.8, 0.3), (0.3, 0.8), (-0.4, 0.7), (-0.8, 0.1), (-0.5, -0.5)],
-        ShipType::ChangelingShip => &[(0.0, -1.0), (0.35, -0.4), (0.6, 0.3), (0.4, 0.85), (0.0, 0.95), (-0.4, 0.85), (-0.6, 0.3), (-0.35, -0.4)],
-        ShipType::TholianVessel
-        | ShipType::Bioship
-        | ShipType::JemHadarFighter
-        | ShipType::HirogenHunter
-        | ShipType::QChampion
-        | ShipType::SwarmShip => &[(0.0, -1.0), (0.55, 0.8), (0.0, 0.45), (-0.55, 0.8)],
-        ShipType::BirdOfPrey => &[
-            (0.0, -1.0), (0.25, -0.2), (1.0, 0.45), (0.9, 0.7), (0.2, 0.5), (0.0, 0.75), (-0.2, 0.5), (-0.9, 0.7), (-1.0, 0.45), (-0.25, -0.2),
-        ],
-        ShipType::QEntity => &[(0.0, -1.0), (0.25, -0.25), (1.0, 0.0), (0.25, 0.25), (0.0, 1.0), (-0.25, 0.25), (-1.0, 0.0), (-0.25, -0.25)],
-        ShipType::FerengiMarauder => &[(0.0, -0.3), (0.55, -0.9), (0.95, 0.0), (0.5, 0.85), (-0.5, 0.85), (-0.95, 0.0), (-0.55, -0.9)],
-        ShipType::WhaleProbe => &[(-0.28, -1.0), (0.28, -1.0), (0.28, 1.0), (-0.28, 1.0)],
-        ShipType::PromellianCruiser | ShipType::TamarianCruiser => &[(0.0, -1.0), (0.35, -0.7), (0.5, 0.9), (-0.5, 0.9), (-0.35, -0.7)],
-        ShipType::Gomtuu => &[(0.0, -0.8), (0.6, -0.4), (0.7, 0.3), (0.3, 0.9), (-0.3, 0.9), (-0.7, 0.3), (-0.6, -0.4)],
-        ShipType::SolarSail => &[(-0.9, -0.9), (0.9, -0.9), (0.9, 0.0), (0.2, 0.0), (0.2, 0.95), (-0.2, 0.95), (-0.2, 0.0), (-0.9, 0.0)],
-        ShipType::SikarianShip | ShipType::Dauntless => &[(0.0, -1.0), (0.6, 0.55), (0.3, 0.95), (-0.3, 0.95), (-0.6, 0.55)],
-        ShipType::SonaBattleship => &[
-            (0.0, -0.55), (0.3, -1.0), (0.4, -0.3), (0.72, 0.4), (0.55, 0.95), (-0.55, 0.95), (-0.72, 0.4), (-0.4, -0.3), (-0.3, -1.0),
-        ],
-        ShipType::HierarchyShip => &[(0.0, -0.95), (0.4, -0.6), (0.6, 0.15), (0.4, 0.7), (-0.4, 0.7), (-0.6, 0.15), (-0.4, -0.6)],
-        ShipType::PralorUnit => &[(-0.5, -0.9), (0.5, -0.9), (0.65, 0.9), (-0.65, 0.9)],
-        ShipType::Baxial => &[(-0.2, -0.95), (0.3, -0.85), (0.7, 0.3), (0.2, 0.95), (-0.65, 0.6), (-0.6, -0.3)],
-        ShipType::Narada => &[
-            (0.0, -1.0), (0.25, -0.6), (0.55, -0.1), (0.95, 0.3), (0.6, 0.2), (0.35, 0.95), (-0.35, 0.95), (-0.6, 0.2), (-0.95, 0.3), (-0.55, -0.1), (-0.25, -0.6),
-        ],
-        ShipType::NaradaDrill => &[(0.0, -0.8), (0.5, 0.0), (0.0, 0.8), (-0.5, 0.0)],
-        ShipType::KrenimTimeship => &[(0.0, -1.0), (0.35, -0.6), (0.45, 0.5), (0.2, 1.0), (-0.2, 1.0), (-0.45, 0.5), (-0.35, -0.6)],
-        ShipType::MalonFreighter => &[(-0.4, -1.0), (0.4, -1.0), (0.6, 0.95), (-0.6, 0.95)],
-        ShipType::Vaal | ShipType::Landru | ShipType::Calamarain | ShipType::Nagilum => &[
-            (0.0, -1.0), (0.7, -0.7), (1.0, 0.0), (0.7, 0.7), (0.0, 1.0), (-0.7, 0.7), (-1.0, 0.0), (-0.7, -0.7),
-        ],
-        ShipType::BluegillMother => &[(0.0, -0.9), (0.5, -0.5), (0.6, 0.3), (0.2, 0.9), (-0.2, 0.9), (-0.6, 0.3), (-0.5, -0.5)],
-        ShipType::DreadnoughtMissile => &[(0.0, -1.0), (0.35, -0.3), (0.7, 0.7), (0.25, 0.55), (0.0, 0.95), (-0.25, 0.55), (-0.7, 0.7), (-0.35, -0.3)],
-        ShipType::Scimitar => &[
-            (0.0, -1.0), (0.25, -0.45), (1.0, 0.35), (0.85, 0.75), (0.2, 0.5), (0.0, 0.9), (-0.2, 0.5), (-0.85, 0.75), (-1.0, 0.35), (-0.25, -0.45),
-        ],
-        // The Maru: a long spine between pairs of fuel tanks.
-        ShipType::KobayashiMaru => &[(0.0, -1.0), (0.25, -0.8), (0.55, -0.4), (0.55, 0.75), (0.3, 1.0), (-0.3, 1.0), (-0.55, 0.75), (-0.55, -0.4), (-0.25, -0.8)],
-        // A K't'inga: command bulb on a long neck, wings with nacelles.
-        ShipType::Ktinga => &[(0.0, -1.0), (0.12, -0.6), (0.12, 0.0), (0.9, 0.3), (0.9, 0.95), (0.4, 0.6), (0.0, 0.8), (-0.4, 0.6), (-0.9, 0.95), (-0.9, 0.3), (-0.12, 0.0), (-0.12, -0.6)],
-        ShipType::Augment | ShipType::GornRaider => &[
-            (0.0, -1.0), (0.6, -0.55), (0.25, 0.0), (0.8, 0.95), (0.3, 0.6), (-0.3, 0.6), (-0.8, 0.95), (-0.25, 0.0), (-0.6, -0.55),
-        ],
-    }
-}
-
-fn level_color(frac: f64, good_high: bool) -> Color {
-    let f = if good_high { frac } else { 1.0 - frac };
-    if f > 0.6 {
-        Color::Green
-    } else if f > 0.3 {
-        Color::Yellow
-    } else {
-        Color::Red
-    }
-}
-
-/// Cheap deterministic hash for the star field.
-fn hash(x: i64, y: i64) -> u64 {
-    let mut h = (x as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ (y as u64).wrapping_mul(0xC2B2_AE3D_27D4_EB4F);
-    h ^= h >> 29;
-    h = h.wrapping_mul(0xBF58_476D_1CE4_E5B9);
-    h ^ (h >> 32)
 }
 
 const LOGO: [&str; 6] = [
@@ -209,9 +67,8 @@ impl App {
             let (y, maxx) = (scr.h as i32 - 1, scr.w as i32 - 1);
             self.draw_input_line(scr, 1, y, maxx);
         }
-        let vector = in_game && self.gfx == super::Gfx::Vector;
         if self.popup != Popup::None {
-            if vector {
+            if in_game {
                 // Keep the maps as images and float the popup over them.
                 self.draw_popup_image(scr);
             } else {
@@ -241,7 +98,7 @@ impl App {
         }
     }
 
-    /// Vector mode: the popup as an image floating over the maps.
+    /// In game: the popup as an image floating over the maps.
     fn draw_popup_image(&mut self, scr: &mut Screen) {
         let (want_w, want_h, title) = self.popup_size();
         let (w, h) = (scr.w as i32, scr.h as i32);
@@ -370,7 +227,6 @@ impl App {
     /// below the galactic, and the player list in a side column when the
     /// window is wide enough. Sized in real pixels so shapes stay true.
     fn draw_game(&mut self, scr: &mut Screen) {
-        use super::Gfx;
         let (w, h) = (scr.w as i32, scr.h as i32);
         let (cw, ch) = self.cell_px;
         // The controls and messages keep a fixed height; only the maps grow
@@ -401,14 +257,9 @@ impl App {
             Some(p) if p.state != PState::Outfit => (p.x as f64, p.y as f64),
             _ => self.last_center,
         };
-        let vector = self.gfx == Gfx::Vector;
-        let cpx = match self.gfx {
-            Gfx::Vector => self.cell_px,
-            Gfx::Braille => (2.0, 4.0),
-        };
-        let (pw, ph) = ((tac.w as f64 * cpx.0) as i32, (tac.h as f64 * cpx.1) as i32);
+        let (pw, ph) = ((tac.w as f64 * cw) as i32, (tac.h as f64 * ch) as i32);
         let upd = TAC_WIDTH * self.zoom / pw as f64;
-        self.layout = Layout { tac, gal, center, upd, cpx };
+        self.layout = Layout { tac, gal, center, upd, cpx: self.cell_px };
 
         // Tactical border shows alert status, like the original client.
         let alert = match &me {
@@ -433,31 +284,21 @@ impl App {
         scr.frame(0, 0, sc + 2, sr + 2, &tac_title, alert);
         scr.frame(gx, 0, sc + 2, sr + 2, "", Color::White);
         let (vw, vh) = (upd * pw as f64, upd * ph as f64);
-        if vector {
-            let mut img = self.draw_tactical_vec(pw, ph, center, upd);
-            if let Some(b) = &f.banner {
-                let fs = (ch as f32 * 0.8).clamp(10.0, 18.0);
-                img.text_centered(&self.text, pw as f32 / 2.0, ph as f32 / 2.0, b, fs, [255.0, 255.0, 255.0]);
-            }
-            self.images.push(super::Image { x: tac.x, y: tac.y, slot: 0, data: super::sixel::encode_canvas(&img) });
-            scr.masks.push((tac.x, tac.y, tac.w, tac.h));
-            // The galaxy map changes slowly; refresh it a few times a second.
-            if self.sent[1].is_none() || self.last_gal.elapsed() >= Duration::from_millis(500) {
-                let (gw, gh) = ((gal.w as f64 * cw) as i32, (gal.h as f64 * ch) as i32);
-                let img = self.draw_galactic_vec(gw, gh, center, vw, vh);
-                self.images.push(super::Image { x: gal.x, y: gal.y, slot: 1, data: super::sixel::encode_canvas(&img) });
-                self.last_gal = std::time::Instant::now();
-            }
-            scr.masks.push((gal.x, gal.y, gal.w, gal.h));
-        } else {
-            self.sent = [None; IMAGE_SLOTS];
-            self.draw_tactical(scr, tac, center, upd);
-            self.draw_galactic(scr, gal, center, vw, vh);
-            if let Some(b) = &f.banner {
-                let bx = tac.x + (tac.w - b.chars().count() as i32) / 2;
-                scr.text(bx.max(tac.x), tac.y + tac.h / 2, b, Color::White, true);
-            }
+        let mut img = self.draw_tactical_vec(pw, ph, center, upd);
+        if let Some(b) = &f.banner {
+            let fs = (ch as f32 * 0.8).clamp(10.0, 18.0);
+            img.text_centered(&self.text, pw as f32 / 2.0, ph as f32 / 2.0, b, fs, [255.0, 255.0, 255.0]);
         }
+        self.images.push(super::Image { x: tac.x, y: tac.y, slot: 0, data: super::sixel::encode_canvas(&img) });
+        scr.masks.push((tac.x, tac.y, tac.w, tac.h));
+        // The galaxy map changes slowly; refresh it a few times a second.
+        if self.sent[1].is_none() || self.last_gal.elapsed() >= Duration::from_millis(500) {
+            let (gw, gh) = ((gal.w as f64 * cw) as i32, (gal.h as f64 * ch) as i32);
+            let img = self.draw_galactic_vec(gw, gh, center, vw, vh);
+            self.images.push(super::Image { x: gal.x, y: gal.y, slot: 1, data: super::sixel::encode_canvas(&img) });
+            self.last_gal = std::time::Instant::now();
+        }
+        scr.masks.push((gal.x, gal.y, gal.w, gal.h));
 
         // Bottom left: gauges (and the player list if there's no side column).
         // The panels always have room for their contents; any height the
@@ -467,651 +308,45 @@ impl App {
         let bh = h - by;
         scr.frame(0, by, sc + 2, bh, "", Color::White);
         let inner = Rect { x: 1, y: by + 1, w: sc, h: bh - 2 };
-        let list_top;
-        if vector {
-            // Controls drawn as a vector image; leave room for the list if needed.
-            let dash_rows = if side_col { inner.h } else { inner.h.min(DASH_ROWS) };
-            let img = self.draw_dashboard_vec((inner.w as f64 * cw) as i32, (dash_rows as f64 * ch) as i32);
-            self.images.push(super::Image { x: inner.x, y: inner.y, slot: 2, data: super::sixel::encode_canvas(&img) });
-            scr.masks.push((inner.x, inner.y, inner.w, dash_rows));
-            list_top = inner.y + dash_rows;
-        } else {
-            self.draw_gauges(scr, inner);
-            list_top = by + 5;
-        }
+        // The controls, with room left for the player list if it has no column.
+        let dash_rows = if side_col { inner.h } else { inner.h.min(DASH_ROWS) };
+        let img = self.draw_dashboard_vec((inner.w as f64 * cw) as i32, (dash_rows as f64 * ch) as i32);
+        self.images.push(super::Image { x: inner.x, y: inner.y, slot: 2, data: super::sixel::encode_canvas(&img) });
+        scr.masks.push((inner.x, inner.y, inner.w, dash_rows));
+        let list_top = inner.y + dash_rows;
         if !side_col && by + bh - 1 - list_top > 1 {
             let lh = by + bh - 1 - list_top;
-            if vector {
-                let img = self.draw_side_list_vec((sc as f64 * cw) as i32, (lh as f64 * ch) as i32);
-                self.images.push(super::Image { x: 1, y: list_top, slot: 4, data: super::sixel::encode_canvas(&img) });
-                scr.masks.push((1, list_top, sc, lh));
-            } else {
-                self.draw_side_list(scr, Rect { x: 1, y: list_top, w: sc, h: lh });
-            }
+            let img = self.draw_side_list_vec((sc as f64 * cw) as i32, (lh as f64 * ch) as i32);
+            self.images.push(super::Image { x: 1, y: list_top, slot: 4, data: super::sixel::encode_canvas(&img) });
+            scr.masks.push((1, list_top, sc, lh));
         }
 
-        // Bottom right: warning line, talk line, message log. It runs the
-        // full width under the galaxy map and the player list, except in
-        // vector mode, where the viewscreen sits under the galaxy map and
-        // the messages under the player list.
-        let viewscreen = vector && side_col;
+        // Bottom right: warning line, talk line, message log. With a side
+        // column the viewscreen sits under the galaxy map and the messages
+        // under the player list; otherwise the messages run the full width
+        // under the galaxy map.
+        let viewscreen = side_col;
         let comms_x = if viewscreen { maps_right } else { gx };
         scr.frame(comms_x, by, w - comms_x, bh, "", Color::White);
         let rx = comms_x + 1;
         let rw = w - comms_x - 2;
-        if vector {
-            let img = self.draw_comms_vec((rw as f64 * cw) as i32, ((bh - 2) as f64 * ch) as i32);
-            self.images.push(super::Image { x: rx, y: by + 1, slot: 3, data: super::sixel::encode_canvas(&img) });
-            scr.masks.push((rx, by + 1, rw, bh - 2));
-            if viewscreen {
-                scr.frame(gx, by, maps_right - gx, bh, "", Color::White);
-                let (vw, vh) = (maps_right - gx - 2, bh - 2);
-                let img = self.draw_viewscreen_vec((vw as f64 * cw) as i32, (vh as f64 * ch) as i32);
-                self.images.push(super::Image { x: gx + 1, y: by + 1, slot: VIEW_SLOT, data: super::sixel::encode_canvas(&img) });
-                scr.masks.push((gx + 1, by + 1, vw, vh));
-            }
-            if side_col {
-                scr.frame(maps_right, 0, w - maps_right, sr + 2, "", Color::White);
-                let (lw, lh) = (w - maps_right - 2, sr);
-                let img = self.draw_side_list_vec((lw as f64 * cw) as i32, (lh as f64 * ch) as i32);
-                self.images.push(super::Image { x: maps_right + 1, y: 1, slot: 4, data: super::sixel::encode_canvas(&img) });
-                scr.masks.push((maps_right + 1, 1, lw, lh));
-            }
-            return;
+        let img = self.draw_comms_vec((rw as f64 * cw) as i32, ((bh - 2) as f64 * ch) as i32);
+        self.images.push(super::Image { x: rx, y: by + 1, slot: 3, data: super::sixel::encode_canvas(&img) });
+        scr.masks.push((rx, by + 1, rw, bh - 2));
+        if viewscreen {
+            scr.frame(gx, by, maps_right - gx, bh, "", Color::White);
+            let (vw, vh) = (maps_right - gx - 2, bh - 2);
+            let img = self.draw_viewscreen_vec((vw as f64 * cw) as i32, (vh as f64 * ch) as i32);
+            self.images.push(super::Image { x: gx + 1, y: by + 1, slot: VIEW_SLOT, data: super::sixel::encode_canvas(&img) });
+            scr.masks.push((gx + 1, by + 1, vw, vh));
         }
-        if let Some((text, t)) = &self.warning {
-            if t.elapsed() < Duration::from_secs(if self.tmux_hint { 12 } else { 5 }) {
-                scr.text_clip(rx, by + 1, text, Color::Yellow, true, rx + rw - 1);
-            }
-        }
-        self.draw_input_line(scr, rx, by + 2, rx + rw - 1);
-        let mut sep = by + 3;
-        for (text, col) in self.status_lines() {
-            let c = super::palette::to_color(col, self.truecolor);
-            for line in wrap_chars(&text, rw.max(1) as usize) {
-                scr.text_clip(rx, sep, &line, c, false, rx + rw - 1);
-                sep += 1;
-            }
-        }
-        for x in rx..rx + rw {
-            scr.put(x, sep, '─', DIM, false);
-        }
-        self.draw_messages(scr, Rect { x: rx, y: sep + 1, w: rw, h: (by + bh - 1 - sep - 1).max(0) });
-
-        // Side column: the player list, beside the maps.
         if side_col {
             scr.frame(maps_right, 0, w - maps_right, sr + 2, "", Color::White);
-            self.draw_side_list(scr, Rect { x: maps_right + 1, y: 1, w: w - maps_right - 2, h: sr });
+            let (lw, lh) = (w - maps_right - 2, sr);
+            let img = self.draw_side_list_vec((lw as f64 * cw) as i32, (lh as f64 * ch) as i32);
+            self.images.push(super::Image { x: maps_right + 1, y: 1, slot: 4, data: super::sixel::encode_canvas(&img) });
+            scr.masks.push((maps_right + 1, 1, lw, lh));
         }
-    }
-
-    fn draw_tactical(&self, scr: &mut Screen, r: Rect, center: (f64, f64), upd: f64) {
-        let f = self.frame.as_ref().unwrap();
-        let mut b = Braille::new(r.x, r.y, r.w, r.h);
-        let (dw, dh) = b.dots();
-        let (cx, cy) = (dw as f64 / 2.0, dh as f64 / 2.0);
-        let to_dot = |x: f64, y: f64| (cx + (x - center.0) / upd, cy + (y - center.1) / upd);
-        let half_w = dw as f64 / 2.0 * upd;
-        let half_h = dh as f64 / 2.0 * upd;
-        let visible = |x: f64, y: f64, margin: f64| {
-            (x - center.0).abs() < half_w + margin && (y - center.1).abs() < half_h + margin
-        };
-        let mut labels: Vec<(i32, i32, String, Color, bool)> = Vec::new();
-
-        // Star field, fixed in galaxy space so you can feel your motion.
-        let cell = 1600.0;
-        let (x0, x1) = (((center.0 - half_w) / cell).floor() as i64, ((center.0 + half_w) / cell).ceil() as i64);
-        let (y0, y1) = (((center.1 - half_h) / cell).floor() as i64, ((center.1 + half_h) / cell).ceil() as i64);
-        for gy in y0..=y1 {
-            for gx in x0..=x1 {
-                let hv = hash(gx, gy);
-                if hv % 3 != 0 {
-                    continue;
-                }
-                let sx = gx as f64 * cell + (hv >> 8) as f64 % cell;
-                let sy = gy as f64 * cell + (hv >> 24) as f64 % cell;
-                if !(0.0..=GWIDTH).contains(&sx) || !(0.0..=GWIDTH).contains(&sy) {
-                    continue;
-                }
-                let (dx, dy) = to_dot(sx, sy);
-                b.dotf(dx, dy, DIM, 0);
-            }
-        }
-
-        // Space terrain (with the server's --terrain option).
-        super::render_terrain::draw_braille(&mut b, f, &to_dot, upd, true, &mut labels);
-        super::render_terrain::draw_tempest_braille(&mut b, f, &to_dot, upd);
-        super::render_terrain::draw_zones_braille(&mut b, f, &to_dot, upd);
-        super::render_terrain::draw_ring_braille(&mut b, f, &to_dot, upd);
-
-        // Edge of the galaxy.
-        for (ax, ay, bx, by) in [
-            (0.0, 0.0, GWIDTH, 0.0),
-            (GWIDTH, 0.0, GWIDTH, GWIDTH),
-            (GWIDTH, GWIDTH, 0.0, GWIDTH),
-            (0.0, GWIDTH, 0.0, 0.0),
-        ] {
-            let (p0, p1) = (to_dot(ax, ay), to_dot(bx, by));
-            let (p0x, p0y) = (p0.0.clamp(-5.0, dw as f64 + 5.0), p0.1.clamp(-5.0, dh as f64 + 5.0));
-            let (p1x, p1y) = (p1.0.clamp(-5.0, dw as f64 + 5.0), p1.1.clamp(-5.0, dh as f64 + 5.0));
-            b.line_pattern(p0x, p0y, p1x, p1y, Color::DarkRed, 1, 2);
-        }
-
-        // Planets.
-        let pr = (700.0 / upd).max(2.5);
-        for (k, def) in super::planet_defs(f).iter().enumerate() {
-            if !visible(def.x, def.y, 3000.0) {
-                continue;
-            }
-            let info = &f.planets[k];
-            let col = if info.known { self.planet_color(info) } else { DIM };
-            let (px, py) = to_dot(def.x, def.y);
-            b.circle(px, py, pr, col, 2);
-            if info.flags & PL_HOME != 0 {
-                b.circle(px, py, pr * 0.55, col, 2);
-            }
-            if info.known && info.flags & PL_REPAIR != 0 {
-                b.line(px - pr * 0.4, py, px + pr * 0.4, py, col, 2);
-                b.line(px, py - pr * 0.4, px, py + pr * 0.4, col, 2);
-            }
-            let lx = (px / 2.0) as i32;
-            let ly = ((py + pr) / 4.0) as i32 + 1;
-            labels.push((lx - def.name.len() as i32 / 2, ly, def.name.to_string(), col, info.known && info.armies > 4));
-            if info.known {
-                let mut tag = format!("{}", info.armies);
-                if info.flags & PL_REPAIR != 0 {
-                    tag.push('R');
-                }
-                if info.flags & PL_FUEL != 0 {
-                    tag.push('F');
-                }
-                if info.flags & PL_AGRI != 0 {
-                    tag.push('A');
-                }
-                if info.tribbles {
-                    tag.push('T');
-                }
-                if let Some(o) = info.outpost {
-                    tag.push(o.letter());
-                }
-                labels.push((lx - tag.len() as i32 / 2, ly + 1, tag, DIM, false));
-            }
-        }
-
-        // Tholian webs.
-        for w in &f.webs {
-            let (ax, ay) = to_dot(w.x1 as f64, w.y1 as f64);
-            let (bx, by) = to_dot(w.x2 as f64, w.y2 as f64);
-            b.line(ax, ay, bx, by, Color::DarkYellow, 3);
-        }
-
-        // Armies spilled from Ferengi wrecks.
-        for l in &f.loot {
-            let (lx, ly) = to_dot(l.x as f64, l.y as f64);
-            b.circle(lx, ly, 2.0, Color::Yellow, 3);
-            labels.push(((lx / 2.0) as i32 + 1, (ly / 4.0) as i32, format!("+{}", l.armies), Color::Yellow, true));
-        }
-
-        // Captured ships under tow: a dashed hulk on a line to its captor.
-        for z in &f.prizes {
-            let (zx, zy) = to_dot(z.x as f64, z.y as f64);
-            if let Some(c) = f.players.iter().find(|p| p.id == z.captor) {
-                let (cx, cy) = to_dot(c.x as f64, c.y as f64);
-                b.line_pattern(cx, cy, zx, zy, DIM, 3, 3);
-            }
-            let sr = (400.0 / upd).max(2.0);
-            let a = z.dir as f64 * std::f64::consts::TAU / 256.0;
-            let (sa, ca) = (a.sin(), a.cos());
-            let pts: Vec<(f64, f64)> = ship_shape(z.ship).iter().map(|&(px, py)| (zx + (px * ca - py * sa) * sr, zy + (px * sa + py * ca) * sr)).collect();
-            for k in 0..pts.len() {
-                let (p0, p1) = (pts[k], pts[(k + 1) % pts.len()]);
-                b.line_pattern(p0.0, p0.1, p1.0, p1.1, team_color(z.team), 5, 2);
-            }
-            labels.push(((zx / 2.0) as i32 + 2, (zy / 4.0) as i32, "PRIZE".into(), Color::Yellow, false));
-        }
-
-        // Phasers.
-        for ph in &f.phasers {
-            let owner = f.players.iter().find(|p| p.id == ph.owner);
-            let col = match owner {
-                _ if ph.owner == self.slot => Color::White,
-                // The Death Star's superlaser (and its turbolasers) are green.
-                Some(p) if p.ship == ShipType::DeathStar => Color::Green,
-                // The Cygnus's sentry robots fire red lasers.
-                Some(p) if p.ship == ShipType::CygnusShip => Color::Red,
-                Some(p) => self.player_color(p),
-                None => Color::White,
-            };
-            let (ax, ay) = to_dot(ph.x1 as f64, ph.y1 as f64);
-            let (bx, by) = to_dot(ph.x2 as f64, ph.y2 as f64);
-            b.line_pattern(ax, ay, bx, by, col, 6, if ph.hit { 1 } else { 2 });
-        }
-
-        // Tractor and pressor beams.
-        for p in f.players.iter().filter(|p| p.state == PState::Alive) {
-            if let Some(t) = p.tractor_target.and_then(|t| f.players.iter().find(|q| q.id == t)) {
-                let (ax, ay) = to_dot(p.x as f64, p.y as f64);
-                let (bx, by) = to_dot(t.x as f64, t.y as f64);
-                let col = if p.flags & pf::PRESSOR != 0 { Color::Magenta } else { Color::Green };
-                b.line_pattern(ax, ay, bx, by, col, 3, 3);
-            }
-        }
-
-        // Torpedoes.
-        for t in &f.torps {
-            if !visible(t.x as f64, t.y as f64, 500.0) {
-                continue;
-            }
-            let (x, y) = to_dot(t.x as f64, t.y as f64);
-            let mine = t.owner == self.slot;
-            let col = if mine { Color::White } else { f.players.iter().find(|p| p.id == t.owner).map_or(team_color(t.team), |p| self.player_color(p)) };
-            if t.explode > 0 && t.kind == TorpKind::Tricobalt {
-                b.circle(x, y, (t.explode as f64 / 6.0) * 3500.0 / upd, Color::Yellow, 5);
-            } else if t.kind == TorpKind::Tricobalt {
-                b.disc(x, y, 2.0, Color::Yellow, 5);
-                b.circle(x, y, 4.0, Color::Red, 5);
-            } else if t.explode > 0 {
-                let r = t.explode as f64 * 0.9 * (DAMDIST / 2000.0) / (upd / 140.0).max(0.5);
-                b.arc(x, y, r.min(10.0), if t.explode % 2 == 0 { Color::Yellow } else { Color::Red }, 5, 2);
-            } else if t.kind == TorpKind::Plasma {
-                b.disc(x, y, 1.5, col, 5);
-                b.circle(x, y, 3.0, col, 5);
-            } else {
-                b.dotf(x, y, col, 4);
-                b.dotf(x + 1.0, y, col, 4);
-                b.dotf(x - 1.0, y, col, 4);
-                b.dotf(x, y + 1.0, col, 4);
-                b.dotf(x, y - 1.0, col, 4);
-            }
-        }
-
-        // Ships.
-        let sr = (4.5 / self.zoom.sqrt()).clamp(2.5, 7.0);
-        for p in f.players.iter() {
-            if p.state == PState::Outfit || p.state == PState::Dead || p.fuzzy {
-                continue;
-            }
-            if !visible(p.x as f64, p.y as f64, 1000.0) {
-                continue;
-            }
-            let (x, y) = to_dot(p.x as f64, p.y as f64);
-            let is_me = p.id == self.slot;
-            if p.state == PState::Exploding {
-                let fr = p.explode_frame as f64;
-                let col = if p.explode_frame % 2 == 0 { Color::Yellow } else { Color::Red };
-                b.arc(x, y, fr * 1.6, col, 7, 1);
-                b.arc(x, y, fr * 0.8, Color::White, 7, 2);
-                for k in 0..10 {
-                    let a = k as f64 * 0.63 + fr * 0.2;
-                    b.dotf(x + a.cos() * fr * 2.4, y + a.sin() * fr * 2.4, col, 7);
-                }
-                continue;
-            }
-            let col = if is_me { Color::White } else { self.player_color(p) };
-            let cloaked = p.flags & (pf::CLOAK | pf::PHASED) != 0;
-            // Tempest perspective: climbers grow as they near the rim.
-            let sr = match super::render_vec::web_lane_width(f, p) {
-                Some(w) => (w * 0.36 / upd).clamp(1.0, 9.0),
-                None => sr,
-            };
-            if p.flags & pf::CHARGING != 0 {
-                b.circle(x, y, sr * 2.0, Color::Cyan, 3);
-            }
-            let a = p.dir as f64 * std::f64::consts::TAU / 256.0;
-            let (sa, ca) = (a.sin(), a.cos());
-            let pts: Vec<(f64, f64)> = ship_shape(p.ship)
-                .iter()
-                .map(|&(px, py)| (x + (px * ca - py * sa) * sr, y + (px * sa + py * ca) * sr))
-                .collect();
-            let prio = if is_me { 8 } else { 6 };
-            let (scol, step) = if cloaked { (DIM, 2) } else { (col, 1) };
-            for k in 0..pts.len() {
-                let (p0, p1) = (pts[k], pts[(k + 1) % pts.len()]);
-                b.line_pattern(p0.0, p0.1, p1.0, p1.1, scol, prio, step);
-            }
-            if p.ship == ShipType::Starbase {
-                b.circle(x, y, sr * 0.4, scol, prio);
-            }
-            if p.flags & pf::SHIELD != 0 && !cloaked {
-                let shield_col = if is_me {
-                    let frac = f.me_info.shield as f64 / p.ship.stats().max_shield;
-                    match level_color(frac, true) {
-                        Color::Green => Color::Blue,
-                        c => c,
-                    }
-                } else {
-                    col
-                };
-                b.arc(x, y, sr + 2.5, shield_col, prio - 1, 1);
-            }
-            let tag = super::palette::callsign(p);
-            labels.push((((x + sr + 3.0) / 2.0) as i32, (y / 4.0) as i32, tag, if cloaked { DIM } else { self.player_color(p) }, is_me));
-        }
-
-        b.blit(scr);
-        for (lx, ly, text, col, bold) in labels {
-            for (k, ch) in text.chars().enumerate() {
-                let xx = lx + k as i32;
-                if xx >= 0 && xx < r.w && ly >= 0 && ly < r.h {
-                    scr.put(r.x + xx, r.y + ly, ch, col, bold);
-                }
-            }
-        }
-
-        // Mouse pointer crosshair.
-        if let Some((px, py)) = self.pointer {
-            if r.contains(px, py) {
-                scr.put(px, py, '+', Color::Magenta, true);
-            }
-        }
-    }
-
-    fn draw_galactic(&self, scr: &mut Screen, r: Rect, center: (f64, f64), view_w: f64, view_h: f64) {
-        let f = self.frame.as_ref().unwrap();
-        let mut b = Braille::new(r.x, r.y, r.w, r.h);
-        let (dw, dh) = b.dots();
-        let sx = dw as f64 / GWIDTH;
-        let sy = dh as f64 / GWIDTH;
-        let to_dot = |x: f64, y: f64| (x * sx, y * sy);
-
-        // Quadrant guides.
-        b.line_pattern(dw as f64 / 2.0, 0.0, dw as f64 / 2.0, dh as f64, DIM, 0, 6);
-        b.line_pattern(0.0, dh as f64 / 2.0, dw as f64, dh as f64 / 2.0, DIM, 0, 6);
-
-        // Tactical window outline.
-        let (ax, ay) = to_dot(center.0 - view_w / 2.0, center.1 - view_h / 2.0);
-        let (bx, by) = to_dot(center.0 + view_w / 2.0, center.1 + view_h / 2.0);
-        b.line_pattern(ax, ay, bx, ay, DIM, 1, 2);
-        b.line_pattern(bx, ay, bx, by, DIM, 1, 2);
-        b.line_pattern(bx, by, ax, by, DIM, 1, 2);
-        b.line_pattern(ax, by, ax, ay, DIM, 1, 2);
-
-        let mut labels: Vec<(i32, i32, String, Color, bool)> = Vec::new();
-        super::render_terrain::draw_braille(&mut b, f, &to_dot, 1.0 / sx, false, &mut labels);
-        super::render_terrain::draw_tempest_braille(&mut b, f, &to_dot, 1.0 / sx);
-        super::render_terrain::draw_zones_braille(&mut b, f, &to_dot, 1.0 / sx);
-        super::render_terrain::draw_ring_braille(&mut b, f, &to_dot, 1.0 / sx);
-        for (k, def) in super::planet_defs(f).iter().enumerate() {
-            let info = &f.planets[k];
-            let col = if info.known { self.planet_color(info) } else { DIM };
-            let (x, y) = to_dot(def.x, def.y);
-            b.disc(x, y, 0.8, col, 2);
-            let abbr: String = def.name.chars().take(3).collect();
-            let cx = (x / 2.0) as i32;
-            let cy = (y / 4.0) as i32;
-            labels.push((cx + 1, cy, abbr, col, info.known && info.armies > 4));
-        }
-        for p in f.players.iter() {
-            if p.state != PState::Alive {
-                continue;
-            }
-            let (x, y) = to_dot(p.x as f64, p.y as f64);
-            let (cx, cy) = ((x / 2.0) as i32, (y / 4.0) as i32);
-            let is_me = p.id == self.slot;
-            let (text, col) = if p.fuzzy {
-                ("??".to_string(), DIM)
-            } else {
-                (super::palette::callsign(p), if is_me { Color::White } else { self.player_color(p) })
-            };
-            labels.push((cx, cy, text, col, true));
-        }
-        b.blit(scr);
-        for (lx, ly, text, col, bold) in labels {
-            let lx = lx.clamp(0, (r.w - text.chars().count() as i32).max(0));
-            for (k, ch) in text.chars().enumerate() {
-                let xx = lx + k as i32;
-                if xx < r.w && ly >= 0 && ly < r.h {
-                    scr.put(r.x + xx, r.y + ly, ch, col, bold);
-                }
-            }
-        }
-        if let Some((px, py)) = self.pointer {
-            if r.contains(px, py) {
-                scr.put(px, py, '+', Color::Magenta, true);
-            }
-        }
-    }
-
-    /// The classic dashboard: a row of ramp gauges, then weapons and status.
-    fn draw_gauges(&self, scr: &mut Screen, r: Rect) {
-        let f = self.frame.as_ref().unwrap();
-        let Some(me) = self.me() else { return };
-        let s = me.ship.stats();
-        let mi = &f.me_info;
-        let maxx = r.x + r.w - 1;
-        let gw = ((r.w - 4) / 5).clamp(8, 22);
-        let gauges: [(&str, f64, u32, u32); 5] = [
-            ("Spd", mi.speed as f64 / s.max_speed as f64, mi.speed as u32, mi.max_speed_now as u32),
-            ("Ful", mi.fuel as f64 / s.max_fuel, mi.fuel, s.max_fuel as u32),
-            ("Shl", mi.shield as f64 / s.max_shield, mi.shield, s.max_shield as u32),
-            ("Dam", mi.damage as f64 / s.max_damage, mi.damage, s.max_damage as u32),
-            ("Egn", mi.etemp as f64 / 100.0, mi.etemp, 100),
-        ];
-        for (k, (label, frac, val, max)) in gauges.iter().enumerate() {
-            let gx = r.x + k as i32 * (gw + 1);
-            if gx + gw > maxx + 1 {
-                break;
-            }
-            let v = val.to_string();
-            scr.text(gx, r.y, &v, Color::White, true);
-            scr.text_clip(gx + v.len() as i32, r.y, &format!("/{}", max), DIM, false, gx + gw - 1);
-            self.draw_ramp(scr, gx, r.y + 1, gw, *frac, label);
-        }
-        let shields = if me.flags & pf::SHIELD != 0 { "shields UP" } else { "shields down" };
-        let wpn = if me.flags & pf::WEAPON_HOT != 0 { "Wpn: OVERHEATED".to_string() } else { format!("Wpn: {}/100", mi.wtemp) };
-        let mut line = format!(
-            "{}  {}  kills {:.2}  armies {}/{}  torps {}/{}  {}{}",
-            wpn,
-            shields,
-            mi.kills,
-            mi.armies,
-            mi.max_armies_now,
-            mi.torps_out,
-            me.ship.max_torps(),
-            s.abbr,
-            if me.flags & pf::CLOAK != 0 { "  CLOAKED" } else { "" }
-        );
-        if let Some(k) = mi.orbiting {
-            line += &format!("  orbiting {}", super::planet_name(f, k as usize));
-        }
-        if let Some(l) = &mi.lock {
-            line += &format!("  lock {}", l);
-        }
-        for (flag, name) in [
-            (pf::REPAIR, "REPAIR"),
-            (pf::BOMB, "BOMB"),
-            (pf::BEAMUP, "BEAM-UP"),
-            (pf::BEAMDOWN, "BEAM-DOWN"),
-            (pf::TRACTOR, "TRACTOR"),
-            (pf::PRESSOR, "PRESSOR"),
-            (pf::TRAPPED, "TRAPPED"),
-            (pf::ZAPPER, "SUPERZAPPER(d)"),
-            (pf::OVERWATCH, "OVERWATCH"),
-            (pf::HUNTED, "HUNTED"),
-            (pf::TRIBBLES, "TRIBBLES"),
-            (pf::NANITES, "NANITES"),
-            (pf::BOARDING, "BOARDING"),
-            (pf::BOARDED, "BOARDED!"),
-            (pf::TOWING, "TOWING PRIZE"),
-            (pf::SURVIVORS, "SURVIVORS"),
-        ] {
-            if me.flags & flag != 0 {
-                line += "  ";
-                line += name;
-            }
-        }
-        let status = wrap_chars(&line, r.w.max(1) as usize);
-        for (k, part) in status.iter().enumerate() {
-            if r.y + 3 + (k as i32) < r.y + r.h {
-                scr.text_clip(r.x, r.y + 3 + k as i32, part, Color::Grey, false, maxx);
-            }
-        }
-        // Ship systems (with --subsystems): green working, yellow damaged,
-        // red out; * marks the one damage control is fixing first.
-        let mut sys_rows = 0;
-        if let Some(sys) = mi.systems {
-            let y = r.y + 3 + status.len() as i32;
-            if y < r.y + r.h {
-                let mut x = r.x;
-                scr.text_clip(x, y, "Sys", DIM, false, maxx);
-                x += 4;
-                for (k, sy) in System::ALL.iter().enumerate() {
-                    let h = sys[k];
-                    let col = match h {
-                        0 => Color::Red,
-                        1..=74 => Color::Yellow,
-                        _ => Color::Green,
-                    };
-                    let mark = if mi.fix_first == Some(*sy) { "*" } else { "" };
-                    let pct = if (1..100).contains(&h) { h.to_string() } else { String::new() };
-                    let txt = format!("{}{}{}", mark, sy.abbr(), pct);
-                    scr.text_clip(x, y, &txt, col, h < 100, maxx);
-                    x += txt.chars().count() as i32 + 1;
-                }
-                sys_rows = 1;
-            }
-        }
-        // Special or relic ship, then advanced tech, below the status line.
-        if self.tech_in_controls {
-            let mut ty = r.y + 4 + status.len() as i32 + sys_rows;
-            for (k, (text, col)) in self.ship_lines().into_iter().enumerate() {
-                for part in wrap_chars(&text, (r.w - 1).max(1) as usize) {
-                    if ty < r.y + r.h {
-                        scr.text_clip(r.x + usize::from(k > 0) as i32, ty, &part, super::palette::to_color(col, self.truecolor), k == 0, maxx);
-                    }
-                    ty += 1;
-                }
-            }
-            let tech = self.tech_lines();
-            if !tech.is_empty() && ty < r.y + r.h {
-                scr.text_clip(r.x, ty, "Advanced tech", super::palette::to_color(TECH_COLOR, self.truecolor), true, maxx);
-                ty += 1;
-            }
-            // Two columns when the panel is wide enough for them.
-            let widest = tech.iter().map(|(t, _)| t.chars().count() as i32).max().unwrap_or(0);
-            let cols = if r.w >= 2 * (widest + 3) { 2 } else { 1 };
-            let rows = tech.len().div_ceil(cols as usize) as i32;
-            for (k, (text, col)) in tech.into_iter().enumerate() {
-                let (c, row) = (k as i32 / rows, k as i32 % rows);
-                if ty + row < r.y + r.h {
-                    scr.text_clip(r.x + 1 + c * (r.w / 2), ty + row, &text, super::palette::to_color(col, self.truecolor), false, maxx);
-                }
-            }
-        }
-        let secs = f.tick / UPS as u32;
-        let clock = format!("{:02}:{:02}:{:02}", secs / 3600, secs / 60 % 60, secs % 60);
-        let cx = r.x + 5 * (gw + 1);
-        if cx + clock.len() as i32 <= maxx {
-            scr.text(cx, r.y + 1, &clock, Color::White, false);
-        }
-    }
-
-    /// A rising ramp gauge (green → yellow → red), two rows tall, drawn with
-    /// eighth-block glyphs.
-    fn draw_ramp(&self, scr: &mut Screen, x: i32, y: i32, w: i32, frac: f64, label: &str) {
-        use super::palette::{mix, rgb, to_color};
-        const BARS: [char; 9] = [' ', '▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
-        let tc = self.truecolor;
-        let (green, yellow, red) = (rgb(0x20c040), rgb(0xf0e020), rgb(0xe02020));
-        let frac = frac.clamp(0.0, 1.0) as f32;
-        let lx = x + w - label.chars().count() as i32 - 1;
-        for c in 0..w {
-            let t = (c as f32 + 0.5) / w as f32;
-            let col = if t <= frac {
-                if t < 0.5 {
-                    mix(green, yellow, t * 2.0)
-                } else {
-                    mix(yellow, red, (t - 0.5) * 2.0)
-                }
-            } else {
-                [40.0, 42.0, 48.0]
-            };
-            let fg = to_color(col, tc);
-            // Height in eighths of a cell, over two rows.
-            let e = ((0.1 + 0.9 * t) * 16.0).round() as usize;
-            let (low, high) = (e.min(8), e.saturating_sub(8));
-            scr.put(x + c, y, BARS[high], fg, false);
-            let k = x + c - lx;
-            match label.chars().nth(k.max(0) as usize).filter(|_| k >= 0) {
-                // The label sits in the full-height part of the ramp.
-                Some(ch) => scr.put_cell(x + c, y + 1, ch, to_color([255.0, 255.0, 255.0], tc), fg, true),
-                None => scr.put(x + c, y + 1, BARS[low], fg, false),
-            }
-        }
-    }
-
-    /// The player list, or the field manual in its place (G).
-    fn draw_side_list(&self, scr: &mut Screen, r: Rect) {
-        if self.guide {
-            self.draw_guide(scr, r);
-        } else {
-            self.draw_player_list(scr, r, true);
-        }
-    }
-
-    /// The field manual in character cells, from the current position down.
-    fn draw_guide(&self, scr: &mut Screen, r: Rect) {
-        use super::guide::{self, Kind};
-        let maxx = r.x + r.w - 1;
-        let w = r.w.max(8) as usize;
-        let blocks = guide::blocks();
-        let pos = self.guide_pos.min(blocks.len() - 1);
-        scr.text_clip(r.x, r.y, &format!("FIELD MANUAL  {}/{}", guide::chapter_at(pos), guide::chapters()), Color::White, true, maxx);
-        scr.text_clip(r.x, r.y + 1, "[ ] page  { } chapter  G close", DIM, false, maxx);
-        // The last row is kept for the "more" marker.
-        let bottom = r.y + r.h - 1;
-        let mut y = r.y + 3;
-        let mut shown = 0;
-        for (n, b) in blocks[pos..].iter().enumerate() {
-            // Each line: text, colour, bold, and the key column (for key rows).
-            let mut lines: Vec<(String, Color, bool)> = Vec::new();
-            let gap = matches!(b.kind, Kind::Chapter | Kind::Section) && n > 0;
-            match &b.kind {
-                Kind::Chapter => lines.push((b.text.to_uppercase(), Color::Yellow, true)),
-                Kind::Section => lines.push((b.text.clone(), Color::Cyan, true)),
-                Kind::Para => lines.extend(wrap_chars(&b.text, w).into_iter().map(|l| (l, Color::Grey, false))),
-                Kind::Bullet | Kind::Note => {
-                    let (mark, col) = if b.kind == Kind::Note { ("▌ ", Color::Magenta) } else { ("• ", Color::Grey) };
-                    for (k, l) in wrap_chars(&b.text, w.saturating_sub(2).max(4)).into_iter().enumerate() {
-                        lines.push((format!("{}{}", if k == 0 { mark } else { "  " }, l), col, false));
-                    }
-                }
-                Kind::Key(key) => {
-                    let kw = (w / 3).clamp(6, 17);
-                    let desc = wrap_chars(&b.text, w.saturating_sub(kw + 1).max(4));
-                    for (k, l) in desc.into_iter().enumerate() {
-                        let head = if k == 0 { format!("{:<kw$}", key, kw = kw) } else { " ".repeat(kw) };
-                        lines.push((format!("{}\u{1}{} {}", "", head, l), Color::Grey, false));
-                    }
-                }
-            }
-            let need = lines.len() as i32 + i32::from(gap);
-            if y + need > bottom && shown > 0 {
-                scr.text_clip(r.x, bottom, "  ... more: ]", DIM, false, maxx);
-                break;
-            }
-            if gap {
-                y += 1;
-            }
-            for (text, col, bold) in lines {
-                if y >= bottom {
-                    break;
-                }
-                // Key rows: the key bright, what it does in grey.
-                if let Some(rest) = text.strip_prefix('\u{1}') {
-                    let kw = (w / 3).clamp(6, 17);
-                    let head: String = rest.chars().take(kw).collect();
-                    let tail: String = rest.chars().skip(kw).collect();
-                    scr.text_clip(r.x, y, &head, Color::White, true, maxx);
-                    scr.text_clip(r.x + kw as i32, y, &tail, Color::Grey, false, maxx);
-                } else {
-                    scr.text_clip(r.x, y, &text, col, bold, maxx);
-                }
-                y += 1;
-            }
-            shown += 1;
-        }
-        self.guide_fit.set(shown.max(1));
     }
 
     fn draw_player_list(&self, scr: &mut Screen, r: Rect, _wide: bool) {
@@ -1195,8 +430,7 @@ impl App {
     /// The current warning, if it hasn't timed out.
     pub(super) fn warning_text(&self) -> Option<(String, [f32; 3])> {
         let (text, t) = self.warning.as_ref()?;
-        let secs = if self.tmux_hint { 12 } else { 5 };
-        (t.elapsed() < Duration::from_secs(secs)).then(|| (text.clone(), [255.0, 220.0, 80.0]))
+        (t.elapsed() < Duration::from_secs(5)).then(|| (text.clone(), [255.0, 220.0, 80.0]))
     }
 
     /// The talk/typing line in game, as text and colour (for vector mode).
@@ -1534,7 +768,7 @@ const LIST_COLS: i32 = 46;
 const DASH_ROWS: i32 = 8;
 
 pub(super) const HELP: &[(&str, &str)] = &[
-    ("mouse", "move to aim; left click torp, right click steer, middle click phaser"),
+    ("mouse", "move to aim; on a map: left click torp, right click steer, middle click phaser; wheel zooms"),
     ("k", "steer toward the mouse pointer (arrows ← → also turn)"),
     ("0-9 ) ! @", "set speed 0-9, 10, 11, 12   % max speed   # half speed   ↑ ↓ adjust"),
     ("t / p / f", "fire photon torpedo / phaser / plasma toward the pointer"),
@@ -1555,7 +789,6 @@ pub(super) const HELP: &[(&str, &str)] = &[
     ("m", "send a message (then A, T, F/R/K/O or a player slot)"),
     ("L / P", "player list / planet list"),
     ("+ / -", "zoom tactical view (or mouse wheel)"),
-    ("g", "switch graphics: vector / braille"),
     ("S", "sound effects on / off"),
     ("/", "server command, e.g. /record /orders /treaty rom /upgrade torps /fix warp /build yard (when enabled)"),
     ("Ctrl-L", "redraw screen"),
