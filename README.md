@@ -593,9 +593,11 @@ Robots keep the game lively when there aren't enough people. They:
 - make **trench runs** on the Death Star when they're flying a scout or destroyer: they
   swing round its flanks, get right behind it and fire down the exhaust port. In bigger
   ships they leave it alone and fight its escorts
-- know how to deal with **every other incursion** too. Each one tells the robots what it
-  takes, and they share the jobs out among the nearest suitable ships of each empire,
-  dropping their own war to do them:
+- know how to deal with **every other incursion** too, but only **once it has been in the
+  galaxy for three minutes** (robots need time to work it out; until then they just fight
+  it if it comes near). This goes for saving the Moon, pushing Ajax and trench runs too.
+  Then each incursion tells the robots what it takes, and they share the jobs out among
+  the nearest suitable ships of each empire, dropping their own war to do them:
   - **gang up** on the big monsters from outside their reach (the Fesarius, the Borg,
     whom they gather to attack together and close in on while a cube's tractor is busy
     with someone, the planet killer, the Dreadnought with phasers, the Krenim timeship in

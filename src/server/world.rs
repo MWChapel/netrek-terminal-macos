@@ -773,6 +773,9 @@ pub struct World {
     pub duties: Vec<Duty>,
     /// Which of those each robot has been given (see `assign_duties`).
     pub assigned: Vec<Option<usize>>,
+    /// Incursions robots have worked out how to deal with (they've been
+    /// here long enough): only these get the robots' special handling.
+    pub robots_ready: Vec<Faction>,
     /// The Moon, while its waste dumps are going critical and it can still
     /// be saved (robots go to help).
     pub moon_crisis: Option<u8>,
@@ -817,6 +820,7 @@ impl World {
             zones: Vec::new(),
             duties: Vec::new(),
             assigned: vec![None; MAXPLAYER],
+            robots_ready: Vec::new(),
             moon_crisis: None,
             ajax_adrift: None,
             chatter: Vec::new(),

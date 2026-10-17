@@ -162,10 +162,11 @@ impl Bot {
             .filter(|q| (!q.ship.pointless_target() || matches!(q.ship, ShipType::VgerCloud | ShipType::WhaleProbe)) && q.only_hurt_by.map_or(true, |t| t == team))
             // Moonbase Alpha's Eagles are only a threat once you've fired on Alpha.
             .filter(|q| q.faction != Some(Faction::Moonbase) || p.alpha_foe)
-            // Only scouts and destroyers can make a trench run on the Death Star.
-            .filter(|q| q.ship != ShipType::DeathStar || small)
+            // Only scouts and destroyers can make a trench run on the Death
+            // Star (once robots have worked out how).
+            .filter(|q| q.ship != ShipType::DeathStar || (small && world.robots_ready.contains(&Faction::GalacticEmpire)))
             // The Krenim timeship can only be hurt while its temporal shields are down.
-            .filter(|q| q.ship != ShipType::KrenimTimeship || world.tick < q.revealed_until)
+            .filter(|q| q.ship != ShipType::KrenimTimeship || world.tick < q.revealed_until || !world.robots_ready.contains(&Faction::Krenim))
             // Aliens that shooting only makes worse.
             .filter(|q| !spare.contains(&q.id))
             .filter(|q| near_ring(q.x, q.y) || dist(x, y, q.x, q.y) < 5000.0)
@@ -242,7 +243,8 @@ impl Bot {
         };
         // The Moon in crisis: each empire sends its nearest ship (that hasn't
         // fired on Alpha) to help, unless an enemy is right on top of it.
-        let rescuer = world.moon_crisis.filter(|_| !p.alpha_foe).filter(|&m| {
+        let ready = |f: Faction| world.robots_ready.contains(&f);
+        let rescuer = world.moon_crisis.filter(|_| !p.alpha_foe && ready(Faction::Moonbase)).filter(|&m| {
             let moon = &world.players[m as usize];
             world
                 .players
@@ -253,7 +255,7 @@ impl Bot {
         });
         // Ajax adrift: each empire's nearest ship goes to push it into
         // Mingo City and finish Ming.
-        let pusher = world.ajax_adrift.filter(|&(a, _)| {
+        let pusher = world.ajax_adrift.filter(|_| ready(Faction::Ming)).filter(|&(a, _)| {
             let ajax = &world.players[a as usize];
             dist(x, y, ajax.x, ajax.y) < 60_000.0
                 && world

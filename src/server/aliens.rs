@@ -118,6 +118,8 @@ pub struct Director {
     ended: Vec<(Faction, u32)>,
     /// How the last few incursions ended.
     pub log: Vec<(Faction, Ending)>,
+    /// How long robots take to start dealing with an incursion properly.
+    pub robot_delay: u32,
 }
 
 /// How an incursion ended.
@@ -133,6 +135,9 @@ pub enum Ending {
 
 /// How long an incursion that has ended stays away.
 const COMEBACK: u32 = 60 * UPS as u32;
+/// How long robots take to work out what an incursion calls for: until
+/// then they only fight it the ordinary way, if it comes near them.
+pub const ROBOT_DELAY: u32 = 3 * 60 * UPS as u32;
 
 fn dist(ax: f64, ay: f64, bx: f64, by: f64) -> f64 {
     ((ax - bx).powi(2) + (ay - by).powi(2)).sqrt()
@@ -162,7 +167,7 @@ fn duration(kind: Faction) -> u32 {
 impl Director {
     pub fn new(cfg: AlienConfig) -> Director {
         let first = cfg.interval.clamp(1, 120) / 2;
-        Director { cfg, events: Vec::new(), next_spawn: first as u32 * UPS as u32, wormhole: None, kzinti: None, ring_gone: false, ended: Vec::new(), log: Vec::new() }
+        Director { cfg, events: Vec::new(), next_spawn: first as u32 * UPS as u32, wormhole: None, kzinti: None, ring_gone: false, ended: Vec::new(), log: Vec::new(), robot_delay: ROBOT_DELAY }
     }
 
     pub fn tick(&mut self, world: &mut World) {
@@ -171,6 +176,7 @@ impl Director {
         }
         world.zones.clear();
         world.duties.clear();
+        world.robots_ready.clear();
         world.moon_crisis = None;
         world.ajax_adrift = None;
         // A galaxy reset sends everyone home, aliens included.
@@ -202,9 +208,13 @@ impl Director {
             run_event(world, e);
         }
         self.events = events;
-        // Jobs for the robots: what it takes to deal with each incursion.
+        // Jobs for the robots: what it takes to deal with each incursion,
+        // once they've had time to work it out.
         for e in &self.events {
-            post_duties(world, e);
+            if world.tick.saturating_sub(e.started) >= self.robot_delay {
+                world.robots_ready.push(e.kind);
+                post_duties(world, e);
+            }
         }
         world.assign_duties();
         self.run_kzinti(world);
@@ -5586,6 +5596,7 @@ mod tests {
         let mut done = 0;
         for _ in 0..4 {
             let (mut w, mut d, _m, a) = ming_world();
+            d.robot_delay = 0;
             let mut bots = Vec::new();
             for t in Team::PLAYABLE {
                 for _ in 0..2 {
@@ -5713,6 +5724,7 @@ mod tests {
                 w.tick();
             }
             let mut d = Director::new(AlienConfig { kinds: vec![Faction::Moonbase], interval: 9999 });
+            d.robot_delay = 0;
             d.spawn(&mut w);
             for _ in 0..(MOON_CRISIS + 10) {
                 d.tick(&mut w);
@@ -6667,6 +6679,7 @@ mod tests {
             // The pilot is patched up as they go: this is about the flying.
             (w.players[r].damage, w.players[r].shield) = (0.0, 75.0);
             run_event(&mut w, &mut e);
+            w.robots_ready = vec![Faction::GalacticEmpire];
             b.think(&mut w);
             w.tick();
             if !w.players[ds as usize].alive() {
@@ -7154,6 +7167,10 @@ mod tests {
         }
         let mut director = Director::new(AlienConfig { kinds: vec![kind], interval: 100_000 });
         director.next_spawn = 60 * UPS as u32;
+        // The tactics themselves, unless asked to play it as in a game.
+        if std::env::var("ROBOT_DELAY").is_err() {
+            director.robot_delay = 0;
+        }
         let mut log = Vec::new();
         for _ in 0..(UPS as u32 * 60 * 13) {
             director.tick(&mut world);
@@ -7222,6 +7239,34 @@ mod tests {
             }
         }
         assert!(failures.is_empty(), "robots didn't cope with: {}", failures.join(", "));
+    }
+
+    /// Robots leave an incursion to its own devices for its first three
+    /// minutes (they only fight it if it comes at them), then deal with it.
+    #[test]
+    fn robots_take_three_minutes_to_work_an_incursion_out() {
+        let (mut w, _) = with_cruiser(0.0, 0.0);
+        let mut bots: Vec<bot::Bot> = Team::PLAYABLE.iter().map(|&t| bot::spawn(&mut w, t).unwrap()).collect();
+        let mut d = Director::new(AlienConfig { kinds: vec![Faction::Nomad], interval: 100_000 });
+        d.next_spawn = 1;
+        let mut said = None;
+        for _ in 0..(ROBOT_DELAY + 60 * UPS as u32) {
+            d.tick(&mut w);
+            for b in bots.iter_mut() {
+                b.think(&mut w);
+            }
+            if said.is_none() && w.chatter.iter().any(|c| c.1.contains("imperfect")) {
+                said = Some(w.tick);
+            }
+            if w.tick < ROBOT_DELAY {
+                assert!(w.duties.is_empty() && w.robots_ready.is_empty(), "too soon");
+            }
+            w.tick();
+            w.outbox.clear();
+            w.warnings.clear();
+        }
+        let said = said.expect("a robot talked Nomad down in the end");
+        assert!(said >= ROBOT_DELAY, "spoke up after {} s", said / UPS as u32);
     }
 }
 
