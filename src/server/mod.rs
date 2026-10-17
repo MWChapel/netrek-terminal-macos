@@ -787,4 +787,54 @@ mod tests {
         assert!(seen, "the Tempest never formed");
         assert!(bots.len() >= 15, "still plenty of robots");
     }
+
+    /// The new aliens, as `netrek solo --empires all --bots 12 --aliens <x>
+    /// --alien-interval 30 --extras` would run them: each one arrives, and
+    /// shows up in a human player's view.
+    #[test]
+    fn new_aliens_show_up_for_players() {
+        let new = [Faction::Narada, Faction::Krenim, Faction::Malon, Faction::Vaal, Faction::Landru, Faction::Bluegill, Faction::Dreadnought, Faction::Scimitar, Faction::Calamarain, Faction::Nagilum];
+        for kind in new {
+            let features = Features { ranks: true, orders: true, diplomacy: true, terrain: true, supply: true, rank_tech: true, subsystems: true, boarding: true, outposts: true };
+            let mut world = World::with_features(features);
+            let me = world.add_player("chappie", false).unwrap();
+            world.join(me, Team::Fed, ShipType::Cruiser).unwrap();
+            let mut bots = Vec::new();
+            let all = Team::PLAYABLE;
+            let mut director = aliens::Director::new(aliens::AlienConfig { kinds: vec![kind], interval: 30 });
+            let mut logistics = supply::Logistics::new();
+            let mut orders = orders::Orders::new();
+            let mut careers = Some(ranks::Careers::new(None));
+            let (mut arrived, mut seen, mut seen_tagged) = (None, 0, 0);
+            for tick in 0..(UPS as u32 * 60 * 4) {
+                if tick % UPS as u32 == 0 {
+                    let want = robots_that_fit(&world, &bots, 12, alien_reserve(&[kind]));
+                    balance_bots(&mut world, &mut bots, want, &all);
+                }
+                director.tick(&mut world);
+                logistics.tick(&mut world);
+                for b in bots.iter_mut() {
+                    b.think(&mut world);
+                }
+                world.tick();
+                run_extras(&mut world, &logistics, &mut orders, careers.as_mut());
+                if world.players[me as usize].state == PState::Outfit {
+                    let _ = world.join(me, Team::Fed, ShipType::Cruiser);
+                }
+                if arrived.is_none() && world.outbox.iter().any(|o| o.msg.from == "ALERT") {
+                    arrived = Some(tick / UPS as u32);
+                }
+                world.outbox.clear();
+                world.warnings.clear();
+                let f = world.frame_for(me);
+                let _ = encode(&ServerMsg::Frame(Box::new(f.clone())));
+                let mine: Vec<&PlayerInfo> = f.players.iter().filter(|p| world.players[p.id as usize].faction == Some(kind)).collect();
+                seen = seen.max(mine.len());
+                seen_tagged = seen_tagged.max(mine.iter().filter(|p| p.faction == Some(kind)).count());
+            }
+            println!("{:12} arrived at {:?}s, up to {} ships in view ({} shown as {:?})", kind.key(), arrived, seen, seen_tagged, kind);
+            assert!(arrived.is_some() && seen > 0, "{:?} never showed up", kind);
+        }
+    }
 }
+

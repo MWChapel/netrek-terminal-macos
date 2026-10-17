@@ -344,6 +344,10 @@ impl Director {
         if self.kzinti.is_some() || self.ring_gone {
             active.push(Faction::Kzinti);
         }
+        // Tribbles only break out when there are Klingons about to cure them.
+        if !world.players.iter().any(|p| p.alive() && p.team == Team::Kli && p.faction.is_none()) {
+            active.push(Faction::Tribbles);
+        }
         // The Cygnus only turns up where there's a Black Hole for it to hang in.
         if !world.terrain.iter().any(|t| t.kind == TerrainKind::GreatBlackHole) {
             active.push(Faction::Cygnus);
