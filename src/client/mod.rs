@@ -403,6 +403,10 @@ impl TermGuard {
 
     fn restore() {
         let mut out = io::stdout();
+        // Wipe the images off the alternate screen before leaving it: some
+        // terminals (iTerm2) otherwise keep the last ones in memory for the
+        // rest of the session, and every run adds more.
+        let _ = execute!(out, cursor::MoveTo(0, 0), terminal::Clear(terminal::ClearType::All));
         let _ = execute!(out, DisableMouseCapture, cursor::Show, terminal::LeaveAlternateScreen);
         let _ = terminal::disable_raw_mode();
     }
